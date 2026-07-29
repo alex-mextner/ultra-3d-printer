@@ -49,6 +49,7 @@
 ## Структура репозитория
 
 - [`docs/printer-status.md`](docs/printer-status.md) — статус проекта: что сделано и проверено, что в работе, история решений. Читать первым.
+- [`docs/bom.md`](docs/bom.md) — спецификация деталей (BOM): что за железо в машине, откуда данные и что ещё надо померить.
 - [`docs/ramps-diagnostics.html`](docs/ramps-diagnostics.html) — методология: диагностика RAMPS/драйверов, подбор тока и скорости, безопасность 220В. Открыть через `docs/serve-ramps.sh` или напрямую файлом.
 - [`printer-configs/`](printer-configs/) — живые конфиги Klipper/Moonraker/crowsnest, источник истины (правится только тут, см. `CLAUDE.md`).
 - [`scripts/deploy.sh`](scripts/deploy.sh) — выкатка конфигов на принтер.
