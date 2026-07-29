@@ -1,0 +1,2121 @@
+<title>RAMPS 1.4 / A4988 / TMC2209 — методика диагностики</title>
+<style>
+  :root{
+    --bg:#f4f1ea;
+    --paper:#ffffff;
+    --paper-2:#faf8f3;
+    --border:#ddd6c7;
+    --text:#211f1a;
+    --text-dim:#5c574c;
+    --text-faint:#8a8474;
+    --accent:#1f6e46;
+    --accent-2:#155c3a;
+    --accent-bg:rgba(31,110,70,0.08);
+    --warn:#a15c00;
+    --warn-bg:rgba(161,92,0,0.10);
+    --warn-border:#d8a24a;
+    --info:#1c5f8a;
+    --info-bg:rgba(28,95,138,0.08);
+    --danger:#a3271f;
+    --danger-bg:rgba(163,39,31,0.08);
+    --scope-bg:#0d1512;
+    --scope-grid:#1d3a2c;
+    --scope-trace:#5eeb9c;
+    --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#12151a;
+      --paper:#181d24;
+      --paper-2:#1e242c;
+      --border:#2b323c;
+      --text:#e7ecf2;
+      --text-dim:#a7b1bd;
+      --text-faint:#6b7684;
+      --accent:#5eeb9c;
+      --accent-2:#8ff5b8;
+      --accent-bg:rgba(94,235,156,0.09);
+      --warn:#f0ac4e;
+      --warn-bg:rgba(240,172,78,0.10);
+      --warn-border:#7a5a26;
+      --info:#6fb3e6;
+      --info-bg:rgba(111,179,230,0.08);
+      --danger:#f2837a;
+      --danger-bg:rgba(242,131,122,0.10);
+      --scope-bg:#060a08;
+      --scope-grid:#173226;
+      --scope-trace:#7bffb6;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#12151a; --paper:#181d24; --paper-2:#1e242c; --border:#2b323c;
+    --text:#e7ecf2; --text-dim:#a7b1bd; --text-faint:#6b7684;
+    --accent:#5eeb9c; --accent-2:#8ff5b8; --accent-bg:rgba(94,235,156,0.09);
+    --warn:#f0ac4e; --warn-bg:rgba(240,172,78,0.10); --warn-border:#7a5a26;
+    --info:#6fb3e6; --info-bg:rgba(111,179,230,0.08);
+    --danger:#f2837a; --danger-bg:rgba(242,131,122,0.10);
+    --scope-bg:#060a08; --scope-grid:#173226; --scope-trace:#7bffb6;
+    color-scheme: dark;
+  }
+  :root[data-theme="light"]{
+    --bg:#f4f1ea; --paper:#ffffff; --paper-2:#faf8f3; --border:#ddd6c7;
+    --text:#211f1a; --text-dim:#5c574c; --text-faint:#8a8474;
+    --accent:#1f6e46; --accent-2:#155c3a; --accent-bg:rgba(31,110,70,0.08);
+    --warn:#a15c00; --warn-bg:rgba(161,92,0,0.10); --warn-border:#d8a24a;
+    --info:#1c5f8a; --info-bg:rgba(28,95,138,0.08);
+    --danger:#a3271f; --danger-bg:rgba(163,39,31,0.08);
+    --scope-bg:#0d1512; --scope-grid:#1d3a2c; --scope-trace:#5eeb9c;
+    color-scheme: light;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  html{scroll-behavior:smooth;}
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto;}
+  }
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    font-size:16px;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--accent);color:var(--scope-bg);}
+  a{color:var(--accent-2);}
+  h1,h2,h3,h4{font-family:var(--sans);font-weight:800;letter-spacing:-0.01em;text-wrap:balance;color:var(--text);}
+  code,.mono,kbd,.pin{font-family:var(--mono);}
+  .wrap{
+    max-width:1180px;
+    margin:0 auto;
+    padding:0 clamp(14px,3vw,36px) 80px;
+    display:grid;
+    grid-template-columns:250px minmax(0,1fr);
+    gap:40px;
+  }
+  @media (max-width:900px){
+    .wrap{grid-template-columns:1fr;}
+  }
+
+  /* ---------- Hero ---------- */
+  .hero{
+    grid-column:1/-1;
+    padding:34px clamp(14px,3vw,36px) 22px;
+    border-bottom:1px solid var(--border);
+    margin-bottom:6px;
+  }
+  .hero .eyebrow{
+    font-family:var(--mono);
+    font-size:12.5px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--accent);
+    margin-bottom:10px;
+  }
+  .hero h1{
+    font-size:clamp(26px,4vw,38px);
+    margin:0 0 10px;
+    line-height:1.1;
+  }
+  .hero p.lede{
+    color:var(--text-dim);
+    max-width:74ch;
+    font-size:16.5px;
+    margin:0 0 18px;
+  }
+  .context-strip{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+    gap:1px;
+    background:var(--border);
+    border:1px solid var(--border);
+    border-radius:10px;
+    overflow:hidden;
+    max-width:920px;
+  }
+  .context-strip div{
+    background:var(--paper);
+    padding:12px 14px;
+  }
+  .context-strip .k{
+    display:block;
+    font-family:var(--mono);
+    font-size:10.5px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+    margin-bottom:4px;
+  }
+  .context-strip .v{
+    font-size:14px;
+    color:var(--text);
+    font-weight:600;
+  }
+
+  /* ---------- TOC ---------- */
+  nav.toc{
+    align-self:start;
+    position:sticky;
+    top:20px;
+    max-height:calc(100vh - 40px);
+    overflow-y:auto;
+    padding-right:6px;
+  }
+  nav.toc .toc-group-title{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--accent-2);
+    margin:22px 0 6px;
+    padding-top:14px;
+    border-top:1px solid var(--border);
+  }
+  nav.toc .toc-group-title:first-child{margin-top:0;padding-top:0;border-top:none;}
+  nav.toc ol{
+    list-style:none;
+    margin:0 0 4px;
+    padding:0;
+  }
+  nav.toc li{margin:0;}
+  nav.toc a{
+    display:block;
+    text-decoration:none;
+    color:var(--text-dim);
+    font-size:13.5px;
+    padding:4px 0 4px 2px;
+    border-left:2px solid transparent;
+    border-bottom:1px solid transparent;
+  }
+  nav.toc a:hover{color:var(--accent-2);border-left-color:var(--accent);}
+  @media (max-width:900px){
+    nav.toc{position:static;max-height:none;border-bottom:1px solid var(--border);padding-bottom:10px;}
+  }
+
+  /* ---------- Content ---------- */
+  main{min-width:0;}
+  .content-group{
+    padding:30px 0 6px;
+  }
+  .content-group:first-child{padding-top:0;}
+  .content-group-title{
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    color:var(--accent-2);
+    margin:0 0 4px;
+  }
+  .content-group-desc{
+    color:var(--text-faint);
+    font-size:13.5px;
+    max-width:70ch;
+    margin:0 0 4px;
+  }
+  section{
+    padding:28px 0;
+    border-bottom:1px solid var(--border);
+    scroll-margin-top:16px;
+  }
+  .content-group:last-child section:last-child{border-bottom:none;}
+  .heading-anchor{
+    font-family:var(--mono);
+    font-size:0.7em;
+    font-weight:400;
+    color:var(--text-faint);
+    text-decoration:none;
+    opacity:0.5;
+  }
+  .heading-anchor:hover,
+  .heading-anchor:focus{
+    color:var(--accent-2);
+    opacity:1;
+  }
+  section h2{
+    font-size:clamp(19px,2.4vw,24px);
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin:0 0 6px;
+  }
+  section h3{font-size:16.5px;margin:26px 0 10px;color:var(--text);}
+  section > p{color:var(--text-dim);max-width:76ch;}
+  .section-intro{color:var(--text-dim);max-width:76ch;margin:6px 0 20px;}
+
+  .tag{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-family:var(--mono);
+    font-size:10.5px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:3px 8px;
+    border-radius:999px;
+    border:1px solid currentColor;
+    font-weight:700;
+    margin:0 6px 10px 0;
+  }
+  .tag.visual{color:var(--text-dim);}
+  .tag.meter{color:var(--info);background:var(--info-bg);}
+  .tag.scope{color:var(--accent);background:var(--accent-bg);}
+  .tag.warn{color:var(--warn);background:var(--warn-bg);}
+  .tag.danger{color:var(--danger);background:var(--danger-bg);}
+
+  .callout{
+    border:1px solid var(--border);
+    border-left:4px solid var(--text-faint);
+    background:var(--paper);
+    border-radius:8px;
+    padding:14px 16px;
+    margin:16px 0;
+  }
+  .callout p{margin:6px 0;color:var(--text-dim);}
+  .callout p:first-child{margin-top:0;}
+  .callout .ctitle{
+    font-weight:800;
+    color:var(--text);
+    display:block;
+    margin-bottom:4px;
+  }
+  .callout.warn{border-left-color:var(--warn);background:var(--warn-bg);}
+  .callout.warn .ctitle{color:var(--warn);}
+  .callout.info{border-left-color:var(--info);background:var(--info-bg);}
+  .callout.info .ctitle{color:var(--info);}
+  .callout.key{border-left-color:var(--accent);background:var(--accent-bg);}
+  .callout.key .ctitle{color:var(--accent-2);}
+  .callout.danger{border-left-color:var(--danger);background:var(--danger-bg);}
+  .callout.danger .ctitle{color:var(--danger);}
+
+  .scroll-x{overflow-x:auto;border-radius:10px;}
+  table{
+    border-collapse:collapse;
+    width:100%;
+    min-width:560px;
+    font-size:14px;
+    background:var(--paper);
+    border:1px solid var(--border);
+    border-radius:10px;
+    overflow:hidden;
+  }
+  caption{
+    text-align:left;
+    font-family:var(--mono);
+    font-size:11.5px;
+    color:var(--text-faint);
+    margin-bottom:6px;
+    letter-spacing:0.02em;
+  }
+  th,td{
+    text-align:left;
+    padding:9px 12px;
+    border-bottom:1px solid var(--border);
+    vertical-align:top;
+  }
+  thead th{
+    background:var(--paper-2);
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+    font-weight:700;
+  }
+  tbody tr:last-child td{border-bottom:none;}
+  td.good{color:var(--accent-2);}
+  td.bad{color:var(--danger);}
+  td .pin{
+    background:var(--paper-2);
+    border:1px solid var(--border);
+    border-radius:5px;
+    padding:1px 6px;
+    font-size:12.5px;
+  }
+
+  .diagram-frame{
+    background:var(--paper);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:18px;
+    margin:18px 0;
+  }
+  .diagram-frame svg{display:block;width:100%;height:auto;}
+  .diagram-caption{
+    font-size:13px;
+    color:var(--text-faint);
+    margin-top:10px;
+  }
+  ol.legend{
+    margin:12px 0 0;
+    padding:0;
+    list-style:none;
+    display:grid;
+    gap:6px;
+    font-size:13.5px;
+    color:var(--text-dim);
+  }
+  ol.legend li{display:flex;gap:10px;align-items:baseline;}
+  ol.legend .badge{
+    flex:none;
+    width:20px;height:20px;
+    border-radius:50%;
+    background:var(--accent);
+    color:var(--scope-bg);
+    font-family:var(--mono);
+    font-weight:800;
+    font-size:11px;
+    display:flex;align-items:center;justify-content:center;
+  }
+
+  .scope-grid-2{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:16px;
+    margin:16px 0;
+  }
+  @media (max-width:640px){.scope-grid-2{grid-template-columns:1fr;}}
+  .scope-card{
+    background:var(--paper);
+    border:1px solid var(--border);
+    border-radius:12px;
+    overflow:hidden;
+  }
+  .scope-card .scope-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:9px 12px;
+    font-family:var(--mono);
+    font-size:11.5px;
+    letter-spacing:0.04em;
+  }
+  .scope-card.ok .scope-head{color:var(--accent-2);}
+  .scope-card.bad .scope-head{color:var(--danger);}
+  .scope-card svg{display:block;width:100%;height:auto;background:var(--scope-bg);}
+  .scope-card .scope-foot{
+    padding:8px 12px 12px;
+    font-size:12.5px;
+    color:var(--text-faint);
+  }
+
+  ul.checklist{list-style:none;margin:14px 0;padding:0;display:grid;gap:8px;}
+  ul.checklist li{
+    display:flex;gap:10px;
+    padding:10px 12px;
+    background:var(--paper);
+    border:1px solid var(--border);
+    border-radius:8px;
+    font-size:14.5px;
+    color:var(--text-dim);
+  }
+  ul.checklist li::before{
+    content:"□";
+    color:var(--accent);
+    font-weight:800;
+    flex:none;
+  }
+
+  .step-list{counter-reset:step;margin:16px 0;padding:0;list-style:none;display:grid;gap:10px;}
+  .step-list li{
+    counter-increment:step;
+    position:relative;
+    padding:12px 14px 12px 46px;
+    background:var(--paper);
+    border:1px solid var(--border);
+    border-radius:8px;
+    color:var(--text-dim);
+    font-size:14.5px;
+  }
+  .step-list li::before{
+    content:counter(step);
+    position:absolute;
+    left:12px;top:12px;
+    width:22px;height:22px;
+    border-radius:50%;
+    background:var(--accent-bg);
+    color:var(--accent-2);
+    border:1px solid var(--accent);
+    font-family:var(--mono);
+    font-weight:800;
+    font-size:12px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .step-list strong{color:var(--text);}
+
+  .calc-panel{
+    background:var(--paper);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:18px 20px;
+    margin:16px 0;
+  }
+  .calc-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+    gap:14px;
+    margin-top:6px;
+  }
+  .calc-field label{
+    display:block;
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+    color:var(--text-faint);
+    margin-bottom:5px;
+  }
+  .calc-field select,
+  .calc-field input{
+    width:100%;
+    box-sizing:border-box;
+    background:var(--paper-2);
+    border:1px solid var(--border);
+    border-radius:7px;
+    padding:8px 10px;
+    font-family:var(--mono);
+    font-size:15px;
+    color:var(--text);
+  }
+  .calc-field input:focus,
+  .calc-field select:focus{
+    outline:2px solid var(--accent);
+    outline-offset:1px;
+  }
+  .calc-field.result input{
+    color:var(--accent-2);
+    font-weight:700;
+    border-color:var(--accent);
+    background:var(--accent-bg);
+  }
+  .calc-eq{
+    font-family:var(--mono);
+    font-size:12.5px;
+    color:var(--text-faint);
+    margin-top:12px;
+  }
+  .calc-eq code{color:var(--text-dim);}
+  .calc-note{
+    font-size:12.5px;
+    color:var(--text-faint);
+    margin-top:8px;
+  }
+
+  .sheet-table{min-width:760px;}
+  .sheet-table input,.sheet-table select{
+    width:100%;
+    box-sizing:border-box;
+    background:var(--paper-2);
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:6px 8px;
+    font-family:var(--mono);
+    font-size:13.5px;
+    color:var(--text);
+  }
+  .sheet-table input.derived{color:var(--accent-2);font-weight:700;border-color:var(--accent);background:var(--accent-bg);}
+  .sheet-table input.secondary{color:var(--text-faint);}
+  .sheet-table th{white-space:nowrap;}
+  .btn{
+    font-family:var(--sans);
+    font-size:13px;
+    font-weight:700;
+    padding:7px 14px;
+    border-radius:7px;
+    border:1px solid var(--border);
+    background:var(--paper-2);
+    color:var(--text);
+    cursor:pointer;
+  }
+  .btn:hover{border-color:var(--accent);color:var(--accent-2);}
+  .btn.primary{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-2);}
+  .btn.danger:hover{border-color:var(--danger);color:var(--danger);}
+  .btn.small{padding:4px 9px;font-size:12px;}
+  .sheet-actions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;}
+  .sheet-empty{color:var(--text-faint);font-size:13px;padding:10px 0;}
+
+  .flow{margin:18px 0;}
+  .flow-node{
+    border:1px solid var(--border);
+    background:var(--paper);
+    border-radius:8px;
+    padding:11px 14px;
+    margin:10px 0;
+    font-weight:700;
+    color:var(--text);
+    font-size:14.5px;
+  }
+  .flow-children{
+    margin-left:14px;
+    padding-left:16px;
+    border-left:2px dashed var(--border);
+  }
+  .flow-branch-label{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    font-family:var(--mono);
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    padding:2px 9px;
+    border-radius:999px;
+    margin:6px 0 4px;
+  }
+  .flow-branch-label.yes{color:var(--accent-2);background:var(--accent-bg);border:1px solid var(--accent);}
+  .flow-branch-label.no{color:var(--danger);background:var(--danger-bg);border:1px solid var(--danger);}
+  .flow-outcome{
+    border-radius:8px;
+    padding:10px 14px;
+    margin:4px 0 10px;
+    font-size:14px;
+    line-height:1.45;
+    border:1px solid;
+    color:var(--text-dim);
+  }
+  .flow-outcome.ok{background:var(--accent-bg);border-color:var(--accent);}
+  .flow-outcome.warn{background:var(--warn-bg);border-color:var(--warn);}
+  .flow-outcome.bad{background:var(--danger-bg);border-color:var(--danger);}
+
+  .prior-art{
+    display:flex;
+    gap:8px;
+    align-items:baseline;
+    font-size:13px;
+    color:var(--text-faint);
+    margin-top:8px;
+    flex-wrap:wrap;
+  }
+  .prior-art .plabel{
+    font-family:var(--mono);
+    font-size:10.5px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--accent-2);
+    flex:none;
+  }
+
+  footer{
+    grid-column:1/-1;
+    padding:26px clamp(14px,3vw,36px) 10px;
+    color:var(--text-faint);
+    font-size:13px;
+    border-top:1px solid var(--border);
+  }
+  footer .mono{font-size:12.5px;}
+</style>
+
+<div class="hero">
+  <div class="eyebrow">mbot · Orange Pi One + RAMPS 1.4 + Freaduino Mega2560</div>
+  <h1>Диагностика RAMPS 1.4, A4988 и TMC2209</h1>
+  <p class="lede">Пошаговая методика проверки платы и драйверов мультиметром и осциллографом — от простого визуального осмотра до захвата сигналов под напряжением и настройки тока. Собрана под конкретную ситуацию этого принтера, организована по темам как справочник — используйте оглавление, не обязательно читать по порядку.</p>
+  <div class="context-strip">
+    <div><span class="k">Было</span><span class="v">X/Y/Z/E — ноль движения при BUZZ после переполюсовки 12В</span></div>
+    <div><span class="k">Стало</span><span class="v">RAMPS реабилитирована, все оси двигаются, настраивается ток</span></div>
+    <div><span class="k">Сейчас в гнёздах</span><span class="v">A4988/TMC2209 стандэлон, без UART</span></div>
+    <div><span class="k">Живой конфиг/статус</span><span class="v">printer-status.md рядом</span></div>
+  </div>
+</div>
+
+<div class="wrap">
+<nav class="toc">
+  <div class="toc-group-title">Начало работы</div>
+  <ol>
+    <li><a href="#safety">Безопасность</a></li>
+    <li><a href="#hypothesis">Приоритетная гипотеза</a></li>
+    <li><a href="#order">Итоговый порядок действий</a></li>
+  </ol>
+
+  <div class="toc-group-title">Установка и первый запуск</div>
+  <ol>
+    <li><a href="#install-stack">ОС и Klipper-стек</a></li>
+    <li><a href="#firmware-flash">Прошивка MCU</a></li>
+    <li><a href="#preflight">Чеклист перед включением</a></li>
+    <li><a href="#first-run">Первый запуск без хоминга</a></li>
+    <li><a href="#first-heat">Первый нагрев хотэнда</a></li>
+    <li><a href="#mains-bed">Стол на 220В + SSR</a></li>
+  </ol>
+
+  <div class="toc-group-title">Диагностика платы RAMPS</div>
+  <ol>
+    <li><a href="#ramps-visual">Визуальный осмотр</a></li>
+    <li><a href="#ramps-cold">Без драйверов, без питания</a></li>
+    <li><a href="#ramps-hot">Без драйверов, под напряжением</a></li>
+    <li><a href="#pinout">Пиноут гнезда драйвера</a></li>
+  </ol>
+
+  <div class="toc-group-title">Диагностика драйверов</div>
+  <ol>
+    <li><a href="#a4988-bench">A4988 — на столе</a></li>
+    <li><a href="#tmc-bench">TMC2209 — на столе</a></li>
+    <li><a href="#scope-live">В гнезде + осциллограф</a></li>
+    <li><a href="#uart-scope">TMC2209 — линия UART</a></li>
+    <li><a href="#swap">Протокол перестановки</a></li>
+    <li><a href="#tree">Дерево решений</a></li>
+  </ol>
+
+  <div class="toc-group-title">Настройка тока</div>
+  <ol>
+    <li><a href="#vref">Vref — формулы, калькулятор, журнал</a></li>
+  </ol>
+
+  <div class="toc-group-title">Оси и движение</div>
+  <ol>
+    <li><a href="#diy-hints">Координаты, MIN/MAX, разводка мотора</a></li>
+  </ol>
+
+  <div class="toc-group-title">Инфраструктура</div>
+  <ol>
+    <li><a href="#uart-direct">Прямой UART Orange Pi ↔ Mega</a></li>
+  </ol>
+
+  <div class="toc-group-title">Хотэнд</div>
+  <ol>
+    <li><a href="#hotend-thermal">Термопаста и тепловой барьер</a></li>
+  </ol>
+
+  <div class="toc-group-title">Методология</div>
+  <ol>
+    <li><a href="#methodology">Prior art использованных техник</a></li>
+  </ol>
+
+  <div class="toc-group-title">Справочник</div>
+  <ol>
+    <li><a href="#cheatsheet">Команды Klipper</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<div class="content-group">
+  <div class="content-group-title">Начало работы</div>
+  <p class="content-group-desc">Прочитать в первую очередь, прежде чем трогать плату руками.</p>
+
+<section id="safety">
+  <h2>Безопасность</h2>
+  <div class="callout warn">
+    <span class="ctitle">Прочитать перед началом</span>
+    <p>Плата уже пережила переполюсовку питания. Это не «работает или нет» — где-то в цепи мог остаться повреждённый, но частично работоспособный компонент (диод, полифьюз, H-мост), который при повторном включении под нагрузкой ведёт себя непредсказуемо. Работайте по шагам ниже, не пропуская «холодные» проверки ради того, чтобы быстрее добраться до осциллографа.</p>
+  </div>
+  <ul class="checklist">
+    <li>Сопротивление и диодный режим — только при полностью отключённом питании (12В блок питания физически выключен или отсоединён, USB можно оставить).</li>
+    <li>Никогда не отключайте разъём мотора, пока на драйвер подано VMOT — обратная ЭДС обмотки может пробить выходные ключи мгновенно.</li>
+    <li>Щуп осциллографа заземляйте один раз на GND платы RAMPS. Не цепляйте землю осциллографа одновременно к другой точке (например, отдельно к минусу БП) — это создаёт паразитный контур земли между БП, осциллографом и Orange Pi через общий USB.</li>
+    <li>Перед первой подачей питания на новую комбинацию (например, «драйвер в другом гнезде») убедитесь, что установлены все 3 перемычки микрошага и подключён провод VMOT/GND от блока питания в правильной полярности — проверьте мультиметром сам разъём БП <em>до</em> подключения к RAMPS.</li>
+    <li>Перед любым BUZZ-тестом ток (Vref) должен быть выставлен на безопасно низкое значение — см. раздел <a href="#vref">«Vref»</a>. Осциллограф не защитит драйвер от превышения тока.</li>
+  </ul>
+</section>
+
+<section id="hypothesis">
+  <h2>Приоритетная гипотеза — одна причина на оба симптома</h2>
+  <p class="section-intro">Прежде чем подозревать все пять драйверов по очереди, стоит проверить одну гипотезу, которая объясняет сразу оба симптома одним повреждением.</p>
+  <div class="callout key">
+    <span class="ctitle">Гипотеза: пропала шина VMOT (12В на драйверы)</span>
+    <p>A4988 и TMC2209 получают два независимых питания: логику 5В (VDD, от Mega) и силовое 12В для обмоток (VMOT, напрямую с входа RAMPS через предохранитель). <code>STEPPER_BUZZ</code> использует VMOT для вращения мотора. У TMC2209 приёмопередатчик UART тоже запитан от VMOT, а не от VDD — если VMOT не приходит на гнездо, драйвер физически не может ответить по UART, даже будучи полностью исправным.</p>
+    <p>Иначе говоря: <strong>«молчат все 4 мотора» + «TMC2209 не отвечает по UART»</strong> одновременно и без единого повреждённого драйвера объясняются одним отказом — обрывом цепи VMOT где-то между входной клеммой RAMPS и гнёздами драйверов (перегоревший полифьюз, пробитый диод D1/D2, обгоревшая дорожка).</p>
+  </div>
+  <p>Это проверяется за одну минуту мультиметром, без снятия единого драйвера — раздел <a href="#ramps-hot">«Без драйверов, под напряжением»</a>. Если VMOT на гнёздах присутствует и равен напряжению блока питания — гипотеза отклонена, переходите к проверке драйверов по отдельности.</p>
+  <p class="section-intro">На этом принтере гипотеза впоследствии была отклонена (VMOT оказался в норме на всех гнёздах) — проблема оказалась ниже по цепочке, в самих драйверах/сигналах. Раздел остаётся как быстрая первая проверка для похожих случаев.</p>
+</section>
+
+<section id="order">
+  <h2>Итоговый порядок действий</h2>
+  <p class="section-intro">Рекомендуемая последовательность для новой диагностики с нуля — не начинайте сразу с осциллографа «чтобы быстрее», ранние дешёвые шаги отделяют повреждение платы от повреждения драйверов и экономят время на трудоёмких этапах.</p>
+  <ol class="step-list">
+    <li><strong>Визуальный осмотр</strong> платы и всех модулей (<a href="#ramps-visual">визуальный осмотр</a>) — 5 минут, ищем явные следы перегрева.</li>
+    <li><strong>RAMPS без драйверов, без питания</strong> (<a href="#ramps-cold">без питания</a>) — сопротивление и диодный режим на входной цепи.</li>
+    <li><strong>RAMPS без драйверов, под напряжением</strong> (<a href="#ramps-hot">под напряжением</a>) — проверка VMOT на всех гнёздах, отсекает или подтверждает <a href="#hypothesis">приоритетную гипотезу</a>.</li>
+    <li><strong>Все модули на столе</strong> (<a href="#a4988-bench">A4988</a> / <a href="#tmc-bench">TMC2209</a>) — сравнительная таблица диодных переходов, ищем «не такой как все».</li>
+    <li><strong>Один драйвер в одном гнезде под осциллографом</strong> (<a href="#scope-live">в гнезде + осциллограф</a>) — STEP/DIR/ENABLE/катушки, начиная с контрольного драйвера.</li>
+    <li><strong>Протокол перестановки</strong> (<a href="#swap">перестановка</a>) — если предыдущий шаг показал молчание, разделяем «драйвер мёртв» и «гнездо мертво».</li>
+    <li><strong>TMC2209 — линия UART</strong> (<a href="#uart-scope">линия UART</a>) — только после того, как VMOT подтверждённо доходит до гнёзд.</li>
+    <li><strong>Настройка тока</strong> (<a href="#vref">Vref</a>) — обязательно перед любым реальным движением под нагрузкой.</li>
+  </ol>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Установка и первый запуск</div>
+  <p class="content-group-desc">Путь с нуля до первого движения мотора: ОС, Klipper-стек, прошивка MCU, безопасные первые тесты.</p>
+
+<section id="install-stack">
+  <h2>ОС и Klipper-стек на одноплатнике</h2>
+  <p class="section-intro">Архитектура: одноплатник (Orange Pi / Raspberry Pi / любой Debian-совместимый SBC) — это только хост: веб-интерфейс, нарезка gcode-команд, Moonraker/Mainsail. Весь реалтайм (импульсы STEP/DIR) генерирует сам ATmega2560 на плате Mega+RAMPS, подключённый по USB. Именно под такую схему Klipper и писался.</p>
+
+  <h3>ОС</h3>
+  <ul class="checklist">
+    <li>Armbian (Debian-based), минимальный/Lite-образ достаточно — GUI на плате не нужен.</li>
+    <li>Прошивка образа — balenaEtcher или аналог; SSH включить до первой загрузки.</li>
+    <li>Подключение по Ethernet надёжнее Wi-Fi: меньше риск обрыва при передаче больших gcode-файлов.</li>
+    <li>Если Wi-Fi всё же нужен — донгл на чипе RTL8188CUS/RTL8192CU (поддерживаются ядром без доустановки драйверов), настройка разово через <code>nmcli device wifi connect 'SSID' password 'пароль' ifname wlan0</code>.</li>
+  </ul>
+
+  <h3>Klipper + Moonraker + Mainsail через KIAUH</h3>
+  <p>KIAUH — стандартный установщик, работает на любом Debian-based SBC, не только на Raspberry Pi:</p>
+  <p><code>cd ~ &amp;&amp; git clone https://github.com/dw-0/kiauh.git &amp;&amp; ./kiauh/kiauh.sh</code></p>
+  <p>В меню ставить по порядку: Klipper → Moonraker → Mainsail (либо Fluidd — дело вкуса).</p>
+
+  <div class="callout warn">
+    <span class="ctitle">Типичная засада на слабых платах: установка Moonraker падает на <code>uvloop</code></span>
+    <p>Симптом — <code>fatal error: Killed signal terminated program cc1</code>. Это OOM-killer убивает компилятор: готового wheel под свежий Python на armv7l нет, приходится собирать из исходников, а памяти не хватает.</p>
+    <p><strong>Самое простое решение — выкинуть <code>uvloop</code>:</strong> это опциональный ускоритель, Moonraker прекрасно работает без него. Открыть <code>~/moonraker/scripts/moonraker-speedups.txt</code>, удалить/закомментировать строку <code>uvloop</code>, перезапустить установку Moonraker в KIAUH.</p>
+    <p>Альтернатива — добавить своп (<code>fallocate -l 1G /swapfile &amp;&amp; chmod 600 /swapfile &amp;&amp; mkswap /swapfile &amp;&amp; swapon /swapfile</code>) и собрать как есть, но на слабом Cortex-A7 это долго и ради необязательного компонента.</p>
+  </div>
+
+  <div class="callout key">
+    <span class="ctitle">Всегда используйте пути <code>/dev/serial/by-id/...</code>, а не <code>/dev/ttyUSB0</code></span>
+    <p><code>ls /dev/serial/by-id/</code> покажет что-то вроде <code>usb-1a86_USB2.0-Serial-...</code> (CH340) или <code>usb-FTDI_FT232R_...</code> — это и есть значение для <code>serial:</code> в секции <code>[mcu]</code>. Номер <code>ttyUSB*</code> может съезжать между перезагрузками и при перетыкании в другой порт, <code>by-id</code> — стабилен.</p>
+    <p>Тот же принцип касается USB-камеры: <code>/dev/videoN</code> нестабилен (одна камера часто создаёт два узла — реальный поток и служебный metadata), используйте <code>/dev/v4l/by-id/...-video-index0</code>.</p>
+  </div>
+</section>
+
+<section id="firmware-flash">
+  <h2>Прошивка MCU (ATmega2560)</h2>
+  <p class="section-intro">Версия прошивки MCU должна совпадать с версией хоста — при расхождении Klipper откажется стартовать с явной ошибкой. После каждого <code>git pull</code> Klipper прошивку нужно перезаливать.</p>
+
+  <h3>Сборка</h3>
+  <p><code>cd ~/klipper &amp;&amp; make menuconfig</code> — выставить:</p>
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Параметр</th><th>Значение</th></tr></thead>
+    <tbody>
+      <tr><td>Micro-controller Architecture</td><td class="good">Atmel AVR</td></tr>
+      <tr><td>Processor model</td><td class="good">atmega2560</td></tr>
+      <tr><td>Clock Speed</td><td class="good">16 MHz (стандарт для Mega2560)</td></tr>
+      <tr><td>Communication interface</td><td class="good">Serial (USB/UART), baud 250000</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Затем <code>make clean &amp;&amp; make</code>.</p>
+
+  <h3>Заливка</h3>
+  <ol class="step-list">
+    <li>Остановить Klipper, иначе он держит порт: <code>sudo service klipper stop</code></li>
+    <li><code>make flash FLASH_DEVICE=/dev/serial/by-id/usb-...</code> (путь из раздела выше)</li>
+    <li>Запустить обратно: <code>sudo service klipper start</code></li>
+  </ol>
+  <p>Если <code>make flash</code> не определяет программатор — залить напрямую тем же протоколом, что использует Arduino IDE для Mega2560:</p>
+  <p><code>avrdude -c wiring -p atmega2560 -P /dev/serial/by-id/usb-... -b 115200 -D -U flash:w:out/klipper.elf.hex:i</code></p>
+  <p>На части клонов вместо <code>wiring</code> нужен <code>-c stk500v2</code> — зависит от бутлоадера конкретной платы, оба протокола в ходу.</p>
+
+  <div class="callout warn">
+    <span class="ctitle">Если avrdude зависает в середине записи</span>
+    <p>Классическая причина — сочетание USB-хаба и большого значения FTDI <code>latency_timer</code> (по умолчанию 16 мс). Лечится двумя действиями: (1) подключить адаптер напрямую в порт SBC, минуя хаб; (2) снизить задержку: <code>echo 1 | sudo tee /sys/bus/usb-serial/devices/ttyUSB&lt;N&gt;/latency_timer</code>.</p>
+    <p><strong>Важно:</strong> это НЕ постоянная настройка — сбрасывается на 16 при каждом переподключении USB. Для постоянного эффекта нужно udev-правило.</p>
+  </div>
+</section>
+
+<section id="preflight">
+  <h2>Чеклист перед первым включением</h2>
+  <span class="tag warn">пройти целиком до подачи питания</span>
+  <ul class="checklist">
+    <li>Ток драйверов выставлен осознанно (по паспорту мотора либо от заниженного значения вверх), а не оставлен «как пришло» — см. <a href="#vref">раздел про Vref</a>.</li>
+    <li>Направление осей проверено через <code>STEPPER_BUZZ</code>/<code>FORCE_MOVE</code>, а не через реальный ход в раму.</li>
+    <li>Пока концевики не проверены — <code>G28</code> не запускать вообще.</li>
+    <li>Тип термистора в <code>sensor_type</code> соответствует реально установленному, а не оставлен дефолтным «на авось».</li>
+    <li>Напряжение нагревателя хотэнда (12В или 24В) совпадает с реальным питанием — иначе либо не греет, либо перегревается.</li>
+    <li>Защита <code>verify_heater</code> (thermal runaway) включена и НЕ закомментирована «ради удобства тестов».</li>
+    <li>Пучок проводов на подвижной каретке не пережимает PTFE-трубку и не трётся изоляцией в точке выхода — он будет двигаться тысячи раз.</li>
+    <li>Секции для отсутствующего железа (например <code>[heater_bed]</code>, когда стола ещё нет) в конфиге отсутствуют — Klipper не должен искать то, чего нет.</li>
+    <li>Натяжение ремней и перпендикулярность гантри — не блокирует первые тесты, но проверить до реальной печати.</li>
+  </ul>
+</section>
+
+<section id="first-run">
+  <h2>Первый запуск — без хоминга</h2>
+  <p class="section-intro">Главный принцип: убедиться, что моторы вообще слушаются, ДО того как разрешить оси ехать в неизвестном направлении на полный ход.</p>
+  <ol class="step-list">
+    <li><code>FIRMWARE_RESTART</code> — проверяем, что MCU на связи и в конфиге нет ошибок.</li>
+    <li>По одной оси: <code>STEPPER_BUZZ STEPPER=stepper_x</code> (аналогично <code>stepper_y</code>, <code>stepper_z</code>, <code>extruder</code>) — мотор качнётся ±1мм 10 раз. Это официальный способ Klipper проверить STEP/DIR/ENABLE до хоминга, без риска влететь в раму.</li>
+    <li>Ручной джог маленькими шагами: <code>G91</code>, затем <code>G1 X10 F300</code>, смотреть глазами на реальное перемещение, руку держать у выключателя питания.</li>
+    <li>Если ось не отхомлена и Klipper отклоняет <code>G1</code> — использовать <code>FORCE_MOVE</code> (требует <code>[force_move] enable_force_move: True</code>), он обходит проверку хоминга. Подробности и правила — в разделе <a href="#diy-hints">«Координаты, MIN/MAX, разводка мотора»</a>.</li>
+    <li>Экструдер можно buzz-ить без филамента — это безопасно. Экструдировать в холодный хотэнд не пытаться: от этого страхует <code>min_extrude_temp</code>, если его не отключали.</li>
+  </ol>
+  <div class="callout key">
+    <span class="ctitle">Если мотор молчит, а команда прошла без ошибок</span>
+    <p>Klipper принял команду ≠ мотор поехал. Это ровно тот случай, ради которого написан весь остальной гайд — идите в <a href="#order">«Итоговый порядок действий»</a> и дальше по дереву решений.</p>
+  </div>
+</section>
+
+<section id="first-heat">
+  <h2>Первый нагрев хотэнда</h2>
+  <span class="tag danger">не оставлять без присмотра</span>
+  <ul class="checklist">
+    <li>Быть рядом первые 10-15 минут прогрева, не отходить.</li>
+    <li><code>SET_HEATER_TEMPERATURE HEATER=extruder TARGET=200</code>, смотреть график в Mainsail.</li>
+    <li>Если температура растёт нелинейно / слишком быстро / не останавливается на целевой — сразу <code>TARGET=0</code> и физически снять питание, не разбираться на ходу.</li>
+    <li>Убедиться, что термистор реально в контакте с блоком, а не болтается — иначе показания занижены, а на них завязана вся тепловая защита.</li>
+    <li>Лёгкий дым/запах от заводской смазки при первом нагреве — нормально в небольших количествах; едкий запах или дым, который не прекращается — выключать.</li>
+  </ul>
+  <div class="callout danger">
+    <span class="ctitle">Никогда не грейте нагревательный картридж вне блока</span>
+    <p>Если хотэнд разобран (например, меняете хитблок или сопло) — не подавайте команды нагрева. Картридж, не вставленный в алюминиевый блок, не имеет теплоотвода и перегревается очень быстро. Для проверки вентиляторов и прочего в разобранном состоянии есть безопасные обходные пути — например, временно объявить вентилятор как <code>[fan_generic]</code> и крутить его командой <code>SET_FAN_SPEED</code>, не трогая нагреватель.</p>
+  </div>
+  <div class="callout warn">
+    <span class="ctitle">Не «подгоняйте» показания термистора под ожидание</span>
+    <p>Если температура выглядит абсурдно (например, глубокий минус или сотни градусов на холодной машине) — это сломанное измерение, а не повод подкрутить коэффициенты. Ищите причину: не тот <code>sensor_type</code>, обрыв/КЗ в проводе, неверный пин, проблема с опорным напряжением АЦП. Правка чисел ради «красивого» графика убивает тепловую защиту.</p>
+  </div>
+</section>
+
+<section id="mains-bed">
+  <h2>Стол на 220В через SSR — отдельная зона риска</h2>
+  <span class="tag danger">сетевое напряжение</span>
+  <p class="section-intro">Стол на 220В переменного тока нельзя коммутировать штатным MOSFET-выходом платы — только слаботочным сигналом на вход внешнего твердотельного реле (SSR), которое своей силовой стороной переключает сеть отдельно от платы.</p>
+
+  <ul class="checklist">
+    <li>Управление: DC-вход SSR (обычно 3–32В) — на выход нагрева стола платы (он коммутирует минус), силовая сторона SSR — отдельно, в разрыв фазы нагревателя.</li>
+    <li>Посчитать реальный ток: Вт ÷ 220В = А. Убедиться, что он с большим запасом ниже номинала SSR (для дешёвых SSR ориентир — не грузить выше 60-70% паспорта).</li>
+    <li>Отдельный предохранитель на линии 220В под реальный ток нагревателя — с запасом ~25-30%, не «на глаз» и не заведомо больший (избыточный номинал не защитит проводку).</li>
+    <li>Радиатор на SSR обязателен — см. отдельную врезку ниже.</li>
+    <li>Термостойкий (силиконовый) провод нужного сечения на силовой части — обычный ПВХ рассчитан максимум на ~80-105°C и станет узким местом раньше самого стола.</li>
+    <li>Механический термопредохранитель (thermal fuse) на столе — аппаратный бэкап, независимый от софта: если Klipper зависнет, а SSR залипнет включённым, только он остановит нагрев.</li>
+    <li>Проверить SSR изолированно (без стола и без 220В) до первого реального включения — что переключается по команде и не залипает.</li>
+    <li>«Грязную» землю силовой части развести отдельно от логической земли платы/одноплатника, не делать общих контуров.</li>
+    <li>Тип термистора стола не угадывать — измерить сопротивление при комнатной температуре и сверить с документацией.</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="ctitle">Радиатор на SSR — не формальность, даже если «запас огромный»</span>
+    <p>Интуиция «нагрузка 4.5А при номинале 25А, значит грется не будет» ошибочна. Тепловыделение в SSR определяется не процентом от номинала, а произведением тока на падение напряжения на открытом полупроводнике (~1-2В у типового триака) — то есть примерно ватт на каждый ампер. При 4.5А это уже 5-9Вт в маленьком корпусе без оребрения. Практика сообщества: подлинный SSR-25 без радиатора комфортен примерно до 5А, ощутимо греется к 8А.</p>
+    <p><strong>Дополнительный риск — подделки.</strong> Популярные модели SSR массово подделывают: внутри может стоять триак на 12А при маркировке 25А на корпусе. Реальный запас тогда в разы меньше паспортного. Радиатор + термопаста стоят копейки и снимают этот класс проблем для устройства, которое без присмотра коммутирует киловатт.</p>
+  </div>
+
+  <div class="callout info">
+    <span class="ctitle">Zero-cross SSR → управление bang-bang, не PID</span>
+    <p>Zero-cross реле физически не может переключиться быстрее ближайшего перехода сети через ноль, поэтому PID с коротким периодом ШИМ всё равно выродится в грубое вкл/выкл. Для таких столов правильный режим — <code>control: watermark</code>; это же поведение по умолчанию в официальном <code>generic-ramps.cfg</code> самого Klipper.</p>
+    <p>Полезный нюанс про запас по температуре: у watermark есть <code>max_delta</code> — допуск, при котором регулятор сам решает выключиться выше цели. Если <code>max_temp</code> стоит впритык к рабочей температуре, штатная работа регулятора вылезет за аварийный потолок и уронит принтер. Держите между целевой температурой и <code>max_temp</code> зазор 5-10°C.</p>
+  </div>
+
+  <div class="callout key">
+    <span class="ctitle">Температура датчика ≠ температура поверхности</span>
+    <p>Термистор обычно сидит в алюминии рядом с нагревателем, а печатаете вы по верхней поверхности через магнитную подложку и лист PEI. Разрыв в 15-25°C на открытой раме — норма, а не поломка. Это значит, что реальный рабочий потолок — «показание датчика минус разрыв», а не цифра в конфиге.</p>
+    <p>Отдельно: разброс по самой поверхности (центр горячее краёв) поправкой к целевой температуре не лечится в принципе — коррекция применяется к одному числу, а не к зонам. Уменьшается теплоизоляцией снизу плиты и закрытым корпусом.</p>
+    <p>И осторожнее с ИК-пирометром по голому металлу: у полированного алюминия низкая излучательная способность, прибор systematically занижает. Мерить по матовой поверхности либо заклеить пятно матовым скотчем.</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="ctitle">Потолок температуры задаёт самый слабый слой стека, а не сам нагреватель</span>
+    <p>У съёмных磁 магнитных PEI-пластин ограничивает обычно не полимер PEI (он держит 200°C+), а клеевой/магнитный подслой — у потребительских вариантов это чаще всего район 100-130°C. Плюс на самодельной раме проверьте, чем стол закреплён: напечатанный из PLA/PETG кронштейн размягчится намного раньше, чем что-либо в самом столе.</p>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Диагностика платы RAMPS</div>
+  <p class="content-group-desc">Проверки самой платы — до того, как подозревать драйверы.</p>
+
+<section id="ramps-visual">
+  <h2>Визуальный осмотр</h2>
+  <span class="tag visual">визуально · без приборов</span>
+  <p class="section-intro">Самый дешёвый тест. После переполюсовки ищите на плате следы локального перегрева именно в цепи входного питания — она приняла на себя обратный ток первой.</p>
+
+  <div class="diagram-frame">
+    <svg viewBox="0 0 760 300" role="img" aria-label="Схема зон проверки RAMPS 1.4">
+      <rect x="8" y="8" width="744" height="284" rx="10" fill="none" stroke="var(--border)"/>
+      <text x="26" y="34" fill="var(--text-faint)" font-family="var(--mono)" font-size="11" letter-spacing="0.06em">RAMPS 1.4 — СХЕМАТИЧНО, СВЕРЬТЕСЬ С ШЁЛКОГРАФИЕЙ ВАШЕЙ ПЛАТЫ</text>
+
+      <!-- power terminals -->
+      <rect x="30" y="60" width="90" height="34" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+      <text x="75" y="81" text-anchor="middle" fill="var(--text)" font-size="11" font-family="var(--mono)">IN 12В</text>
+      <circle cx="150" cy="60" r="11" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="150" y="64" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">1</text>
+
+      <rect x="30" y="180" width="90" height="34" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+      <text x="75" y="201" text-anchor="middle" fill="var(--text)" font-size="11" font-family="var(--mono)">IN 12В (стол)</text>
+      <circle cx="150" cy="197" r="11" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="150" y="201" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">2</text>
+
+      <!-- fuses -->
+      <rect x="185" y="46" width="54" height="22" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+      <text x="212" y="61" text-anchor="middle" fill="var(--text)" font-size="10" font-family="var(--mono)">F1</text>
+      <circle cx="270" cy="57" r="11" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="270" y="61" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">3</text>
+
+      <rect x="185" y="196" width="54" height="22" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+      <text x="212" y="211" text-anchor="middle" fill="var(--text)" font-size="10" font-family="var(--mono)">F2</text>
+
+      <!-- diodes -->
+      <rect x="185" y="80" width="54" height="20" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+      <text x="212" y="94" text-anchor="middle" fill="var(--text)" font-size="10" font-family="var(--mono)">D1</text>
+      <circle cx="270" cy="90" r="11" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="270" y="94" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">4</text>
+
+      <rect x="185" y="150" width="54" height="20" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+      <text x="212" y="164" text-anchor="middle" fill="var(--text)" font-size="10" font-family="var(--mono)">D2</text>
+
+      <!-- Mega block -->
+      <rect x="30" y="240" width="330" height="34" rx="4" fill="none" stroke="var(--border)" stroke-dasharray="4 4"/>
+      <text x="195" y="261" text-anchor="middle" fill="var(--text-faint)" font-size="10.5" font-family="var(--mono)">Freaduino Mega2560 (снизу)</text>
+
+      <!-- AUX header -->
+      <rect x="330" y="46" width="90" height="46" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+      <text x="375" y="66" text-anchor="middle" fill="var(--text)" font-size="9.5" font-family="var(--mono)">AUX-2</text>
+      <text x="375" y="80" text-anchor="middle" fill="var(--text)" font-size="9.5" font-family="var(--mono)">AUX-3</text>
+      <circle cx="430" cy="68" r="11" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="430" y="72" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">5</text>
+
+      <!-- driver sockets -->
+      <g font-family="var(--mono)" font-size="11">
+        <rect x="470" y="60" width="46" height="150" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+        <text x="493" y="225" text-anchor="middle" fill="var(--text)">X</text>
+        <rect x="526" y="60" width="46" height="150" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+        <text x="549" y="225" text-anchor="middle" fill="var(--text)">Y</text>
+        <rect x="582" y="60" width="46" height="150" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+        <text x="605" y="225" text-anchor="middle" fill="var(--text)">Z</text>
+        <rect x="638" y="60" width="46" height="150" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+        <text x="661" y="225" text-anchor="middle" fill="var(--text)">E0</text>
+      </g>
+      <circle cx="493" cy="46" r="11" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="493" y="50" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">6</text>
+      <circle cx="661" cy="46" r="11" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="661" y="50" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700">7</text>
+    </svg>
+    <ol class="legend">
+      <li><span class="badge">1</span>Основной вход 12В — питает моторы, хотэнд и (через D1) саму Mega. Именно эта цепь приняла обратный ток при переполюсовке.</li>
+      <li><span class="badge">2</span>Вход 12В стола — у вас не подключён и не используется, можно не проверять в первую очередь.</li>
+      <li><span class="badge">3</span>Полифьюз основной цепи (обычно маркируется ~5А) — самовосстанавливающийся, но после сильного превышения может деградировать и держать заниженный ток или не восстановиться.</li>
+      <li><span class="badge">4</span>D1 — защитный диод, через который запитывается Mega (VIN) от основного входа. При обратной полярности он первым принимает удар «на себя».</li>
+      <li><span class="badge">5</span>AUX-2/AUX-3 — куда вручную распаян PDN_UART для TMC2209. Осмотрите пайку отдельно — при работе рядом с горячим паяльником и переполюсовкой стоит перепроверить, не отслоилась ли дорожка.</li>
+      <li><span class="badge">6</span>Гнёзда драйверов X/Y/Z/E0 — по 16 контактов, распиновка одинакова для A4988 и TMC2209 (см. <a href="#pinout">пиноут</a>).</li>
+      <li><span class="badge">7</span>Крайнее гнездо E0 — сюда штатно стоит A4988 экструдера.</li>
+    </ol>
+    <p class="diagram-caption">Точное расположение F1/F2/D1/D2 отличается между ревизиями RAMPS 1.4 / 1.4a / 1.5 / 1.6 — используйте эту схему как карту зон, а точные позиции сверяйте по надписям на самой плате.</p>
+  </div>
+
+  <h3>Что искать глазами и носом</h3>
+  <ul class="checklist">
+    <li>Потемнение, вздутие или трещина на корпусе полифьюза F1 (обычно чёрный прямоугольник рядом с входной клеммой).</li>
+    <li>Обугленный или потемневший текстолит вокруг входной клеммной колодки, D1, D2 — след локального перегрева при протекании обратного/избыточного тока.</li>
+    <li>Запах гари — если ощущался в момент инцидента, отметьте это как отдельный сигнал даже без видимых следов.</li>
+    <li>Треснувшая пайка или расшатанная клеммная колодка входа питания — винтовые клеммы иногда искрят при рывке проводов под нагрузкой.</li>
+    <li>Вздутие или потёки на самих модулях A4988/TMC2209 (маленький чёрный чип в центре платы драйвера) — явный признак теплового пробоя.</li>
+    <li>Отдельно — состояние ручной пайки PDN_UART на AUX-2/AUX-3: не отслоилась ли контактная площадка, нет ли непропая.</li>
+  </ul>
+</section>
+
+<section id="ramps-cold">
+  <h2>Без драйверов, без питания</h2>
+  <span class="tag meter">мультиметр · питание выключено</span>
+  <p class="section-intro">Извлеките все драйверы из гнёзд. Блок питания физически отключён от сети. Эти проверки изолируют повреждение платы от повреждения драйверов.</p>
+
+  <div class="scroll-x">
+  <table>
+    <caption>Проверка сопротивлением / прозвонкой (без драйверов, без питания)</caption>
+    <thead><tr><th>Точки</th><th>Режим</th><th>Исправно</th><th>Плохой признак</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pin">VMOT</span>–<span class="pin">GND</span> в каждом из 4 гнёзд (X/Y/Z/E0)</td><td>Ом</td><td class="good">Разрыв / очень большое сопротивление</td><td class="bad">Близко к 0 Ом — КЗ шины VMOT на плате</td></tr>
+      <tr><td><span class="pin">VDD</span>(5В)–<span class="pin">GND</span> в каждом гнезде</td><td>Ом</td><td class="good">Не КЗ (сотни Ом и выше)</td><td class="bad">Близко к 0 Ом</td></tr>
+      <tr><td>Входная клемма 12В(+) → площадка F1 после предохранителя</td><td>Прозвонка</td><td class="good">Есть контакт (доли Ом)</td><td class="bad">Обрыв — предохранитель сгорел / оторвалась дорожка</td></tr>
+      <tr><td>D1: анод–катод</td><td>Диодный режим</td><td class="good">Проводит в одну сторону (~0.3–0.7В), обрыв в другую</td><td class="bad">Проводит в обе стороны (пробит) или не проводит ни в одну (оборван)</td></tr>
+      <tr><td>D2: анод–катод</td><td>Диодный режим</td><td class="good">Так же, одна проводящая полярность</td><td class="bad">Обе стороны проводят / обе — обрыв</td></tr>
+      <tr><td>GND входной клеммы — GND любого гнезда драйвера</td><td>Прозвонка</td><td class="good">Есть контакт</td><td class="bad">Обрыв — потеряна общая земля платы</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout info">
+    <span class="ctitle">Важно про диодный режим</span>
+    <p>Обычный режим «сопротивление» на многих мультиметрах использует слишком малый измерительный ток, чтобы открыть кремниевый p-n переход — исправный диод или защитный диод внутри H-моста покажет обрыв («OL») даже будучи полностью рабочим. Переключайтесь на режим «диод» (значок диода на лимбе) для всех проверок переходов — он выдаёт ~1–3 мА и корректно открывает переход. Если диодного режима нет вообще — см. раздел <a href="#a4988-bench">«A4988 на столе»</a>, там дана равноценная замена осциллографом.</p>
+  </div>
+</section>
+
+<section id="ramps-hot">
+  <h2>Без драйверов, под напряжением</h2>
+  <span class="tag meter">мультиметр</span>
+  <p class="section-intro">Драйверы всё ещё вынуты из гнёзд (чтобы точно знать, что вы измеряете саму плату, а не поведение драйвера). Подайте питание на RAMPS и Mega как обычно.</p>
+
+  <div class="scroll-x">
+  <table>
+    <caption>Проверка напряжением (без драйверов, питание включено)</caption>
+    <thead><tr><th>Точка</th><th>Исправно</th><th>Плохой признак</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pin">VMOT</span> любого гнезда относительно <span class="pin">GND</span></td><td class="good">≈ напряжение БП (обычно 12В)</td><td class="bad">0В — обрыв в цепи F1/входной клеммы/дорожки, это и есть проверка <a href="#hypothesis">приоритетной гипотезы</a></td></tr>
+      <tr><td><span class="pin">VDD</span> любого гнезда относительно <span class="pin">GND</span></td><td class="good">≈5В ±0.25В</td><td class="bad">0В или сильно занижено — проблема в 5В регуляторе Mega или дорожке VDD</td></tr>
+      <tr><td>VIN на плате Mega</td><td class="good">≈ напряжение БП минус ~0.5–0.7В (падение на D1)</td><td class="bad">0В — D1 пробит в обрыв или оторвана дорожка</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout key">
+    <span class="ctitle">Если VMOT = 0В хотя бы в одном гнезде</span>
+    <p>Проверьте остальные три гнезда — VMOT на всех 4 гнёздах физически идёт одной общей дорожкой/полигоном, поэтому «0В в одном, норма в остальных» почти невозможно и указывает на локальное повреждение именно этого гнезда (или щуп не на том пине). Если 0В сразу везде — приоритетная гипотеза подтверждена, дальше не тестируйте драйверы, ищите обрыв между входной клеммой и F1/D1.</p>
+  </div>
+</section>
+
+<section id="pinout">
+  <h2>Пиноут гнезда драйвера</h2>
+  <p class="section-intro">Распиновка гнезда RAMPS одинакова для A4988, TMC2208 и TMC2209 — все три физически совместимы с «pololu-style» гнездом. Пригодится для разделов диагностики драйверов ниже.</p>
+
+  <div class="diagram-frame">
+    <svg viewBox="0 0 420 260" role="img" aria-label="Пиноут гнезда драйвера шагового мотора">
+      <rect x="130" y="20" width="160" height="210" rx="8" fill="var(--paper-2)" stroke="var(--text-faint)"/>
+      <circle cx="210" cy="42" r="13" fill="none" stroke="var(--accent)" stroke-width="2"/>
+      <line x1="210" y1="42" x2="219" y2="33" stroke="var(--accent)" stroke-width="2"/>
+      <text x="210" y="70" text-anchor="middle" fill="var(--accent-2)" font-size="10" font-family="var(--mono)">Vref подстроечник</text>
+      <text x="210" y="130" text-anchor="middle" fill="var(--text-faint)" font-size="11" font-family="var(--mono)">A4988 / TMC2209</text>
+      <text x="210" y="146" text-anchor="middle" fill="var(--text-faint)" font-size="11" font-family="var(--mono)">(вид сверху)</text>
+
+      <!-- left pins -->
+      <g font-family="var(--mono)" font-size="11" fill="var(--text)">
+        <circle cx="130" cy="55" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="50" y="59" text-anchor="end">ENABLE</text>
+        <circle cx="130" cy="80" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="50" y="84" text-anchor="end">MS1</text>
+        <circle cx="130" cy="105" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="50" y="109" text-anchor="end">MS2</text>
+        <circle cx="130" cy="130" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="50" y="134" text-anchor="end">MS3</text>
+        <circle cx="130" cy="155" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="50" y="159" text-anchor="end">RESET</text>
+        <circle cx="130" cy="180" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="50" y="184" text-anchor="end">SLEEP</text>
+        <circle cx="130" cy="205" r="5" fill="var(--paper)" stroke="var(--accent)"/>
+        <text x="50" y="209" text-anchor="end" fill="var(--accent-2)">STEP</text>
+        <circle cx="130" cy="230" r="5" fill="var(--paper)" stroke="var(--accent)"/>
+        <text x="50" y="234" text-anchor="end" fill="var(--accent-2)">DIR</text>
+      </g>
+      <g stroke="var(--text-faint)" stroke-dasharray="2 3">
+        <line x1="55" y1="55" x2="125" y2="55"/><line x1="55" y1="80" x2="125" y2="80"/>
+        <line x1="55" y1="105" x2="125" y2="105"/><line x1="55" y1="130" x2="125" y2="130"/>
+        <line x1="55" y1="155" x2="125" y2="155"/><line x1="55" y1="180" x2="125" y2="180"/>
+        <line x1="55" y1="205" x2="125" y2="205" stroke="var(--accent)"/><line x1="55" y1="230" x2="125" y2="230" stroke="var(--accent)"/>
+      </g>
+
+      <!-- right pins -->
+      <g font-family="var(--mono)" font-size="11" fill="var(--text)">
+        <circle cx="290" cy="55" r="5" fill="var(--paper)" stroke="var(--info)"/>
+        <text x="370" y="59" fill="var(--info)">VMOT</text>
+        <circle cx="290" cy="80" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="370" y="84">GND</text>
+        <circle cx="290" cy="105" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="370" y="109">2B</text>
+        <circle cx="290" cy="130" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="370" y="134">2A</text>
+        <circle cx="290" cy="155" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="370" y="159">1A</text>
+        <circle cx="290" cy="180" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="370" y="184">1B</text>
+        <circle cx="290" cy="205" r="5" fill="var(--paper)" stroke="var(--info)"/>
+        <text x="370" y="209" fill="var(--info)">VDD</text>
+        <circle cx="290" cy="230" r="5" fill="var(--paper)" stroke="var(--text-dim)"/>
+        <text x="370" y="234">GND</text>
+      </g>
+      <g stroke="var(--text-faint)" stroke-dasharray="2 3">
+        <line x1="295" y1="55" x2="365" y2="55" stroke="var(--info)"/><line x1="295" y1="80" x2="365" y2="80"/>
+        <line x1="295" y1="105" x2="365" y2="105"/><line x1="295" y1="130" x2="365" y2="130"/>
+        <line x1="295" y1="155" x2="365" y2="155"/><line x1="295" y1="180" x2="365" y2="180"/>
+        <line x1="295" y1="205" x2="365" y2="205" stroke="var(--info)"/><line x1="295" y1="230" x2="365" y2="230"/>
+      </g>
+
+      <rect x="150" y="238" width="120" height="18" rx="4" fill="none" stroke="var(--warn)" stroke-dasharray="3 3"/>
+      <text x="210" y="251" text-anchor="middle" fill="var(--warn)" font-size="10" font-family="var(--mono)">PDN_UART — доп. вывод (только TMC2209-UART)</text>
+    </svg>
+    <p class="diagram-caption">1A/1B — выход одной обмотки, 2A/2B — второй. На реальных модулях TMC2209 подписи могут отличаться от общей Pololu-схемы (например VIO вместо VDD, SPREAD вместо MS3/RESET/SLEEP) — сверяйтесь с шёлкографией конкретно вашего модуля, эта диаграмма — обобщённая карта позиций, не факсимиле.</p>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Диагностика драйверов</div>
+  <p class="content-group-desc">A4988 и TMC2209 — на столе изолированно, затем в гнезде под реальным питанием.</p>
+
+<section id="a4988-bench">
+  <h2>A4988 — на столе (изолированно)</h2>
+  <span class="tag meter">мультиметр (авто, без диодного режима) + осциллограф · вне RAMPS · без USB</span>
+  <div class="callout warn">
+    <span class="ctitle">Условие чистоты теста</span>
+    <p>Модуль должен лежать сам по себе на столе: не в гнезде RAMPS, USB-кабель Orange Pi отсоединён, никакого внешнего питания. Иначе вы снова измеряете наведённый эффект от работающей логики Mega/RAMPS через один из пинов гнезда, а не собственное состояние чипа.</p>
+  </div>
+
+  <p>Проверка <span class="pin">VMOT</span>–<span class="pin">GND</span> на обрыв — стандартный первый шаг, но сама по себе <strong>не доказывает исправность</strong>: мёртвый H-мост чаще всего тоже даёт обрыв на этой паре, потому что он «обрывается», а не «замыкается». Самая информативная проверка — пары <span class="pin">1A</span>–<span class="pin">1B</span> и <span class="pin">2A</span>–<span class="pin">2B</span>, они прозванивают именно защитные (flyback) диоды H-моста. Обычно для этого используют диодный режим мультиметра — если его нет, есть равноценная замена своим же осциллографом.</p>
+
+  <div class="callout key">
+    <span class="ctitle">Замена диодному режиму: батарейка + резистор + осциллограф</span>
+    <p>Простая самодельная схема для проверки перехода без диодного режима мультиметра: <strong>батарейка (подойдёт «Крона» 9В) → последовательно резистор ~4.7–10 кОм → пара выводов драйвера под проверкой (например 1A–1B)</strong>, всё последовательно в одну цепь. Осциллограф (DC-связь) щупом прямо на пару выводов драйвера — то есть только на сам переход, не на всю цепочку с резистором.</p>
+    <p>Резистор ограничивает ток до безопасных ~1-2 мА — этого достаточно чтобы приоткрыть переход, но не повредить ничего. Это классическая методика «curve tracer» (кривая ВАХ через ограничительный резистор + осциллограф вместо специализированного прибора) — см. <a href="#methodology">раздел про методологию</a>.</p>
+  </div>
+
+  <div class="scroll-x">
+  <table>
+    <caption>Чтение осциллографа в этой самодельной схеме</caption>
+    <thead><tr><th>Полярность</th><th>Исправный переход</th><th>Мёртвый/повреждённый переход</th></tr></thead>
+    <tbody>
+      <tr><td>Прямая (переход открыт)</td><td class="good">~0.3–0.7В на переходе — низкое и почти не зависящее от напряжения батарейки (классическое падение на кремниевом p-n переходе)</td><td class="bad">Около 0В (переход пробит, ведёт себя как провод) — на выводах почти нет напряжения, весь ток свободно проходит</td></tr>
+      <tr><td>Обратная (переход заперт)</td><td class="good">Почти всё напряжение батарейки (переход не проводит, весь ток блокирован, падения на резисторе почти нет)</td><td class="bad">Низкое напряжение, похожее на прямую полярность (переход пробит в обе стороны) — или наоборот 0В в обе полярности (переход в обрыве)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Автоматический мультиметр без диодного режима всё же годится для одной вещи — грубого обрыва/КЗ (см. таблицу ниже), просто не годится для честной диодной асимметрии. Используйте его для быстрой отбраковки явных КЗ, а самодельную схему выше — для содержательной проверки 1A-1B/2A-2B.</p>
+
+  <div class="scroll-x">
+  <table>
+    <caption>A4988, вне схемы, без питания — базовая отбраковка автоматическим мультиметром (Ω)</caption>
+    <thead><tr><th>Пара выводов</th><th>Исправно</th><th>Комментарий</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pin">VMOT</span>–<span class="pin">GND</span></td><td class="good">Обрыв в обе стороны</td><td>Через закрытый H-мост нет прямого пути.</td></tr>
+      <tr><td><span class="pin">1A</span>–<span class="pin">1B</span></td><td class="good">Обрыв или очень большое R в обе стороны (авто-режим обычно не откроет переход слабым током)</td><td>Резкое КЗ (близко к 0 Ом) — явный признак пробоя, но "обрыв в обе стороны" НЕ доказывает исправность — нужна схема выше для честного ответа.</td></tr>
+      <tr><td><span class="pin">2A</span>–<span class="pin">2B</span></td><td class="good">То же поведение, что и 1A–1B</td><td>Катушка B, второй мост.</td></tr>
+      <tr><td><span class="pin">VDD</span>–<span class="pin">GND</span></td><td class="good">Обрыв или очень большое R, не КЗ</td><td>Логическое питание 5В.</td></tr>
+      <tr><td><span class="pin">STEP</span>/<span class="pin">DIR</span>/<span class="pin">ENABLE</span>/<span class="pin">MS1-3</span>/<span class="pin">RESET</span>/<span class="pin">SLEEP</span> — <span class="pin">GND</span></td><td class="good">Одинаковые показания на всех сравниваемых модулях</td><td>Абсолютное значение не так важно, как совпадение между модулями — ищите «не такой как все».</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout info">
+    <span class="ctitle">Метод сравнения</span>
+    <p>При нескольких модулях A4988 постройте табличку N строк × 7 пар выводов и заполните для каждого (омметром для грубой отбраковки + схемой батарейка/резистор/осциллограф для 1A-1B/2A-2B). Модуль, который систематически отличается от остальных — подозреваемый №1. Если все ведут себя одинаково, повреждение почти наверняка не в самих чипах. Это формальная методика «A-B-A swap» / сравнительная диагностика — см. <a href="#methodology">методологию</a>.</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="ctitle">Если и так неоднозначно — переходите сразу к живому тесту</span>
+    <p>Раз диодного режима нет, а самодельная схема тоже не даёт стопроцентной ясности — не зависайте на этом шаге долго. Осциллограф в гнезде под реальным питанием (раздел <a href="#scope-live">«В гнезде + осциллограф»</a>: STEP→DIR→ENABLE→1A/1B при <code>STEPPER_BUZZ</code>) даёт куда более прямой и однозначный ответ, потому что проверяет реальную работу драйвера, а не статичное поведение перехода. Бенч-тест тут — быстрый предварительный отсев, не единственный источник истины.</p>
+  </div>
+</section>
+
+<section id="tmc-bench">
+  <h2>TMC2209 — на столе (изолированно)</h2>
+  <span class="tag meter">мультиметр · вне RAMPS · без USB</span>
+  <p class="section-intro">Тот же протокол, что и для <a href="#a4988-bench">A4988</a> (силовая часть H-моста устроена аналогично), плюс одна дополнительная точка — линия UART.</p>
+
+  <div class="scroll-x">
+  <table>
+    <caption>TMC2209, диодный режим, вне схемы, без питания</caption>
+    <thead><tr><th>Пара выводов</th><th>Исправно</th><th>Комментарий</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pin">VMOT</span>–<span class="pin">GND</span>, <span class="pin">1A</span>–<span class="pin">1B</span>, <span class="pin">2A</span>–<span class="pin">2B</span>, <span class="pin">VDD</span>–<span class="pin">GND</span></td><td class="good">Как в таблице A4988</td><td>Силовая часть у TMC2209 архитектурно та же — H-мост с flyback-диодами.</td></tr>
+      <tr><td><span class="pin">PDN_UART</span>–<span class="pin">GND</span></td><td class="good">Не КЗ; обычно есть подтяжка (сотни кОм – единицы МОм в одну сторону, встречается разброс 300-500кОм между экземплярами — это норма, не признак неисправности)</td><td>Сравните все модули между собой — точное значение зависит от исполнения модуля.</td></tr>
+      <tr><td><span class="pin">PDN_UART</span>–<span class="pin">VDD</span></td><td class="good">Не КЗ</td><td>Проверяет, что линия не залипла на питание.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="ctitle">UART не заработает без VMOT — это не поломка</span>
+    <p>Приёмопередатчик PDN_UART у TMC2209 запитан внутренним стабилизатором от VMOT, а не от VDD. На столе, без силового 12В, линия UART в принципе не будет «оживать» — это нормально и ничего не говорит об исправности. Полноценный тест UART возможен только в разделе <a href="#uart-scope">«линия UART»</a>, под VMOT.</p>
+  </div>
+</section>
+
+<section id="scope-live">
+  <h2>В гнезде + осциллограф</h2>
+  <span class="tag scope">осциллограф · под напряжением</span>
+  <p class="section-intro">Только теперь один драйвер устанавливается в одно гнездо RAMPS, остальные три гнезда — пустые. Мотор подключён. Vref уже выставлен на безопасный минимум (см. <a href="#vref">настройку тока</a>).</p>
+
+  <ol class="step-list">
+    <li><strong>Земля щупа</strong> — один раз на GND рядом с тестируемым гнездом. Не переставляйте между каналами.</li>
+    <li><strong>Развёртка</strong> — начните с 20–50 мс/дел, чтобы захватить весь цикл BUZZ целиком (10 циклов «+1мм/-1мм» ≈ 5 секунд), затем увеличьте до 2–5 мс/дел, чтобы рассмотреть один импульсный пакет детально.</li>
+    <li><strong>Триггер</strong> — по фронту на канале STEP, либо запустите однократный захват (single shot) сразу перед подачей команды.</li>
+    <li><strong>Команда</strong> — из консоли Mainsail/Klipper: <code>STEPPER_BUZZ STEPPER=stepper_x</code> (замените на stepper_y, stepper_z, extruder).</li>
+    <li><strong>Снимайте по очереди</strong>: STEP → DIR → ENABLE → 1A/1B → 2A/2B, при необходимости повторяя BUZZ для каждого канала.</li>
+  </ol>
+
+  <h3>STEP — должен идти пакетами импульсов</h3>
+  <div class="scope-grid-2">
+    <div class="scope-card ok">
+      <div class="scope-head">✓ ИСПРАВНО</div>
+      <svg viewBox="0 0 400 130" preserveAspectRatio="none">
+        <g stroke="var(--scope-grid)" stroke-width="1">
+          <line x1="0" y1="20" x2="400" y2="20"/><line x1="0" y1="45" x2="400" y2="45"/>
+          <line x1="0" y1="70" x2="400" y2="70"/><line x1="0" y1="95" x2="400" y2="95"/><line x1="0" y1="115" x2="400" y2="115"/>
+          <line x1="40" y1="10" x2="40" y2="120"/><line x1="80" y1="10" x2="80" y2="120"/><line x1="120" y1="10" x2="120" y2="120"/>
+          <line x1="160" y1="10" x2="160" y2="120"/><line x1="200" y1="10" x2="200" y2="120"/><line x1="240" y1="10" x2="240" y2="120"/>
+          <line x1="280" y1="10" x2="280" y2="120"/><line x1="320" y1="10" x2="320" y2="120"/><line x1="360" y1="10" x2="360" y2="120"/>
+        </g>
+        <polyline points="0,100 10,100 10,25 18,25 18,100 30,100 30,25 38,25 38,100 60,100 60,25 68,25 68,100 76,100 76,25 84,25 84,100 130,100 130,25 138,25 138,100 150,100 150,25 158,25 158,100 166,100 166,25 174,25 174,100 220,100 220,25 228,25 228,100 240,100 240,25 248,25 248,100 256,100 256,25 264,25 264,100 310,100 310,25 318,25 318,100 330,100 330,25 338,25 338,100 346,100 346,25 354,25 354,100 400,100" fill="none" stroke="var(--scope-trace)" stroke-width="2"/>
+      </svg>
+      <div class="scope-foot">Группы коротких импульсов с паузами — каждая группа — один «толчок» BUZZ.</div>
+    </div>
+    <div class="scope-card bad">
+      <div class="scope-head">✕ НЕИСПРАВНО</div>
+      <svg viewBox="0 0 400 130" preserveAspectRatio="none">
+        <g stroke="var(--scope-grid)" stroke-width="1">
+          <line x1="0" y1="20" x2="400" y2="20"/><line x1="0" y1="45" x2="400" y2="45"/>
+          <line x1="0" y1="70" x2="400" y2="70"/><line x1="0" y1="95" x2="400" y2="95"/><line x1="0" y1="115" x2="400" y2="115"/>
+          <line x1="40" y1="10" x2="40" y2="120"/><line x1="80" y1="10" x2="80" y2="120"/><line x1="120" y1="10" x2="120" y2="120"/>
+          <line x1="160" y1="10" x2="160" y2="120"/><line x1="200" y1="10" x2="200" y2="120"/><line x1="240" y1="10" x2="240" y2="120"/>
+          <line x1="280" y1="10" x2="280" y2="120"/><line x1="320" y1="10" x2="320" y2="120"/><line x1="360" y1="10" x2="360" y2="120"/>
+        </g>
+        <polyline points="0,100 400,100" fill="none" stroke="var(--danger)" stroke-width="2"/>
+      </svg>
+      <div class="scope-foot">Плоская линия — проблема ДО драйвера: MCU, конфиг <code>step_pin</code>, обрыв шлейфа.</div>
+    </div>
+  </div>
+
+  <h3>DIR и ENABLE — уровни, не импульсы</h3>
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Сигнал</th><th>Ожидаемо во время BUZZ</th><th>Плохой признак</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pin">DIR</span></td><td class="good">Переключается между 0 и 5В между фазой «+1мм» и «-1мм»</td><td class="bad">Постоянный уровень весь тест — направление не меняется</td></tr>
+      <tr><td><span class="pin">ENABLE</span></td><td class="good">Активен (низкий уровень при инвертированном <code>enable_pin: !...</code>) в течение всего теста</td><td class="bad">Остаётся высоким (3.3–5В) — драйвер физически выключен, STEP/DIR не имеют значения</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Выходы обмоток 1A/1B и 2A/2B — самая важная проверка</h3>
+  <div class="scope-grid-2">
+    <div class="scope-card ok">
+      <div class="scope-head">✓ ИСПРАВНО — чоппер работает</div>
+      <svg viewBox="0 0 400 130" preserveAspectRatio="none">
+        <g stroke="var(--scope-grid)" stroke-width="1">
+          <line x1="0" y1="20" x2="400" y2="20"/><line x1="0" y1="45" x2="400" y2="45"/>
+          <line x1="0" y1="70" x2="400" y2="70"/><line x1="0" y1="95" x2="400" y2="95"/><line x1="0" y1="115" x2="400" y2="115"/>
+          <line x1="40" y1="10" x2="40" y2="120"/><line x1="80" y1="10" x2="80" y2="120"/><line x1="120" y1="10" x2="120" y2="120"/>
+          <line x1="160" y1="10" x2="160" y2="120"/><line x1="200" y1="10" x2="200" y2="120"/><line x1="240" y1="10" x2="240" y2="120"/>
+          <line x1="280" y1="10" x2="280" y2="120"/><line x1="320" y1="10" x2="320" y2="120"/><line x1="360" y1="10" x2="360" y2="120"/>
+        </g>
+        <polyline points="0,90 8,90 8,30 14,30 14,85 20,85 20,25 26,25 26,80 34,80 34,20 40,20 40,90 55,90 63,90 63,35 68,35 68,88 74,88 74,28 80,28 80,82 88,82 88,22 94,22 94,90 110,90 130,90 138,90 138,40 144,40 144,86 150,86 150,32 156,32 156,80 164,80 164,24 170,24 170,90 190,90 210,90 218,90 218,45 224,45 224,84 230,84 230,36 236,36 236,78 244,78 244,26 250,26 250,90 270,90 290,90 298,90 298,50 304,50 304,82 310,82 310,40 316,40 316,76 324,76 324,28 330,28 330,90 350,90 370,90" fill="none" stroke="var(--scope-trace)" stroke-width="1.6"/>
+      </svg>
+      <div class="scope-foot">Быстрое переключение (ШИМ-чоппинг тока) во время каждого «толчка» — драйвер реально качает ток в обмотку.</div>
+    </div>
+    <div class="scope-card bad">
+      <div class="scope-head">✕ НЕИСПРАВНО — тока нет</div>
+      <svg viewBox="0 0 400 130" preserveAspectRatio="none">
+        <g stroke="var(--scope-grid)" stroke-width="1">
+          <line x1="0" y1="20" x2="400" y2="20"/><line x1="0" y1="45" x2="400" y2="45"/>
+          <line x1="0" y1="70" x2="400" y2="70"/><line x1="0" y1="95" x2="400" y2="95"/><line x1="0" y1="115" x2="400" y2="115"/>
+          <line x1="40" y1="10" x2="40" y2="120"/><line x1="80" y1="10" x2="80" y2="120"/><line x1="120" y1="10" x2="120" y2="120"/>
+          <line x1="160" y1="10" x2="160" y2="120"/><line x1="200" y1="10" x2="200" y2="120"/><line x1="240" y1="10" x2="240" y2="120"/>
+          <line x1="280" y1="10" x2="280" y2="120"/><line x1="320" y1="10" x2="320" y2="120"/><line x1="360" y1="10" x2="360" y2="120"/>
+        </g>
+        <polyline points="0,95 400,95" fill="none" stroke="var(--danger)" stroke-width="2"/>
+      </svg>
+      <div class="scope-foot">Плоско на 0В (или плоско на VMOT) при исправных STEP/DIR/ENABLE — H-мост не коммутирует. Если это видно на всех модулях по очереди в одном и том же гнезде — смотрите <a href="#swap">протокол перестановки</a>, подозревайте гнездо RAMPS, а не все драйверы сразу.</div>
+    </div>
+  </div>
+
+  <div class="callout key">
+    <span class="ctitle">Как читать комбинацию результатов</span>
+    <p>STEP есть, DIR меняется, ENABLE активен, но 1A/1B и 2A/2B плоские — драйвер получает все управляющие сигналы, но не может (или не смеет) выдать силовой ток. Причины по убыванию вероятности: (а) нет VMOT на этом гнезде — вернитесь к разделу <a href="#ramps-hot">«под напряжением»</a>; (б) драйвер в защитном отключении из-за перегрева/КЗ, определяется по разделу <a href="#a4988-bench">«A4988»</a>/<a href="#tmc-bench">«TMC2209»</a> на столе; (в) H-мост физически мёртв. Полное дерево решений — <a href="#tree">ниже</a>.</p>
+  </div>
+</section>
+
+<section id="uart-scope">
+  <h2>TMC2209 — линия UART осциллографом</h2>
+  <span class="tag scope">осциллограф · под напряжением · только TMC2209</span>
+  <p class="section-intro">Проверяется отдельно от STEP/DIR/ENABLE — подключение однопроводное полудуплексное, поэтому TX и RX идут по одной линии PDN_UART.</p>
+
+  <ol class="step-list">
+    <li>Драйвер TMC2209 в гнезде, <strong>VMOT обязательно присутствует</strong> (см. предупреждение в разделе <a href="#tmc-bench">«TMC2209 на столе»</a> — без силового питания линия молчит независимо от исправности).</li>
+    <li>Щуп — на точку ручной пайки PDN_UART на AUX-2/AUX-3, земля — на GND рядом.</li>
+    <li>Развёртка — начните широко (10–20 мс/дел), чтобы поймать момент, когда Klipper подключается к MCU и опрашивает регистры драйверов (сразу при запуске сервиса klipper или при <code>FIRMWARE_RESTART</code>).</li>
+    <li>В консоли Klipper выполните <code>DUMP_TMC STEPPER=stepper_x</code> — это гарантированно вызовет обмен по UART прямо сейчас, не нужно ждать перезапуска.</li>
+  </ol>
+
+  <div class="scope-grid-2">
+    <div class="scope-card ok">
+      <div class="scope-head">✓ ЕСТЬ ОБМЕН</div>
+      <svg viewBox="0 0 400 130" preserveAspectRatio="none">
+        <g stroke="var(--scope-grid)" stroke-width="1">
+          <line x1="0" y1="20" x2="400" y2="20"/><line x1="0" y1="45" x2="400" y2="45"/>
+          <line x1="0" y1="70" x2="400" y2="70"/><line x1="0" y1="95" x2="400" y2="95"/><line x1="0" y1="115" x2="400" y2="115"/>
+          <line x1="40" y1="10" x2="40" y2="120"/><line x1="80" y1="10" x2="80" y2="120"/><line x1="120" y1="10" x2="120" y2="120"/>
+          <line x1="160" y1="10" x2="160" y2="120"/><line x1="200" y1="10" x2="200" y2="120"/><line x1="240" y1="10" x2="240" y2="120"/>
+          <line x1="280" y1="10" x2="280" y2="120"/><line x1="320" y1="10" x2="320" y2="120"/><line x1="360" y1="10" x2="360" y2="120"/>
+        </g>
+        <polyline points="0,30 150,30 150,90 158,90 158,30 163,30 163,90 168,90 168,30 176,30 176,90 181,30 189,30 189,90 194,90 194,30 202,30 202,90 207,90 207,30 215,30 215,90 220,90 220,30 228,30 228,90 233,90 233,30 241,30 241,90 246,90 246,30 254,30 254,90 259,90 259,30 400,30" fill="none" stroke="var(--scope-trace)" stroke-width="2"/>
+      </svg>
+      <div class="scope-foot">Линия высокая в покое (idle), короткий пакет узких импульсов — один UART-датаграм (адрес+регистр+CRC), затем снова высокая.</div>
+    </div>
+    <div class="scope-card bad">
+      <div class="scope-head">✕ ТИШИНА</div>
+      <svg viewBox="0 0 400 130" preserveAspectRatio="none">
+        <g stroke="var(--scope-grid)" stroke-width="1">
+          <line x1="0" y1="20" x2="400" y2="20"/><line x1="0" y1="45" x2="400" y2="45"/>
+          <line x1="0" y1="70" x2="400" y2="70"/><line x1="0" y1="95" x2="400" y2="95"/><line x1="0" y1="115" x2="400" y2="115"/>
+          <line x1="40" y1="10" x2="40" y2="120"/><line x1="80" y1="10" x2="80" y2="120"/><line x1="120" y1="10" x2="120" y2="120"/>
+          <line x1="160" y1="10" x2="160" y2="120"/><line x1="200" y1="10" x2="200" y2="120"/><line x1="240" y1="10" x2="240" y2="120"/>
+          <line x1="280" y1="10" x2="280" y2="120"/><line x1="320" y1="10" x2="320" y2="120"/><line x1="360" y1="10" x2="360" y2="120"/>
+        </g>
+        <polyline points="0,30 400,30" fill="none" stroke="var(--danger)" stroke-width="2"/>
+      </svg>
+      <div class="scope-foot">Плоско высокая (idle) весь тест — либо обрыв в пайке AUX-2/AUX-3, либо нет VMOT, либо MCU не пытается опросить этот драйвер вовсе.</div>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <span class="ctitle">Плоско НИЗкая линия — отдельный, более тревожный случай</span>
+    <p>Если линия не «высокая в покое», а залипла на 0В постоянно — это не молчание, а вероятная неисправность самой линии (короткое замыкание PDN_UART на GND, либо повреждённый выход приёмопередатчика внутри чипа). Отличайте этот случай от простого «нет обмена» — оба выглядят как «нет ответа» для Klipper, но диагноз разный.</p>
+  </div>
+</section>
+
+<section id="swap">
+  <h2>Протокол перестановки (swap test)</h2>
+  <p class="section-intro">Между шагами гоняйте по одному драйверу за раз через одно и то же гнездо — так сравнение честное. Цель — понять, «путешествует» ли неисправность вместе с драйвером (значит драйвер) или остаётся привязанной к гнезду (значит RAMPS). Формальное название методики — «A-B-A swap» / известно-исправная замена, см. <a href="#methodology">методологию</a>.</p>
+
+  <ol class="step-list">
+    <li>Возьмите один драйвер, который на столе (<a href="#a4988-bench">A4988</a>/<a href="#tmc-bench">TMC2209</a>) не показал явных отклонений от остальных («контрольный» драйвер).</li>
+    <li>Прогоните его по очереди через гнёзда X → Y → Z → E0, в каждом делая BUZZ + осциллограф на 1A/1B (раздел <a href="#scope-live">«в гнезде»</a>). Заполните строку в таблице ниже.</li>
+    <li>Если контрольный драйвер молчит в одном конкретном гнезде, но работает в остальных трёх — неисправно это гнездо RAMPS, не драйвер.</li>
+    <li>Затем каждый из подозрительных драйверов по очереди ставьте в единственное подтверждённо-исправное гнездо (то, где контрольный драйвер точно работал).</li>
+    <li>Если подозрительный драйвер молчит даже в заведомо исправном гнезде — неисправен именно он.</li>
+  </ol>
+
+  <div class="scroll-x">
+  <table>
+    <caption>Шаблон — заполните по факту тестов</caption>
+    <thead><tr><th>Драйвер</th><th>Гнездо X</th><th>Гнездо Y</th><th>Гнездо Z</th><th>Гнездо E0</th></tr></thead>
+    <tbody>
+      <tr><td>Контрольный</td><td></td><td></td><td></td><td></td></tr>
+      <tr><td>Драйвер #1</td><td></td><td></td><td></td><td></td></tr>
+      <tr><td>Драйвер #2</td><td></td><td></td><td></td><td></td></tr>
+      <tr><td>Драйвер #3</td><td></td><td></td><td></td><td></td></tr>
+      <tr><td>Драйвер #4</td><td></td><td></td><td></td><td></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="tree">
+  <h2>Дерево решений</h2>
+  <p class="section-intro">Сводка разделов диагностики драйверов в виде схемы для одного мотора за раз.</p>
+  <div class="flow">
+    <div class="flow-node">Старт: BUZZ не даёт видимого движения мотора</div>
+    <div class="flow-children">
+      <div class="flow-branch-label no">Нет</div>
+      <div class="flow-outcome bad">Импульсов STEP на осциллографе нет → проблема до драйвера: MCU, конфиг <code>step_pin</code>, обрыв шлейфа</div>
+      <div class="flow-branch-label yes">Да, импульсы STEP есть</div>
+
+      <div class="flow-node">DIR меняет уровень между фазами BUZZ?</div>
+      <div class="flow-children">
+        <div class="flow-branch-label no">Нет</div>
+        <div class="flow-outcome bad">Проверить конфиг <code>dir_pin</code> / провод DIR</div>
+        <div class="flow-branch-label yes">Да</div>
+
+        <div class="flow-node">ENABLE активен во время BUZZ?</div>
+        <div class="flow-children">
+          <div class="flow-branch-label no">Нет</div>
+          <div class="flow-outcome bad">Проверить <code>enable_pin</code> и его инверсию, провод ENABLE</div>
+          <div class="flow-branch-label yes">Да</div>
+
+          <div class="flow-node">На 1A-1B и 2A-2B есть чопперная коммутация?</div>
+          <div class="flow-children">
+            <div class="flow-branch-label no">Нет</div>
+            <div class="flow-node">Есть VMOT на этом гнезде? (см. «под напряжением»)</div>
+            <div class="flow-children">
+              <div class="flow-branch-label no">Нет</div>
+              <div class="flow-outcome bad">Обрыв цепи VMOT самой платы RAMPS</div>
+              <div class="flow-branch-label yes">Да</div>
+              <div class="flow-outcome warn">Драйвер не выдаёт ток — вероятно мёртв</div>
+
+              <div class="flow-node">Тот же драйвер работает в другом гнезде? (протокол перестановки)</div>
+              <div class="flow-children">
+                <div class="flow-branch-label yes">Да</div>
+                <div class="flow-outcome bad">Неисправно это гнездо RAMPS, не драйвер</div>
+                <div class="flow-branch-label no">Нет, нигде не работает</div>
+                <div class="flow-outcome bad">Неисправен сам драйвер</div>
+              </div>
+            </div>
+            <div class="flow-branch-label yes">Да, коммутация есть</div>
+            <div class="flow-node">Мотор физически двигается?</div>
+            <div class="flow-children">
+              <div class="flow-branch-label no">Нет</div>
+              <div class="flow-outcome bad">Обрыв/КЗ в моторе, обрыв шлейфа, либо мотор заклинило</div>
+              <div class="flow-branch-label yes">Да</div>
+              <div class="flow-outcome ok">Всё исправно</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Настройка тока</div>
+  <p class="content-group-desc">Vref — формулы, интерактивный калькулятор, журнал измерений.</p>
+
+<section id="vref">
+  <h2>Vref — формулы, калькулятор, журнал</h2>
+  <span class="tag meter">мультиметр · специфично для драйвера и мотора</span>
+  <p class="section-intro">Все нюансы настройки тока конкретно под A4988/TMC2209 и безымянные моторы без даташита.</p>
+
+  <div class="callout warn">
+    <span class="ctitle">Когда мерить</span>
+    <p>Vref-делитель на триммере запитан от логики (VDD), а не от VMOT — мерить и крутить можно при питании только через USB (Orange Pi → Mega), 12В на RAMPS ещё не подавая. Это самый безопасный момент для настройки: даже если ошибётесь и выставите слишком много, силового тока через мотор ещё физически нет.</p>
+  </div>
+
+  <h3>Формула — она разная у A4988 и TMC2209</h3>
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Драйвер</th><th>Формула</th><th>Rsense в этом проекте</th></tr></thead>
+    <tbody>
+      <tr><td>A4988</td><td><code>Vref = run_current × 8 × Rsense</code></td><td class="good">0.100 Ом (маркировка "S1 R100"/"S2 R100" на модуле — Sense1/Sense2, R100 = 0.100 Ом)</td></tr>
+      <tr><td>TMC2209 (standalone/без UART)</td><td><code>Vref = run_current × 2.5 × Rsense</code></td><td class="good">0.110 Ом (маркировка R110 на модуле, подтверждено визуально)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Коэффициент отличается (8 vs 2.5) из-за разной внутренней схемы измерения тока у Allegro (A4988) и Trinamic (TMC2209) — это не опечатка и не зависит от конкретного экземпляра модуля, только от чипа.</p>
+
+  <h3>Таблица — свои значения на каждую ось, с историей</h3>
+  <p class="section-intro">Строка на каждую ось/драйвер. <code>I</code> и <code>V</code> взаимозависимы — меняете любое, пересчитывается другое по формуле <code>V = I × коэффициент × Rsense</code>. <code>R</code> — отдельное поле для сырого показания мультиметра в режиме сопротивления (когда автоматический мультиметр переключается в Ω, а не в В) — только для журнала, в расчёт тока не входит, так как одного R недостаточно для однозначного пересчёта без схемы делителя. Значения полей и история сохраняются в этом браузере (localStorage) — переживают перезагрузку страницы.</p>
+
+  <div class="calc-panel">
+    <div class="scroll-x">
+      <table class="sheet-table">
+        <thead><tr><th>Метка</th><th>Драйвер</th><th>Rsense (Ом)</th><th>I (А)</th><th>V (В)</th><th>R (Ом)</th><th></th></tr></thead>
+        <tbody id="vref-sheet-body"></tbody>
+      </table>
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn primary" id="vref-add-row">+ строка</button>
+    </div>
+  </div>
+
+  <h3>История измерений</h3>
+  <div class="calc-panel">
+    <div class="scroll-x">
+      <table class="sheet-table">
+        <thead><tr><th>Время</th><th>Метка</th><th>Драйвер</th><th>Rsense</th><th>I</th><th>V</th><th>R</th><th></th></tr></thead>
+        <tbody id="vref-history-body"></tbody>
+      </table>
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn danger" id="vref-clear-history">Очистить историю</button>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    var ROWS_KEY = 'ramps-vref-sheet-rows';
+    var HIST_KEY = 'ramps-vref-sheet-history';
+    var PRESET = { a4988: {mult:8, rsense:0.100, label:'A4988 (×8)'}, tmc2209: {mult:2.5, rsense:0.110, label:'TMC2209 (×2.5)'} };
+    var sheetBody = document.getElementById('vref-sheet-body');
+    var histBody = document.getElementById('vref-history-body');
+
+    function loadRows(){
+      try{
+        var raw = localStorage.getItem(ROWS_KEY);
+        if(raw) return JSON.parse(raw);
+      }catch(e){}
+      return [
+        {label:'X', driver:'a4988', rsense:0.100, current:0.4, vref:0.32, rmeas:''},
+        {label:'Y', driver:'a4988', rsense:0.100, current:0.4, vref:0.32, rmeas:''},
+        {label:'Z', driver:'a4988', rsense:0.100, current:0.4, vref:0.32, rmeas:''},
+        {label:'E (extruder)', driver:'a4988', rsense:0.100, current:0.4, vref:0.32, rmeas:''}
+      ];
+    }
+    function saveRows(){
+      var rows = [];
+      sheetBody.querySelectorAll('tr').forEach(function(tr){
+        rows.push({
+          label: tr.querySelector('.f-label').value,
+          driver: tr.querySelector('.f-driver').value,
+          rsense: tr.querySelector('.f-rsense').value,
+          current: tr.querySelector('.f-current').value,
+          vref: tr.querySelector('.f-vref').value,
+          rmeas: tr.querySelector('.f-rmeas').value
+        });
+      });
+      try{ localStorage.setItem(ROWS_KEY, JSON.stringify(rows)); }catch(e){}
+    }
+    function loadHistory(){
+      try{
+        var raw = localStorage.getItem(HIST_KEY);
+        if(raw) return JSON.parse(raw);
+      }catch(e){}
+      return [];
+    }
+    function saveHistory(list){
+      try{ localStorage.setItem(HIST_KEY, JSON.stringify(list)); }catch(e){}
+    }
+
+    function vrefFromCurrent(tr){
+      var mult = PRESET[tr.querySelector('.f-driver').value].mult;
+      var rsense = parseFloat(tr.querySelector('.f-rsense').value) || 0;
+      var i = parseFloat(tr.querySelector('.f-current').value) || 0;
+      tr.querySelector('.f-vref').value = (i * mult * rsense).toFixed(3);
+    }
+    function currentFromVref(tr){
+      var mult = PRESET[tr.querySelector('.f-driver').value].mult;
+      var rsense = parseFloat(tr.querySelector('.f-rsense').value) || 0;
+      var v = parseFloat(tr.querySelector('.f-vref').value) || 0;
+      var denom = mult * rsense;
+      tr.querySelector('.f-current').value = denom > 0 ? (v / denom).toFixed(3) : '0';
+    }
+
+    function addRow(data){
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><input class="f-label" type="text" value="'+(data.label||'')+'"></td>'+
+        '<td><select class="f-driver">'+
+          '<option value="a4988">'+PRESET.a4988.label+'</option>'+
+          '<option value="tmc2209">'+PRESET.tmc2209.label+'</option>'+
+        '</select></td>'+
+        '<td><input class="f-rsense" type="number" step="any" value="'+data.rsense+'"></td>'+
+        '<td><input class="f-current derived" type="number" step="any" value="'+data.current+'"></td>'+
+        '<td><input class="f-vref derived" type="number" step="any" value="'+data.vref+'"></td>'+
+        '<td><input class="f-rmeas secondary" type="number" step="any" value="'+(data.rmeas||'')+'" placeholder="—"></td>'+
+        '<td style="white-space:nowrap;"><button type="button" class="btn small log">запись</button> <button type="button" class="btn small danger del">×</button></td>';
+      tr.querySelector('.f-driver').value = data.driver || 'a4988';
+
+      tr.querySelector('.f-driver').addEventListener('change', function(){
+        var d = PRESET[tr.querySelector('.f-driver').value];
+        tr.querySelector('.f-rsense').value = d.rsense;
+        vrefFromCurrent(tr); saveRows();
+      });
+      tr.querySelector('.f-rsense').addEventListener('input', function(){ vrefFromCurrent(tr); saveRows(); });
+      tr.querySelector('.f-current').addEventListener('input', function(){ vrefFromCurrent(tr); saveRows(); });
+      tr.querySelector('.f-vref').addEventListener('input', function(){ currentFromVref(tr); saveRows(); });
+      tr.querySelector('.f-rmeas').addEventListener('input', saveRows);
+      tr.querySelector('.f-label').addEventListener('input', saveRows);
+      tr.querySelector('.del').addEventListener('click', function(){ tr.remove(); saveRows(); });
+      tr.querySelector('.log').addEventListener('click', function(){
+        var list = loadHistory();
+        list.push({
+          ts: new Date().toLocaleString(),
+          label: tr.querySelector('.f-label').value,
+          driver: PRESET[tr.querySelector('.f-driver').value].label,
+          rsense: tr.querySelector('.f-rsense').value,
+          current: tr.querySelector('.f-current').value,
+          vref: tr.querySelector('.f-vref').value,
+          rmeas: tr.querySelector('.f-rmeas').value
+        });
+        saveHistory(list);
+        renderHistory();
+      });
+      sheetBody.appendChild(tr);
+    }
+
+    function renderHistory(){
+      var list = loadHistory();
+      histBody.innerHTML = '';
+      if(!list.length){
+        histBody.innerHTML = '<tr><td colspan="8" class="sheet-empty">Пока пусто — нажмите «запись» в строке выше, чтобы сохранить текущее измерение.</td></tr>';
+        return;
+      }
+      list.slice().reverse().forEach(function(entry, i){
+        var realIndex = list.length - 1 - i;
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>'+entry.ts+'</td><td>'+entry.label+'</td><td>'+entry.driver+'</td>'+
+          '<td>'+entry.rsense+'</td><td>'+entry.current+'</td><td>'+entry.vref+'</td><td>'+(entry.rmeas||'—')+'</td>'+
+          '<td><button type="button" class="btn small danger del-h" data-i="'+realIndex+'">×</button></td>';
+        histBody.appendChild(tr);
+      });
+      histBody.querySelectorAll('.del-h').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var list2 = loadHistory();
+          list2.splice(parseInt(btn.dataset.i,10), 1);
+          saveHistory(list2);
+          renderHistory();
+        });
+      });
+    }
+
+    loadRows().forEach(addRow);
+    renderHistory();
+
+    document.getElementById('vref-add-row').addEventListener('click', function(){
+      addRow({label:'', driver:'a4988', rsense:PRESET.a4988.rsense, current:0.4, vref:(0.4*PRESET.a4988.mult*PRESET.a4988.rsense).toFixed(3), rmeas:''});
+      saveRows();
+    });
+    document.getElementById('vref-clear-history').addEventListener('click', function(){
+      if(confirm('Очистить всю историю измерений?')){ saveHistory([]); renderHistory(); }
+    });
+  })();
+  </script>
+
+  <h3>Rsense A4988 в этом проекте — подтверждён</h3>
+  <div class="callout key">
+    <span class="ctitle">0.100 Ом — по маркировке "S1 R100" / "S2 R100"</span>
+    <p>"S1"/"S2" — это подпись самого производителя "Sense1"/"Sense2", то есть прямо указывает, что это и есть токовые шунты (не догадка по коду резистора без подписи) — уверенность выше обычного. "R100" по стандартному SMD-соглашению (R заменяет десятичную точку) = 0.100 Ом.</p>
+  </div>
+  <div class="scroll-x">
+  <table>
+    <caption>Готовые Vref под подтверждённый Rsense = 0.100 Ом (A4988, формула ×8)</caption>
+    <thead><tr><th>run_current</th><th>Vref (расчёт)</th></tr></thead>
+    <tbody>
+      <tr><td>0.3А</td><td class="good">0.24В</td></tr>
+      <tr><td>0.4А (стартовое)</td><td class="good">0.32В</td></tr>
+      <tr><td>0.5А</td><td class="good">0.40В</td></tr>
+      <tr><td>0.6А</td><td class="good">0.48В</td></tr>
+      <tr><td>0.7А</td><td class="good">0.56В</td></tr>
+      <tr><td>0.8А</td><td class="good">0.64В</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout info">
+    <span class="ctitle">На всякий случай — как перепроверить самостоятельно</span>
+    <p>Маркировка почти наверняка верна благодаря подписи "Sense", но если захотите перепроверить: мультиметром на самом низком пределе сопротивления, чётко на сам резистор (плата снята с RAMPS, вне схемы). На таких низких значениях (доли Ома) сопротивление щупов (обычно 0.1-0.3 Ом) само по себе может исказить показание сильнее измеряемой величины — используйте 4-проводное (Кельвина) измерение, либо замкните щупы между собой заранее, запомните число и вычтите его из результата.</p>
+  </div>
+
+  <h3>Сколько тока задавать, если у моторов нет даташита</h3>
+  <p>Безымянные моторы без публичного даташита — читаемая маркировка (Z: <code>17HD2008-200</code>, X/E: похоже на <code>MT-1702HS170AW</code>, 1.8°), паспортный ток не найден гуглежом. Протокол:</p>
+  <ol class="step-list">
+    <li>Стартуйте с заниженного <strong>0.4А</strong>.</li>
+    <li>После каждого шага — <code>STEPPER_BUZZ</code> на этой оси. Пропуски шагов ("щелчок"/скрежет вместо ровного вращения) означают ток занижен — безопасно, просто поднимайте.</li>
+    <li>Поднимайте по <strong>0.1А</strong> за раз, каждый раз проверяя нагрев корпуса мотора рукой после пары минут под током — если палец не выдерживает на корпусе дольше секунды, ток избыточен, снижайте на шаг назад. Для точности лучше ИК-термометр, чем палец (см. <a href="#methodology">методологию</a>) — палец даёт только грубое "нормально/перебор".</li>
+    <li>Не полагайтесь на тепловую защиту чипа как на штатный режим работы — это аварийный выход, а не индикатор "всё в порядке".</li>
+    <li>Дополнительно к «не пропускает шаги» — попробуйте слегка мешать оси рукой во время движения (лёгкое сопротивление, не полная остановка силой). Это проверяет запас момента под нагрузкой, а не только на холостом ходу — ближе к тому, что ось увидит при реальной печати.</li>
+  </ol>
+
+  <h3>Измерение и подстройка — пошагово</h3>
+  <ol class="step-list">
+    <li>Питание RAMPS 12В выключено. Только USB на Orange Pi/Mega включено.</li>
+    <li>Чёрный щуп мультиметра — на любой GND-пин гнезда драйвера. Красный щуп — точно на металлический винт/площадку триммера (не на соседние пины).</li>
+    <li>Режим мультиметра — постоянное напряжение (DCV), предел на пару вольт (обычно есть предел 2В или 20В).</li>
+    <li>Считаете целевой Vref по формуле выше (с уже узнанным Rsense) под желаемый <code>run_current</code> на этом шаге протокола (0.4А → 0.5А → ...).</li>
+    <li>Крутите триммер маленькой шлицевой отвёрткой, следя за показанием мультиметра, пока не совпадёт с расчётным значением.</li>
+    <li>Только после этого подавайте 12В на RAMPS и переходите к <code>STEPPER_BUZZ</code>.</li>
+  </ol>
+
+  <div class="callout warn">
+    <span class="ctitle">Если мультиметр не хочет мерить напряжение ниже ~0.5В</span>
+    <p>Полностью автоматический мультиметр сам выбирает режим (В или Ω) по внутренней эвристике — у делителя на триммере выходное сопротивление максимально примерно в середине хода и падает к краям; там, где сопротивление источника высокое, прибор иногда путается и переключается в Ω, хотя реальное напряжение физически есть, просто неправильно классифицировано. Не обходите эту зону — она обычно и есть рабочий диапазон низких токов. Вместо мультиметра используйте осциллограф (DC-связь, щуп на 1x — см. следующий callout, зачем именно 1x) на этом же участке — ему всё равно, какое сопротивление источника.</p>
+  </div>
+
+  <div class="callout key">
+    <span class="ctitle">Осциллограф не видит напряжение ниже ~0.5В — почти всегда щуп на 10x</span>
+    <p>Физический переключатель на щупе (1x/10x) должен совпадать с настройкой "probe attenuation" в меню канала осциллографа. Для таких маленьких напряжений (доли вольта) 10x не нужен — переключите щуп физически на <strong>1x</strong> и то же самое выставьте в меню канала. В 1x полный сигнал доходит до входа без ослабления — для медленного/постоянного напряжения вроде Vref потеря полосы пропускания в 1x значения не имеет, а точность на малых величинах становится намного лучше.</p>
+  </div>
+
+  <h3>Триммер крутится "не туда" или сопротивление почти не меняется</h3>
+  <div class="callout warn">
+    <span class="ctitle">Сначала проверьте метод: вы мерите напряжение или сопротивление?</span>
+    <p>Для настройки Vref нужно именно <strong>напряжение (DCV)</strong> между GND и движком триммера — не сопротивление самого потенциометра. У разных плат/партий сам потенциометр может быть разного номинала (5к/10к/20к) — сравнивать "на одном 7кОм, на другом 10кОм" не имеет смысла, это не признак неисправности, просто разные экземпляры. На формулу и итоговый ток номинал самого потенциометра не влияет — важно только конечное напряжение на движке.</p>
+  </div>
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Симптом</th><th>Вероятная причина</th><th>Что делать</th></tr></thead>
+    <tbody>
+      <tr><td>Маленький плоский триммер (прорезь под отвёртку прямо на чипе, обычно ~270° хода) крутится непрерывно, много оборотов, без чувствуемого упора</td><td class="bad">Вероятно физически сломан (сорван внутренний контакт) — особенно если раньше выкручивали через силу до упора</td><td>Считать этот драйвер подозрительным, внести в таблицу <a href="#swap">перестановки</a></td></tr>
+      <tr><td>Круглый многооборотный триммер (до 10-25 оборотов) крутится вхолостую у одного края диапазона, напряжение не меняется</td><td class="good">Нормально — встроенная муфта-проскальзывание на упоре, защита от поломки при чрезмерном закручивании</td><td>Ничего не делать, просто вы на краю диапазона — покрутите в другую сторону</td></tr>
+      <tr><td>Направление вращения "не угадывается"</td><td class="good">Не универсально, зависит от разводки конкретной платы</td><td>Крутните немного в одну сторону, замерьте Vref повторно — так узнаете направление именно для этой платы, не пытайтесь запомнить общее правило</td></tr>
+      <tr><td>Напряжение Vref не двигается вообще на протяжении нескольких полных оборотов в любую сторону</td><td class="bad">Подозрение на неисправность делителя/движка</td><td>Тот же протокол перестановки — сравнить с заведомо исправным драйвером</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Перемычки микрошага у TMC2209 без UART — не то же самое, что у A4988</h3>
+  <p>У модуля TMC2209 третья позиция (там, где у A4988 был MS3) на некоторых модулях — это SPREAD (выбор spreadCycle/stealthChop), не микрошаг. Точная таблица зависит от модуля — на модели с раздельными MS2/MS1/SPREAD типично:</p>
+  <div class="scroll-x">
+  <table>
+    <caption>MS2 / MS1 / SPREAD → микрошаг / режим (пример конкретной платы, сверяйте с шёлкографией своей)</caption>
+    <thead><tr><th>MS2</th><th>MS1</th><th>SPREAD (3-я)</th><th>Микрошаг</th><th>Режим</th></tr></thead>
+    <tbody>
+      <tr><td>есть</td><td>есть</td><td>есть</td><td class="good">1/16</td><td>spreadCycle (громче)</td></tr>
+      <tr><td>есть</td><td>есть</td><td>нет</td><td class="good">1/16</td><td>stealthChop (тише)</td></tr>
+      <tr><td>нет</td><td>нет</td><td>любая</td><td>1/8</td><td>—</td></tr>
+      <tr><td>есть</td><td>нет</td><td>любая</td><td>1/32</td><td>—</td></tr>
+      <tr><td>нет</td><td>есть</td><td>любая</td><td>1/64</td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Без UART Klipper не знает и не отражает режим чоппера в конфиге — это чисто физическая настройка платы, в <code>printer.cfg</code> ничего дописывать не нужно.</p>
+
+  <div class="callout danger">
+    <span class="ctitle">Кто на самом деле управляет током — UART или триммер</span>
+    <p>Секция <code>[tmc2209 stepper_x]</code> с <code>run_current</code> в конфиге работает ТОЛЬКО если UART реально на связи. Если UART не отвечает (<code>Unable to read tmc uart register ...</code>) — драйвер работает в откате на standalone-режим, и ток целиком определяется физическим положением триммера, а значение в конфиге ИГНОРИРУЕТСЯ чипом. Крутить триммер нужно обязательно в этом случае, независимо от того, что написано в <code>printer.cfg</code>.</p>
+    <p>Если/когда UART заработает — Klipper сам переключит чип в программное управление током при старте, и триммер перестанет иметь значение (но физически он никуда не денется, просто чип будет его игнорировать).</p>
+  </div>
+
+  <div class="callout info">
+    <span class="ctitle">hold_current — касается только TMC2209 по UART</span>
+    <p>Когда UART заработает, <code>hold_current</code> в конфиге (обычно вполовину от <code>run_current</code>) программно снижает ток в режиме удержания позиции — резко меньше нагрева в простое. У A4988 такой возможности нет вообще: ток всегда равен тому, что выставлено триммером, и в движении, и в простое, одинаково. Учитывайте это при выборе Vref для драйвера на A4988 — что зададите, то и будет греться постоянно, включая долгие паузы.</p>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Оси и движение</div>
+  <p class="content-group-desc">Координаты, хоуминг, разводка мотора — общая шпаргалка для DIY-принтеров.</p>
+
+<section id="diy-hints">
+  <h2>Координаты, MIN/MAX, разводка мотора</h2>
+  <p class="section-intro">Откуда берётся направление осей и что может его перепутать. Пригодится не только сейчас, но и при любой будущей переборке/замене мотора.</p>
+
+  <h3>Откуда берётся (0,0,0)</h3>
+  <p>Общепринято (хотя не универсальный закон физики, а просто самая частая договорённость среди прошивок/слайсеров): <strong>X0/Y0</strong> — передний левый угол стола, если смотреть на принтер спереди; <strong>Z0</strong> — сопло касается стола (минимальный зазор сопло-стол). Всё остальное — куда физически едет каретка при росте координаты — зависит от конкретной механики, единого стандарта тут нет, только соглашение.</p>
+  <div class="callout key">
+    <span class="ctitle">Для этого mbot — подтверждено</span>
+    <p>Начало координат (0,0,0) — <strong>спереди, слева, сверху</strong>. "Сверху" для Z здесь означает то же самое, что "стол максимально поднят/ближе к соплу" из таблицы ниже — на этой машине именно стол едет по Z, а не гантри.</p>
+  </div>
+
+  <div class="scroll-x">
+  <table>
+    <caption>Z0 — что физически происходит, по типу механики</caption>
+    <thead><tr><th>Тип принтера</th><th>Что двигается по Z</th><th>При Z=0 (старт печати)</th><th>По мере роста Z</th></tr></thead>
+    <tbody>
+      <tr><td>Подвижный стол (частый бюджетный DIY-вариант)</td><td>Стол едет вверх/вниз, гантри с соплом неподвижна по высоте</td><td>Стол максимально ПОДНЯТ — ближе всего к соплу</td><td>Стол едет ВНИЗ, отдаляясь от сопла</td></tr>
+      <tr><td>Подвижная гантри</td><td>Сопло/гантри едет вверх/вниз, стол неподвижен</td><td>Гантри максимально ОПУЩЕНА — сопло ближе всего к столу</td><td>Гантри едет ВВЕРХ, отдаляя сопло от стола</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Определите, какой у вас вариант, глазами (что физически подключено к Z-винту — рама с соплом или платформа стола) — дальше все выводы про "верх=минимум или максимум" зависят именно от этого.</p>
+
+  <h3>MIN/MAX-разъёмы на RAMPS — это разные физические пины</h3>
+  <p>На RAMPS 1.4 у каждой оси по ДВА отдельных 3-контактных разъёма для концевиков — MIN и MAX, это разные дорожки к разным пинам Меги. Если воткнуть в другой разъём, чем прописано в конфиге — Klipper физически не увидит переключение, конфиг должен указывать именно тот пин, куда реально воткнут провод.</p>
+  <div class="scroll-x">
+  <table>
+    <caption>Соответствие разъёмов RAMPS 1.4 + Mega2560</caption>
+    <thead><tr><th>Разъём</th><th>AVR-пин</th><th>Разъём</th><th>AVR-пин</th></tr></thead>
+    <tbody>
+      <tr><td>X-MIN</td><td class="mono">PE5</td><td>X-MAX</td><td class="mono">PE4</td></tr>
+      <tr><td>Y-MIN</td><td class="mono">PJ1</td><td>Y-MAX</td><td class="mono">PJ0</td></tr>
+      <tr><td>Z-MIN</td><td class="mono">PD3</td><td>Z-MAX</td><td class="mono">PD2</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p><code>position_endstop</code> в конфиге должно совпадать с тем, в какой разъём реально воткнуто: если в MIN — обычно <code>position_endstop: 0</code> (или близко к нулю); если в MAX — <code>position_endstop</code> должен равняться <code>position_max</code> этой оси. Klipper сам определяет направление хоминга по тому, к какому концу (<code>position_min</code> или <code>position_max</code>) ближе <code>position_endstop</code> — отдельного флага "направление" в Klipper нет, всё выводится из этих чисел.</p>
+
+  <div class="callout danger">
+    <span class="ctitle">Прежде чем повторно хомить ось после любой правки direction/endstop — проверьте джогом</span>
+    <p>Не полагайтесь сразу на <code>G28</code> после смены <code>position_endstop</code>/<code>dir_pin</code> — маленький ручной джог безопаснее и однозначно покажет, куда физически едет ось. Если ось ещё не отхомлена, обычный <code>G1</code> будет отклонён Klipper — см. врезку про <code>FORCE_MOVE</code> ниже.</p>
+  </div>
+  <ol class="step-list">
+    <li>Отхомленная ось — относительный режим <code>G91</code>, затем <code>G1 Z2 F60</code> (замените Z на нужную ось, 2мм — заведомо безопасное расстояние от любого края), затем обратно <code>G90</code>.</li>
+    <li>Неотхомленная ось — используйте <code>FORCE_MOVE STEPPER=stepper_z DISTANCE=3 VELOCITY=3</code> (замените stepper_z на нужный степпер; для экструдера имя степпера — именно <code>extruder</code>, не <code>stepper_e</code>). Двигает сырой степпер напрямую, минуя проверку хоуминга.</li>
+    <li>Смотрите глазами, куда физически поехало — к предполагаемому концевику/в ожидаемую сторону, или нет.</li>
+  </ol>
+  <p>Если поехало не в ту сторону, что ожидали — это либо <code>dir_pin</code> нужно инвертировать (<code>!</code> перед пином), либо перепутаны MIN/MAX (<code>position_endstop</code> не там), либо дело в самом моторе — см. ниже.</p>
+
+  <div class="callout warn">
+    <span class="ctitle"><code>FORCE_MOVE</code> нужно сначала включить</span>
+    <p><code>FORCE_MOVE</code> и <code>SET_KINEMATIC_POSITION</code> по умолчанию выключены (это осознанное ограничение безопасности — они обходят проверку лимитов). Добавьте в конфиг:</p>
+    <p><code>[force_move]<br>enable_force_move: True</code></p>
+    <p>Это временная мера для тестирования направления до того, как хоуминг заведомо доверенный — стоит убрать из конфига, когда все оси откалиброваны и `G28` подтверждённо работает правильно на всех, поскольку это отключает часть штатных защит по лимитам.</p>
+  </div>
+
+  <h3>Провода мотора в Dupont-колодке — тоже может развернуть направление</h3>
+  <p>4-проводной биполярный шаговый мотор — это две независимые катушки (A+/A-, B+/B-), каждая идёт на свою пару выходов драйвера (1A/1B и 2A/2B).</p>
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Что перепутано</th><th>Эффект</th><th>Опасно?</th></tr></thead>
+    <tbody>
+      <tr><td>Два провода ОДНОЙ катушки местами (A+↔A-)</td><td class="good">Разворачивает направление вращения — неотличимо от инвертированного <code>dir_pin</code></td><td class="good">Нет, просто крутится в другую сторону. Чинится софтом (<code>dir_pin: !...</code>), перепаивать не обязательно</td></tr>
+      <tr><td>Провода ПЕРЕМЕШАНЫ между катушками (не парами)</td><td class="bad">Драйвер видит половины разных катушек вместо двух целых — дёргание/гудение/пропуски шагов вместо ровного вращения</td><td class="bad">Не работает нормально, надо перепаивать/переставлять правильно</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p><strong>Проверка без даташита, мотор отключён от драйвера:</strong> мультиметром (сопротивление) прозвоните ВСЕ 6 пар между 4 проводами. У исправного мотора ровно 2 пары дадут низкое и примерно одинаковое сопротивление (единицы Ом, это и есть обе катушки) — остальные 4 пары дадут обрыв (провода из разных катушек не связаны). Если так — с мотором всё в порядке, разворот направления (если он есть) — вопрос конфига, не перепайки. Даже полностью «зеркальный» разъём (все 4 провода сдвинуты как единый блок) остаётся безопасным, пока пары катушек не разбиты — это всё ещё просто вопрос направления, не порчи.</p>
+
+  <h3>Сводная таблица — на что смотреть при "едет не туда"</h3>
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Симптом</th><th>Проверить</th><th>Фикс</th></tr></thead>
+    <tbody>
+      <tr><td>Джог в одну сторону едет физически в другую</td><td>Прозвонка катушек мотора (см. выше) — исключить перемешанные провода</td><td><code>dir_pin: !PIN</code> (добавить/убрать инверсию) — работает независимо от того, мотор ли это или просто конфиг</td></tr>
+      <tr><td>Хоминг едет не к тому концу оси</td><td>В какой физический разъём (MIN/MAX) воткнут концевик</td><td><code>endstop_pin</code> на правильный AVR-пин (таблица выше) + <code>position_endstop</code> = 0 (MIN) или = <code>position_max</code> (MAX)</td></tr>
+      <tr><td><code>QUERY_ENDSTOPS</code> показывает состояние наоборот (открыт/нажат перепутаны)</td><td>Вручную нажать/отпустить, сверить с показанием</td><td>Инверсия в <code>endstop_pin</code>: <code>^PIN</code> → <code>^!PIN</code></td></tr>
+      <tr><td>Мотор дёргается/гудит вместо ровного вращения</td><td>Прозвонка катушек — скорее всего провода перемешаны между катушками, не просто развёрнуты</td><td>Физически переставить провода в Dupont-колодке по результату прозвонки</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Разумные скорости — определять эмпирически, не по книге</h3>
+  <p>На DIY-раме с безымянными моторами нет проверенного эталона скорости — единственный надёжный путь: гонять <code>FORCE_MOVE</code> с растущей <code>VELOCITY</code> при текущем токе, пока не поймаете срыв шагов, затем взять значение на 25-30% ниже порога срыва как практичный потолок для <code>max_velocity</code>/<code>max_z_velocity</code>. Не пытайтесь работать впритык к порогу — нужен запас на реальную нагрузку при печати, которой в тесте нет. Ток и скорость напрямую связаны: у степпера момент падает с ростом скорости (противо-ЭДС), больше тока — выше порог срыва, так что подъём тока — это и есть механизм расширения диапазона скоростей. Автоматизированная версия той же идеи — модуль <code>klipper_auto_speed</code>, см. <a href="#methodology">методологию</a>.</p>
+
+  <div class="callout key">
+    <span class="ctitle">Результаты для этого mbot (2026-07-27)</span>
+    <p><strong>X/Y:</strong> стабильно 200мм/с под ручной нагрузкой (мешали рукой во время движения, пропусков нет) — в конфиг записано <code>max_velocity: 175</code> (margin ~12% вниз от подтверждённого чистого значения — реальная печать добавляет одновременные повороты/ускорения, которых нет в прямолинейном тесте).</p>
+    <p><strong>Z:</strong> уткнулось в 20мм/с и дальше не сдвинулось ни при повышении, ни при понижении тока — характерная сигнатура НЕ токового/момента-ограничения (будь то нехватка момента, рост тока или его снижение сдвигали бы порог), а механического потолка (резонанс винта/муфты) или предела по противо-ЭДС при доступном напряжении VMOT. Микрошаг тут не поможет: мм/с = обороты мотора × шаг винта, от делителя микрошага физически не зависит — <code>16→32</code> микрошагов не расширит потолок скорости, если ограничение именно в этом. Что реально может сдвинуть порог (если хочется побороться) — переключение chopper-режима (spreadCycle↔stealthChop, перемычка SPREAD) или снижение <code>max_z_accel</code>. Но 20мм/с уже с большим запасом выше того, что реально требуется по Z (5-15мм/с — типичный диапазон Z-скоростей у любого слайсера, Z двигается только между слоями) — в конфиге поставлено <code>max_z_velocity: 18</code>, гнаться за большим смысла нет.</p>
+    <p><strong>Экструдер:</strong> уверенно докручивает до 50мм/с подачи филамента под пальцевой нагрузкой — это неформальный качественный тест (не строгий FORCE_MOVE-до-срыва свип), поэтому в конфиг заложен запас пониже: <code>max_extrude_only_velocity: 35</code>.</p>
+  </div>
+
+  <h3>Ускорение (max_accel) и Square Corner Velocity — как подбирать дальше</h3>
+  <p class="section-intro">Оба параметра управляют не столько «может ли мотор физически», сколько качеством печати (резонанс/ringing на стенках, сглаживание углов) — поэтому в отличие от скорости их нельзя честно подобрать через <code>FORCE_MOVE</code> на одной оси, нужен реальный тестовый принт. Хронологически имеет смысл делать это ПОСЛЕ того, как хоуминг подтверждённо надёжен на всех осях (см. завтрашний план по концевикам ниже) — <code>G28</code> должен быть доверенным, прежде чем печатать тестовые башни.</p>
+
+  <h4 style="margin:20px 0 8px;font-size:15px;color:var(--text);">Square Corner Velocity</h4>
+  <p>Klipper использует SCV вместо привычного по Marlin «jerk» — это скорость (мм/с), с которой тулхед проходит воображаемый прямой угол 90°, не притормаживая. Для других углов скорость в повороте выводится из этого значения автоматически (более острый угол → медленнее, более тупой → быстрее) — крутить нужно только одно число, не таблицу jerk по осям. Дефолт в Klipper — <strong>5 мм/с</strong>, и на самодельной раме без accelerometer-калибровки это, по сути, честный ответ: поднимать стоит осторожно и понемногу (проверяя на тестовом квадрате/звезде на явные пропуски шагов в углах), разумный потолок для такой рамы — ориентировочно 8-10 мм/с, выше — уже требует уверенности в жёсткости всей конструкции.</p>
+
+  <h4 style="margin:20px 0 8px;font-size:15px;color:var(--text);">max_accel — без акселерометра</h4>
+  <p>Официальный быстрый путь в Klipper — <code>SHAPER_CALIBRATE</code>/<code>TEST_RESONANCES</code>, но оба требуют акселерометр (обычно ADXL345), физически прикрученный к тулхеду — на этой раме его пока нет. Без акселерометра у Klipper есть свой штатный, задокументированный ручной метод — не самодельный, а прямо из `docs/Resonance_Compensation.md`:</p>
+  <ol class="step-list">
+    <li>Печатается тестовая модель <code>docs/prints/ringing_tower.stl</code> (штатная модель из репозитория Klipper) — башня со ступенчатым резким изменением направления по высоте, слой 0.2-0.25мм, 1-2 периметра, внешний периметр на скорости 80-100мм/с.</li>
+    <li>На стенках башни появляется характерная рябь («ringing»/«ghosting») от резонанса рамы — по мере роста высоты (и, соответственно, ускорения, если печать через <code>TUNING_TOWER</code>) рябь усиливается или ослабевает.</li>
+    <li>Частота резонанса считается по видимой ряби: <code>Частота (Гц) = Скорость (мм/с) × число_колебаний / Расстояние (мм)</code> — измеряется линейкой прямо по отпечатку.</li>
+    <li>Модель также содержит намеренный зазор в стенке (0.15мм), который расширяется с ростом ускорения — это отдельный, независимый индикатор («smoothing»).</li>
+    <li>Берётся МЕНЬШЕЕ из двух значений (по рябь-порогу и по smoothing-порогу) — это и есть безопасный <code>max_accel</code> в <code>printer.cfg</code>.</li>
+  </ol>
+  <p>Автоматизировать сам процесс печати серии образцов на разных ускорениях помогает штатная команда <code>TUNING_TOWER</code>, например:</p>
+  <p><code>TUNING_TOWER COMMAND=SET_VELOCITY_LIMIT PARAMETER=ACCEL START=1500 STEP_DELTA=500 STEP_HEIGHT=5</code></p>
+  <p>— поднимает ускорение на 500мм/с² каждые 5мм высоты печати одной и той же модели, чтобы увидеть переход «рябь ещё приемлема / уже нет» на одном отпечатке, без ручной перепечатки заново под каждое значение.</p>
+  <div class="callout warn">
+    <span class="ctitle">Сейчас в конфиге</span>
+    <p><code>max_accel: 1500</code> — родовое значение из исходного черновика конфига, НЕ откалибровано под эту раму ни одним из методов выше. Не повышать вслепую — резкий скачок ускорения на нетестированной раме увеличивает риск сорванных шагов и остаточных вибраций в отпечатке. Плановая последовательность: сначала завершить работу с концевиками (план ниже) → доверенный <code>G28</code> на всех осях → печать <code>ringing_tower.stl</code> → пересчитать <code>max_accel</code> по методике выше.</p>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Инфраструктура</div>
+  <p class="content-group-desc">Сеть, USB, UART — то, что вокруг принтера, но влияет на его стабильность.</p>
+
+<section id="uart-direct">
+  <h2>Прямой UART Orange Pi ↔ Mega (без USB/хаба)</h2>
+  <span class="tag warn">физическая пайка/монтаж · есть риск повредить Orange Pi при ошибке</span>
+  <p class="section-intro">Цель — убрать зависимость связи с MCU от нестабильного USB-хаба: соединить UART Orange Pi напрямую с Мегой, освободив единственный USB-порт под камеру.</p>
+
+  <div class="callout info">
+    <span class="ctitle">Альтернатива без пайки — microUSB-OTG</span>
+    <p>Если на Orange Pi есть microUSB с поддержкой OTG host-режима — это может решить ту же задачу (два независимых USB-порта вместо одного, делённого хабом) вообще без уровневого шифтера и пайки. См. раздел про methodology ниже — на Orange Pi Lite это задокументированный, рабочий приём. Проверьте это в первую очередь, прежде чем паять UART напрямую.</p>
+  </div>
+
+  <div class="callout danger">
+    <span class="ctitle">Единственное реально опасное место (если всё же паять UART)</span>
+    <p>GPIO Orange Pi — 3.3В, НЕ толерантны к 5В. Mega — логика 5В. TX/RX сами по себе перепутать не страшно (просто не заработает, ничего не сгорит) — страшно перепутать питание уровневого шифтера (HV/LV) или подать 5В прямо на 3.3В-рельс Orange Pi в обход шифтера. Протокол ниже специально устроен так, чтобы поймать такую ошибку мультиметром до подключения сигнальных проводов.</p>
+  </div>
+
+  <h3>Что нужно</h3>
+  <ul class="checklist">
+    <li>Двунаправленный логический шифтер уровней 3.3В↔5В (дешёвый 4-канальный модуль на BSS138 — используете 2 из 4 каналов)</li>
+    <li>Провода для GND, 5В, 3.3В, и двух сигнальных линий (TX/RX)</li>
+    <li>Мультиметр</li>
+  </ul>
+
+  <h3>Точки подключения</h3>
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Сигнал</th><th>Orange Pi One (гребёнка)</th><th>Mega2560</th><th>Шифтер</th></tr></thead>
+    <tbody>
+      <tr><td>GND</td><td>пин 6</td><td>любой GND</td><td>GND (обе стороны, HV и LV)</td></tr>
+      <tr><td>3.3В (питание LV-стороны)</td><td>пин 1</td><td>—</td><td>LV</td></tr>
+      <tr><td>5В (питание HV-стороны)</td><td>—</td><td>5V пин</td><td>HV</td></tr>
+      <tr><td>TX Меги → RX Orange Pi</td><td>пин 10 (RX3) через LV-канал</td><td>TX0 (D1)</td><td>канал 1: HV1↔LV1</td></tr>
+      <tr><td>TX Orange Pi → RX Меги</td><td>пин 8 (TX3) через LV-канал</td><td>RX0 (D0)</td><td>канал 2: LV2↔HV2</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="callout warn">
+    <span class="ctitle">D0/D1 сейчас заняты USB-serial чипом</span>
+    <p>Штатный USB-serial чип платы уже использует эти же пины Меги (D0/D1) — Klipper собран под UART0. Перед подключением новых проводов физически отсоедините эти сигнальные линии от D0/D1 — не должно быть двух источников на одной линии одновременно.</p>
+  </div>
+
+  <h3>Порядок — сначала проверить питание шифтера, потом сигнал</h3>
+  <ol class="step-list">
+    <li>Подключите GND, 5В (HV) и 3.3В (LV) к шифтеру. <strong>Сигнальные провода (TX/RX) пока не трогайте.</strong></li>
+    <li>Включите питание обеих плат. Мультиметром проверьте прямо на выводах шифтера: HV-сторона ≈5В относительно GND, LV-сторона ≈3.3В относительно GND.</li>
+    <li>Если цифры не сходятся — не подключайте сигнальные провода, разбирайтесь с питанием шифтера сначала. Пока ничего не подключено к самим платам через сигнальные линии — повредить нечего.</li>
+    <li>Если всё сошлось — подключайте TX/RX по таблице выше.</li>
+    <li>Включите UART3 через <code>armbian-config</code> (System → Hardware → uart3 → Save → перезагрузка), проверьте появление <code>/dev/ttyS3</code>, переключите <code>[mcu] serial:</code> в <code>printer.cfg</code> на новый порт.</li>
+  </ol>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Хотэнд</div>
+  <p class="content-group-desc">Тепловая архитектура радиатор→термобарьер→блок→сопло — где резьба, где градиент температуры и где реально нужна термопаста.</p>
+
+<section id="hotend-thermal">
+  <h2>Термопаста и тепловой барьер хотэнда</h2>
+  <p class="section-intro">Все резьбовые соединения в хотэнде V6/BMG-типа несут разный смысл: где-то важно МАКСИМИЗИРОВАТЬ теплопередачу (чтобы холодная зона реально оставалась холодной), а где-то это не имеет значения. Термопаста полезна только там, где температуры на обеих сторонах резьбы и так разные — на однородно горячих или однородно холодных стыках она ничего не даёт.</p>
+
+  <div class="diagram-frame">
+    <svg viewBox="0 0 680 560" role="img" aria-label="Тепловая схема хотэнда: радиатор, термобарьер, нагревательный блок и сопло, свёрнутые резьбой друг в друга, с указанием места нанесения термопасты">
+      <defs>
+        <marker id="hb-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M2 1L8 5L2 9" fill="none" stroke="var(--warn)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </marker>
+        <linearGradient id="hb-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--accent-bg)"/>
+          <stop offset="50%" stop-color="var(--paper-2)"/>
+          <stop offset="100%" stop-color="var(--warn-bg)"/>
+        </linearGradient>
+        <pattern id="hb-thread" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="9" stroke="var(--text-faint)" stroke-width="2"/>
+        </pattern>
+      </defs>
+
+      <text x="340" y="26" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--text-faint)">Филамент (твёрдый)</text>
+      <line x1="340" y1="34" x2="340" y2="318" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="4 4" opacity="0.6"/>
+      <line x1="340" y1="318" x2="340" y2="466" stroke="var(--warn)" stroke-width="1.3" stroke-dasharray="3 3" opacity="0.85" marker-end="url(#hb-arrow)"/>
+
+      <!-- 1: радиатор -->
+      <rect x="250" y="55" width="180" height="105" rx="10" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1"/>
+      <g stroke="var(--accent)" stroke-width="0.6" opacity="0.35">
+        <line x1="268" y1="77" x2="412" y2="77"/>
+        <line x1="268" y1="95" x2="412" y2="95"/>
+        <line x1="268" y1="113" x2="412" y2="113"/>
+        <line x1="268" y1="131" x2="412" y2="131"/>
+      </g>
+      <line x1="430" y1="100" x2="460" y2="100" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" opacity="0.7"/>
+      <circle cx="470" cy="100" r="10" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="1"/>
+      <text x="470" y="104" text-anchor="middle" fill="var(--accent-2)" font-size="11" font-weight="700" font-family="var(--mono)">1</text>
+      <text x="486" y="97" font-family="var(--sans)" font-size="13" font-weight="700" fill="var(--text)">Радиатор</text>
+      <text x="486" y="112" font-family="var(--sans)" font-size="11.5" fill="var(--text-faint)">холодная зона, обдув вентилятором</text>
+
+      <!-- 2: резьба радиатор<->термобарьер — ГЛАВНАЯ точка пасты -->
+      <rect x="308" y="160" width="64" height="22" fill="url(#hb-thread)" stroke="var(--accent)" stroke-width="1.6"/>
+      <line x1="372" y1="171" x2="460" y2="171" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="3 2" opacity="0.85"/>
+      <circle cx="470" cy="171" r="10" fill="var(--accent)" stroke="var(--accent-2)" stroke-width="1"/>
+      <text x="470" y="175" text-anchor="middle" fill="var(--paper)" font-size="11" font-weight="700" font-family="var(--mono)">2</text>
+      <text x="486" y="168" font-family="var(--sans)" font-size="13" font-weight="800" fill="var(--accent-2)">Резьба: радиатор ↔ термобарьер</text>
+      <text x="486" y="183" font-family="var(--sans)" font-size="11.5" fill="var(--text-dim)">★ главное место для термопасты</text>
+
+      <!-- 3: термобарьер -->
+      <rect x="316" y="182" width="48" height="118" fill="url(#hb-grad)" stroke="var(--text-faint)" stroke-width="1"/>
+      <line x1="364" y1="241" x2="460" y2="241" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3 2" opacity="0.7"/>
+      <circle cx="470" cy="241" r="10" fill="var(--paper-2)" stroke="var(--text-faint)" stroke-width="1"/>
+      <text x="470" y="245" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-weight="700" font-family="var(--mono)">3</text>
+      <text x="486" y="238" font-family="var(--sans)" font-size="13" font-weight="700" fill="var(--text)">Термобарьер (heatbreak)</text>
+      <text x="486" y="253" font-family="var(--sans)" font-size="11.5" fill="var(--text-faint)">тонкие стенки ~2мм, создаёт градиент</text>
+
+      <!-- 4: резьба термобарьер<->блок -->
+      <rect x="308" y="300" width="64" height="20" fill="url(#hb-thread)" stroke="var(--warn)" stroke-width="1.2"/>
+      <line x1="372" y1="310" x2="460" y2="310" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3 2" opacity="0.7"/>
+      <circle cx="470" cy="310" r="10" fill="var(--paper-2)" stroke="var(--text-faint)" stroke-width="1"/>
+      <text x="470" y="314" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-weight="700" font-family="var(--mono)">4</text>
+      <text x="486" y="307" font-family="var(--sans)" font-size="13" font-weight="700" fill="var(--text)">Резьба: термобарьер ↔ блок</text>
+      <text x="486" y="322" font-family="var(--sans)" font-size="11.5" fill="var(--text-faint)">паста не нужна — обе стороны и так горячие</text>
+
+      <!-- 5: нагревательный блок + картридж/термистор -->
+      <rect x="250" y="320" width="180" height="95" rx="8" fill="var(--warn-bg)" stroke="var(--warn)" stroke-width="1"/>
+      <rect x="210" y="343" width="42" height="16" rx="3" fill="var(--paper-2)" stroke="var(--warn)" stroke-width="0.8"/>
+      <rect x="222" y="378" width="30" height="10" rx="2" fill="var(--paper-2)" stroke="var(--warn)" stroke-width="0.8"/>
+      <line x1="430" y1="367" x2="460" y2="367" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3 2" opacity="0.7"/>
+      <circle cx="470" cy="367" r="10" fill="var(--warn-bg)" stroke="var(--warn)" stroke-width="1"/>
+      <text x="470" y="371" text-anchor="middle" fill="var(--warn)" font-size="11" font-weight="700" font-family="var(--mono)">5</text>
+      <text x="486" y="357" font-family="var(--sans)" font-size="13" font-weight="700" fill="var(--text)">Нагревательный блок</text>
+      <text x="486" y="372" font-family="var(--sans)" font-size="11.5" fill="var(--text-faint)">полное расплавление; сюда вставлены</text>
+      <text x="486" y="386" font-family="var(--sans)" font-size="11.5" fill="var(--text-faint)">картридж и термистор (кружки слева)</text>
+
+      <!-- 6: резьба блок<->сопло -->
+      <rect x="300" y="415" width="80" height="18" fill="url(#hb-thread)" stroke="var(--warn)" stroke-width="1.2"/>
+      <line x1="380" y1="424" x2="460" y2="424" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3 2" opacity="0.7"/>
+      <circle cx="470" cy="424" r="10" fill="var(--paper-2)" stroke="var(--text-faint)" stroke-width="1"/>
+      <text x="470" y="428" text-anchor="middle" fill="var(--text-dim)" font-size="11" font-weight="700" font-family="var(--mono)">6</text>
+      <text x="486" y="421" font-family="var(--sans)" font-size="13" font-weight="700" fill="var(--text)">Резьба: блок ↔ сопло</text>
+      <text x="486" y="436" font-family="var(--sans)" font-size="11.5" fill="var(--text-faint)">паста опциональна — небольшой плюс</text>
+
+      <!-- 7: сопло -->
+      <polygon points="300,433 380,433 350,478 330,478" fill="var(--warn-bg)" stroke="var(--warn)" stroke-width="1"/>
+      <line x1="350" y1="465" x2="460" y2="465" stroke="var(--warn)" stroke-width="1" stroke-dasharray="3 2" opacity="0.8"/>
+      <circle cx="470" cy="465" r="10" fill="var(--warn-bg)" stroke="var(--warn)" stroke-width="1"/>
+      <text x="470" y="469" text-anchor="middle" fill="var(--warn)" font-size="11" font-weight="700" font-family="var(--mono)">7</text>
+      <text x="486" y="462" font-family="var(--sans)" font-size="13" font-weight="700" fill="var(--text)">Сопло</text>
+      <text x="486" y="477" font-family="var(--sans)" font-size="11.5" fill="var(--text-faint)">→ расплав выходит здесь</text>
+
+      <text x="340" y="545" text-anchor="middle" font-family="var(--sans)" font-size="12" fill="var(--text-faint)">Цвет показывает температуру (холоднее → горячее); заштрихованные полосы — резьбовые соединения, не зазоры</text>
+    </svg>
+    <ol class="legend">
+      <li><span class="badge">1</span>Радиатор (heatsink) — холодная зона, обычно с постоянно работающим вентилятором обдува. Задача — как можно эффективнее сбрасывать тепло, просочившееся через термобарьер, наружу.</li>
+      <li><span class="badge">2</span><strong>Резьба радиатор↔термобарьер — главное и практически единственное общепризнанное место для термопасты в хотэнде.</strong> Наносится на наружную резьбу термобарьера перед вкручиванием в радиатор. Цель — максимизировать теплопередачу именно тут: чем эффективнее радиатор охлаждает верхнюю часть термобарьера, тем короче и резче температурный градиент внутри самого термобарьера, тем меньше риск heat creep (расширение/размягчение филамента выше зоны плавления, ведущее к засорам). Лишнюю пасту, вытекшую наружу при закручивании — стереть.</li>
+      <li><span class="badge">3</span>Термобарьер (heatbreak) — узкая трубка с тонкими стенками (~2мм), физически ограничивает поток тепла вверх, создавая резкий градиент температуры на протяжении нескольких мм.</li>
+      <li><span class="badge">4</span>Резьба термобарьер↔нагревательный блок — паста тут не имеет смысла: обе стороны и так горячие (блок специально греет нижнюю часть термобарьера, чтобы филамент плавился), разницы температур для пасты «сглаживать» нет.</li>
+      <li><span class="badge">5</span>Нагревательный блок — сюда вставлены нагревательный картридж и термистор (два кружка на схеме). Термопаста здесь опциональна, но распространена: улучшает точность показаний термистора (меньше расхождение между реальной температурой блока и тем, что видит датчик) и работает как антипригарная смазка — картридж/термистор не закисают/не прикипают в отверстии при многократных циклах нагрева, легче снять при следующей переборке.</li>
+      <li><span class="badge">6</span>Резьба нагревательный блок↔сопло — тоже горячая сторона с обеих сторон, паста опциональна и даёт скорее небольшой бонус к равномерности прогрева кончика, чем что-то критичное.</li>
+      <li><span class="badge">7</span>Сопло — на резьбе самой по себе паста не нужна и её отсутствие — это нормально, не признак проблемы (см. раздел про недокручивающееся сопло выше, если он ещё есть в этой версии гайда).</li>
+    </ol>
+  </div>
+
+  <div class="scroll-x">
+  <table>
+    <caption>Сводка — где паста реально нужна, а где просто можно</caption>
+    <thead><tr><th>Место</th><th>Статус</th><th>Зачем</th></tr></thead>
+    <tbody>
+      <tr><td>Радиатор ↔ термобарьер (наружная резьба)</td><td class="good">Нужна</td><td>Единственное место, где паста решает реальную задачу — эффективность холодной зоны напрямую снижает риск heat creep.</td></tr>
+      <tr><td>Нагревательный картридж / термистор в блоке</td><td>По желанию</td><td>Точность показаний термистора + анти-прикипание при переборке.</td></tr>
+      <tr><td>Нагревательный блок ↔ сопло</td><td>По желанию</td><td>Небольшой плюс к равномерности прогрева кончика, не критично.</td></tr>
+      <tr><td>Термобарьер ↔ нагревательный блок</td><td class="bad">Не нужна</td><td>Обе стороны и так горячие — пасте нечего «сглаживать».</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="ctitle">Тип пасты</span>
+    <p>Для хотэнда предпочтительна термопаста на основе нитрида бора (boron nitride) — она электрически непроводящая и не «схватывается»/не спекается при многократных термоциклах до высоких температур, в отличие от многих обычных компьютерных термопаст на металлической/керамической основе, часть которых со временем твердеет или деградирует при постоянном нагреве выше 250°C. Обычная процессорная термопаста тоже физически сработает разово, но хуже переносит долгие термоциклы именно в этом диапазоне температур.</p>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Методология</div>
+  <p class="content-group-desc">Откуда взялись нестандартные приёмы в этом гайде — и что о них известно за пределами этого проекта.</p>
+
+<section id="methodology">
+  <h2>Prior art использованных техник</h2>
+  <p class="section-intro">Часть методов в этом гайде родилась по ходу диагностики конкретной ситуации. Проверено, что почти все они — известные, задокументированные приёмы, не изобретение с нуля; ниже — что нашлось и какие уточнения это дало.</p>
+
+  <h3>Эмпирический подбор максимальной скорости («поднимай, пока не сорвётся»)</h3>
+  <p>Раздел <a href="#diy-hints">«Оси и движение»</a>: растим <code>VELOCITY</code> в <code>FORCE_MOVE</code>, пока не сорвутся шаги, берём запас 25-30% ниже порога.</p>
+  <div class="prior-art">
+    <span class="plabel">Prior art</span>
+    <span>Ellis' Print Tuning Guide, «Determining Maximum Speeds and Accelerations»; автоматизированная версия — модуль <code>klipper_auto_speed</code> (Anonoei), сам замеряет пропуски шагов по осям на разных ускорениях/скоростях. Klipper сам ограничивает потолок ускорения/скорости степпера тройным от настроенного максимума перемещения — сверху всё равно есть аппаратная защита.</span>
+  </div>
+
+  <h3>Проверка нагрева мотора на ощупь</h3>
+  <p>Раздел <a href="#vref">«Vref»</a>: держать палец на корпусе мотора несколько секунд как индикатор перегрузки по току.</p>
+  <div class="prior-art">
+    <span class="plabel">Prior art</span>
+    <span>Устоявшееся правило сообщества: 40-55°C — комфортно, 55-70°C — приемлемо для долгих печатей, выше 70°C — снижать Vref на ~10% и перепроверять, устойчиво выше 80°C — риск размагнитить ротор. Важная поправка: рука даёт только грубую оценку "нормально/перебор", не точное число — для реальных цифр надёжнее ИК-термометр или термопара.</span>
+  </div>
+
+  <h3>Батарейка + резистор + осциллограф вместо диодного режима мультиметра</h3>
+  <p>Раздел <a href="#a4988-bench">«A4988 на столе»</a>: проверка flyback-диодов H-моста через самодельную ограниченную по току цепь.</p>
+  <div class="prior-art">
+    <span class="plabel">Prior art</span>
+    <span>Это классическая методика «curve tracer» — источник напряжения + ограничительный резистор + осциллограф вместо специализированного прибора, применяется в электронике десятилетиями для трассировки ВАХ полупроводников. Дополнительно: даже обычный омметр (без диодного режима) иногда способен частично приоткрыть переход на старших пределах, показывая «несколько сотен Ом» для исправного диода — не универсально, но ещё один способ отличить живой переход от пробитого при отсутствии диодного режима.</span>
+  </div>
+
+  <h3>microUSB-OTG как второй независимый USB-хост-порт</h3>
+  <p>Раздел <a href="#uart-direct">«Прямой UART»</a> (врезка-алтернатива): вместо общего хаба под камеру и MCU — развести их по двум физически разным портам Orange Pi.</p>
+  <div class="prior-art">
+    <span class="plabel">Prior art</span>
+    <span>Форум Armbian и отдельный GitHub-репозиторий (<em>carl1961/Orange-PI-Lite-Usb-OTG-to-Host</em>) описывают ровно этот приём именно для Orange Pi Lite — родственная плата на том же H3 SoC: подключить USB-камеру через microUSB-OTG, освободив основной USB-порт. На части моделей/образов нужен явный device-tree overlay (<code>usbotg2host.dts</code>) — если host-режим не поднимается автоматически, это первое, что стоит проверить.</span>
+  </div>
+
+  <h3>Swap-тест / протокол перестановки</h3>
+  <p>Раздел <a href="#swap">«Протокол перестановки»</a>: гонять драйверы между гнёздами, чтобы отличить «сломан драйвер» от «сломано гнездо».</p>
+  <div class="prior-art">
+    <span class="plabel">Prior art</span>
+    <span>Формальное название — «A-B-A Swap Method» в электронной диагностике: убрать подозреваемый компонент, поставить заведомо исправный на его место, затем поставить подозреваемый на заведомо исправное место — если неисправность «путешествует» вместе с компонентом, виноват он, если остаётся на месте — виновата плата/гнездо. Считается одним из самых эффективных и одновременно часто пропускаемых шагов при диагностике «проблем с мотором».</span>
+  </div>
+
+  <h3>Ringing tower / TUNING_TOWER для подбора max_accel без акселерометра</h3>
+  <p>Раздел <a href="#diy-hints">«Ускорение и Square Corner Velocity»</a>: печать тестовой башни, замер ряби на стенках линейкой, пересчёт в частоту резонанса.</p>
+  <div class="prior-art">
+    <span class="plabel">Prior art</span>
+    <span>Это не самодельная методика, а штатная — прямо из документации Klipper (<code>docs/Resonance_Compensation.md</code>, модель <code>docs/prints/ringing_tower.stl</code>). Единственное, что можно назвать местной адаптацией — применение той же логики «поднимать параметр, пока не станет видно проблему, затем отступить» уже знакомой по подбору скорости и тока в этом гайде, только здесь критерий — качество печати, а не срыв шагов.</span>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Справочник</div>
+  <p class="content-group-desc">Быстрый доступ к командам, без объяснений — когда уже разобрались, что делать.</p>
+
+<section id="cheatsheet">
+  <h2>Команды Klipper</h2>
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>Команда</th><th>Что делает</th></tr></thead>
+    <tbody>
+      <tr><td><code>STEPPER_BUZZ STEPPER=stepper_x</code></td><td>10 циклов ±1мм — основной механический тест. Замените <code>stepper_x</code> на <code>stepper_y</code>, <code>stepper_z</code>, <code>extruder</code>.</td></tr>
+      <tr><td><code>FORCE_MOVE STEPPER=stepper_z DISTANCE=3 VELOCITY=3</code></td><td>Двигает сырой степпер напрямую, не требует хоуминга. Нужна включённая секция <code>[force_move]</code> — см. <a href="#diy-hints">«Оси и движение»</a>. Для экструдера — <code>STEPPER=extruder</code>.</td></tr>
+      <tr><td><code>DUMP_TMC STEPPER=stepper_x</code></td><td>Немедленно опрашивает регистры TMC2209 по UART и печатает их — форсирует обмен для осциллографа, не дожидаясь перезапуска.</td></tr>
+      <tr><td><code>FIRMWARE_RESTART</code></td><td>Перезапускает соединение с MCU и заново инициализирует драйверы (в т.ч. первичный опрос UART).</td></tr>
+      <tr><td><code>QUERY_ENDSTOPS</code></td><td>Опрашивает состояние концевиков без движения — безопасно.</td></tr>
+      <tr><td><code>SET_TMC_CURRENT STEPPER=stepper_x CURRENT=0.20</code></td><td>Меняет run_current «на лету» через UART без правки конфига — удобно для безопасного шагового подъёма тока (нужен рабочий UART).</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+</div>
+
+</main>
+</div>
+
+<footer>
+  <div class="mono">mbot · Orange Pi One (ultra@192.168.11.160) · см. также printer-status.md для полного состояния проекта</div>
+</footer>
+
+<script>
+(function(){
+  document.querySelectorAll('section[id]').forEach(function(sec){
+    var h2 = sec.querySelector(':scope > h2');
+    if(!h2 || h2.querySelector('.heading-anchor')) return;
+    var a = document.createElement('a');
+    a.href = '#' + sec.id;
+    a.className = 'heading-anchor';
+    a.textContent = '#';
+    a.setAttribute('aria-label', 'Прямая ссылка на раздел «' + h2.textContent.trim() + '»');
+    h2.appendChild(a);
+  });
+})();
+</script>
