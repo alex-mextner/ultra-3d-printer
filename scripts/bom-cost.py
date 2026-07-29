@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Считает стоимость проекта по таблицам из docs/purchases.md.
 
+Все цены — в долларах США (рублёвые покупки пересчитаны в самом документе,
+исходная сумма сохранена там отдельным столбцом).
+
 Источник истины — сам markdown-файл, а не отдельная база: правится документ,
 скрипт только пересчитывает. Таблицы размечены комментариями вида
     <!-- cost-table: confirmed -->
 где вид таблицы — один из: confirmed (цена подтверждена), estimate (диапазон
-оценки), free (досталось бесплатно), unknown (цены нет, в сумму не идёт).
+оценки по купленному), planned (запланировано, ещё не куплено), free
+(досталось бесплатно), unknown (цены нет, в сумму не идёт).
 
-Формат ячейки цены: "251", "3500-6500" (дефис или тире), "0", "-" / "—".
+Формат ячейки цены: "3.18", "40-75" (дефис или тире), "0", "-" / "—".
 
 Запуск:
     python3 scripts/bom-cost.py [путь/к/purchases.md]
@@ -17,7 +21,7 @@ import re
 import sys
 from pathlib import Path
 
-KINDS = ("confirmed", "estimate", "free", "unknown")
+KINDS = ("confirmed", "estimate", "planned", "free", "unknown")
 TABLE_MARKER = re.compile(r"<!--\s*cost-table:\s*(\w+)\s*-->")
 PRICE_HEADER = "цена"
 # Диапазон: 3500-6500 / 3500–6500 / 3500 — 6500. Разделители тысяч (пробел) чистим заранее.
@@ -103,7 +107,23 @@ def parse(path):
 
 
 def money(value):
-    return f"{value:,.0f}".replace(",", " ")
+    return "$" + f"{value:,.2f}".replace(",", " ")
+
+
+def span(low, high):
+    return money(low) if low == high else f"{money(low)} – {money(high)}"
+
+
+def positions(count):
+    """«1 позиция» / «3 позиции» / «21 позиция» — иначе отчёт читается коряво."""
+    tail, hundred = count % 10, count % 100
+    if tail == 1 and hundred != 11:
+        word = "позиция"
+    elif tail in (2, 3, 4) and hundred not in (12, 13, 14):
+        word = "позиции"
+    else:
+        word = "позиций"
+    return f"{count} {word}"
 
 
 def main():
@@ -114,29 +134,39 @@ def main():
 
     items = parse(path)
 
-    confirmed = sum(low for _, low, _, priced in items["confirmed"] if priced)
-    est_low = sum(low for _, low, _, priced in items["estimate"] if priced)
-    est_high = sum(high for _, _, high, priced in items["estimate"] if priced)
-    free_count = len(items["free"])
-    unpriced = [name for name, _, _, priced in
-                items["unknown"] + items["confirmed"] + items["estimate"] if not priced]
+    def total(kind):
+        low = sum(l for _, l, _, priced in items[kind] if priced)
+        high = sum(h for _, _, h, priced in items[kind] if priced)
+        return low, high
 
-    total_low = confirmed + est_low
-    total_high = confirmed + est_high
+    conf_low, conf_high = total("confirmed")
+    est_low, est_high = total("estimate")
+    plan_low, plan_high = total("planned")
+    unpriced = [name for kind in KINDS for name, _, _, priced in items[kind] if not priced]
+
+    spent_low, spent_high = conf_low + est_low, conf_high + est_high
+    all_low, all_high = spent_low + plan_low, spent_high + plan_high
+
+    n_conf = positions(len(items["confirmed"]))
+    n_est = positions(len(items["estimate"]))
+    n_plan = positions(len(items["planned"]))
+    n_free = positions(len(items["free"]))
+    n_unpriced = positions(len(unpriced))
 
     width = 34
+    value = 20
     print()
-    print(f"{'Подтверждённые траты:':<{width}}{money(confirmed):>16} ₽"
-          f"   ({len(items['confirmed'])} позиций)")
-    print(f"{'Оценка по неподтверждённым:':<{width}}"
-          f"{money(est_low) + ' – ' + money(est_high):>16} ₽"
-          f"   ({len(items['estimate'])} позиций)")
-    print(f"{'Досталось бесплатно с mbot:':<{width}}{'0':>16} ₽   ({free_count} позиций)")
-    print(f"{'Не оценено (нужны цены):':<{width}}{'—':>16}     ({len(unpriced)} позиций)")
-    print("-" * (width + 24))
-    print(f"{'ИТОГО по проекту:':<{width}}"
-          f"{money(total_low) + ' – ' + money(total_high):>16} ₽")
-    print(f"{'  середина диапазона:':<{width}}{money((total_low + total_high) / 2):>16} ₽")
+    print(f"{'Подтверждённые траты:':<{width}}{span(conf_low, conf_high):>{value}}   ({n_conf})")
+    print(f"{'Оценка по неподтверждённым:':<{width}}{span(est_low, est_high):>{value}}   ({n_est})")
+    print(f"{'Запланировано, не куплено:':<{width}}{span(plan_low, plan_high):>{value}}   ({n_plan})")
+    print(f"{'Досталось бесплатно с mbot:':<{width}}{money(0):>{value}}   ({n_free})")
+    if unpriced:
+        print(f"{'Не оценено (нужны цены):':<{width}}{'—':>{value}}   ({n_unpriced})")
+    print("-" * (width + value + 6))
+    print(f"{'ПОТРАЧЕНО (факт + оценка):':<{width}}{span(spent_low, spent_high):>{value}}")
+    print(f"{'  середина диапазона:':<{width}}{money((spent_low + spent_high) / 2):>{value}}")
+    print(f"{'С УЧЁТОМ ПЛАНОВ:':<{width}}{span(all_low, all_high):>{value}}")
+    print(f"{'  середина диапазона:':<{width}}{money((all_low + all_high) / 2):>{value}}")
     print()
 
     if unpriced:
