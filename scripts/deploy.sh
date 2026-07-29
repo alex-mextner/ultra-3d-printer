@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Ручная синхронизация конфигов из этой папки на принтер. Запускать самому,
+# Ручная синхронизация конфигов из printer-configs/ на принтер. Запускать самому,
 # стоя рядом с принтером — НЕ предназначен для автозапуска по CI/merge
 # (стол греется без полной защиты по 220В, см. docs/printer-status.md).
+#
+# Конфиги правим ТОЛЬКО тут, в репозитории (см. CLAUDE.md) — не на самом принтере
+# по SSH. Этот скрипт — единственный путь донести правки до Klipper.
 set -euo pipefail
 
 HOST="${PRINTER_HOST:-ultra@192.168.11.160}"
 REMOTE_DIR="printer_data/config"
-LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../printer-configs" && pwd)"
 FILES=(printer.cfg moonraker.conf crowsnest.conf autotune_tmc.cfg KlipperScreen.conf mainsail.cfg)
 
 echo "== Проверяю связь с принтером =="
