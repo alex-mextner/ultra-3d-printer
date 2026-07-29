@@ -247,7 +247,7 @@
 **Вентилятор №2 охлаждает МОТОР экструдера, а не радиатор термобарьера. Отдельного обдува радиатора нет — и это осознанный выбор, а не упущение.**
 
 Обоснование:
-- У исходного mbot cubic обдув радиатора термобарьера не был предусмотрен конструктивно, и в этой сборке он тоже не делался.
+- У исходного mbot cube обдув радиатора термобарьера не был предусмотрен конструктивно, и в этой сборке он тоже не делался.
 - Вместо этого установлен **мощный (увеличенный) радиатор**, который, возможно, справляется пассивно.
 - Проверять это имеет смысл только на реальной печати — до первой длинной печати вопрос остаётся открытым эмпирически, но конструктивное решение принято.
 
@@ -455,7 +455,7 @@ pin: PH6
 # GND, drain to fan minus, fan plus to 12V).
 #
 # DESIGN DECISION (2026-07-29): this fan cools the STEPPER MOTOR, not a heatbreak
-# heatsink. The mbot cubic never had heatbreak-heatsink cooling and this build
+# heatsink. The mbot cube never had heatbreak-heatsink cooling and this build
 # does not either - an oversized heatsink was fitted instead, on the expectation
 # that it dissipates passively. Hence the fan is tied to machine ACTIVITY, not to
 # hotend temperature: motors heat up from coil current, not from the hotend.
