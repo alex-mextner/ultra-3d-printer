@@ -1,0 +1,87 @@
+/*
+ * big-font theme
+ *
+ * KlipperScreen's [main] font_size option (small/medium/large/extralarge/max)
+ * only applies a +-10% multiplier on top of a hardcoded base computed in
+ * ks_includes/KlippyGtk.py (update_layout): on this 320x240 landscape panel
+ * that base is font_size = min(320/40, 240/27) = 8.0px, so even "max"
+ * (1.06x) only reaches ~8.5px -- imperceptible on a screen this size.
+ *
+ * screen.py:load_base_styles() loads styles/base.css as the base
+ * stylesheet, substituting the literal string KS_FONT_SIZE with that
+ * computed px value in the single rule `* { font-size: KS_FONT_SIZEpx; }`.
+ * change_theme() then appends this theme's style.css after base_css, so
+ * this rule (equal specificity, later in cascade) overrides it.
+ *
+ * Because everything else in base.css (padding, min-height, min-width,
+ * etc.) is expressed in em units, bumping this one px value scales
+ * button/row sizing proportionally along with glyph size.
+ *
+ * Chosen value: 14px (~1.65x the ~8.5px effective base) -- picked after
+ * iterating 12/14/16px against live screenshots on the actual 320x240
+ * panel; 14px gives a clearly readable jump without introducing gross
+ * overflow/overlap in the main menu or temperature panels.
+ *
+ * Known caveat (not fixed by this theme): icon/titlebar/action-bar sizing
+ * (img_width/height, titlebar_height, action_bar_width/height,
+ * keyboard_height, etc.) is computed in Python directly off
+ * self.gtk.font_size in KlippyGtk.py, NOT via CSS, so those stay sized for
+ * the original ~8.5px base. This is cosmetic only.
+ *
+ * images/ in this theme folder is a verbatim copy of styles/z-bolt/images
+ * (KlipperScreen's default theme). Themes are looked up by
+ * KlippyGtk._PixbufFromIcon() strictly under styles/<theme>/images/ with NO
+ * fallback to another theme -- a theme folder that ships only style.css
+ * (as this one originally did) silently renders zero icons everywhere
+ * (no exception, no log line). If this theme is ever reinstalled from
+ * scratch, re-copy images/ from z-bolt (or symlink it on the live
+ * filesystem; keep real files in git since symlinks don't survive git
+ * checkout portably across OSes here).
+ *
+ * Regression fixed 2026-07-30: at 14px, the main-menu temperature list
+ * (left panel: Extruder / Heater Bed / OrangePi_CPU rows + graph) got a
+ * vertical scrollbar and truncated device names ("..."). Root cause was
+ * two stacked, unrelated base.css values that don't scale down for this
+ * 320x240 panel:
+ *   - `.heatergraph { min-height: 350px }` (base.css) is a literal px
+ *     floor > the entire screen height, so it out-competes the device
+ *     list for the vertical space GTK's Box layout splits between them.
+ *   - `.heater-grid button { min-height: 2.9em; margin: .2em }` scales
+ *     with our bigger font (2.9em -> ~41px/row), so 3 device rows + the
+ *     header row need ~155px+ that no longer fit alongside the graph.
+ * Fixed below by shrinking both back down, and by giving the name column
+ * (`.graph_label` class on the row's name button, per main_menu.py) an
+ * explicit min-width so it doesn't get starved by GTK splitting leftover
+ * grid width 50/50 between the (short) value column and the (long) name
+ * column -- both columns have hexpand=True in code, and the value button
+ * has no ellipsize, so absent a min-width push the name column ends up
+ * with whatever's left over rather than what long labels like
+ * "OrangePi CPU" actually need.
+ */
+
+* {
+    font-size: 14px;
+}
+
+/* Shrink the mini temperature-history graph on the main menu: base.css's
+ * 350px min-height is nonsensical on a 240px-tall screen and was starving
+ * the device-name/temp list below it of vertical space. ~65px matches
+ * roughly what it was already rendering at in practice. */
+.heatergraph {
+    min-height: 65px;
+}
+
+/* Shrink per-row button sizing in the main-menu temperature list so 3
+ * device rows + header fit without a vertical scrollbar at 14px. */
+.heater-grid button {
+    margin: .05em;
+    min-height: 1.6em;
+    padding: 0 .15em;
+}
+
+/* Guarantee the name column ("Extruder" / "Heater Bed" / "OrangePi CPU")
+ * enough width to render in full instead of getting ellipsized down to
+ * "..." by GTK's 50/50 leftover-space split with the temp-value column. */
+.heater-grid button.graph_label {
+    min-width: 6.5em;
+}

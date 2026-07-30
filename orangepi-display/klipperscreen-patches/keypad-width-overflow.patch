@@ -1,0 +1,19 @@
+diff --git a/ks_includes/widgets/keypad.py b/ks_includes/widgets/keypad.py
+index cbcdaa4..9f9da7a 100644
+--- a/ks_includes/widgets/keypad.py
++++ b/ks_includes/widgets/keypad.py
+@@ -16,6 +16,14 @@ class Keypad(Gtk.Box):
+ 
+         # Header: Entry + Close
+         self.entry = Gtk.Entry(hexpand=True, xalign=0.5, max_length=entry_max)
++        # Without an explicit width-chars, GtkEntry requests a much wider
++        # natural size than its content needs (measured ~165px on this
++        # screen's font/CSS vs. ~60px once bounded), which alone exceeds the
++        # whole keypad's ~150-160px column budget on a 320px-wide display
++        # and pushes the numpad grid off the right edge of the screen. Cap
++        # it to the actual number of characters the field can hold.
++        self.entry.set_width_chars(entry_max)
++        self.entry.set_max_width_chars(entry_max)
+         self.entry.connect("activate", self._on_keypad_clicked, "E")
+ 
+         close_btn = self._gtk.Button("cancel", scale=0.66)

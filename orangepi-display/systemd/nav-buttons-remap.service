@@ -1,0 +1,14 @@
+[Unit]
+Description=Remap nav_buttons (left long-press -> Escape) via uinput
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/nav-buttons-remap.py
+Restart=always
+RestartSec=2
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target

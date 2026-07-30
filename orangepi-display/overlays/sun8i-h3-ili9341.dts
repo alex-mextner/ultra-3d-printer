@@ -1,0 +1,36 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "allwinner,sun8i-h3";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			ili9341_backlight: ili9341_backlight {
+				compatible = "gpio-backlight";
+				gpios = <&pio 0 6 0>; /* PA6, physical pin 7, GPIO_ACTIVE_HIGH */
+				default-on;
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&spi0>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			ili9341: display@0 {
+				compatible = "adafruit,yx240qv29", "ilitek,ili9341";
+				reg = <0>;
+				spi-max-frequency = <32000000>;
+				dc-gpios = <&pio 2 7 0>;    /* PC7, physical pin 18, GPIO_ACTIVE_HIGH */
+				reset-gpios = <&pio 2 4 0>; /* PC4, physical pin 16, GPIO_ACTIVE_HIGH */
+				rotation = <90>;
+				backlight = <&ili9341_backlight>;
+			};
+		};
+	};
+};

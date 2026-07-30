@@ -1,0 +1,54 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "allwinner,sun8i-h3";
+
+	fragment@0 {
+		target = <&pio>;
+		__overlay__ {
+			nav_button_pins: nav_button_pins {
+				pins = "PA7", "PA8", "PA9", "PA10", "PA20";
+				function = "gpio_in";
+				bias-pull-up;
+			};
+		};
+	};
+
+	fragment@1 {
+		target-path = "/";
+		__overlay__ {
+			nav_buttons {
+				compatible = "gpio-keys";
+				pinctrl-names = "default";
+				pinctrl-0 = <&nav_button_pins>;
+
+				button-up {
+					label = "up";
+					linux,code = <108>; /* KEY_DOWN - physically swapped with down, compensated here */
+					gpios = <&pio 0 7 1>; /* PA7, physical pin 29, active-low */
+				};
+				button-down {
+					label = "down";
+					linux,code = <103>; /* KEY_UP - physically swapped with up, compensated here */
+					gpios = <&pio 0 8 1>; /* PA8, physical pin 31, active-low */
+				};
+				button-left {
+					label = "left";
+					linux,code = <105>; /* KEY_LEFT */
+					gpios = <&pio 0 9 1>; /* PA9, physical pin 33, active-low */
+				};
+				button-right {
+					label = "right";
+					linux,code = <106>; /* KEY_RIGHT */
+					gpios = <&pio 0 10 1>; /* PA10, physical pin 35, active-low */
+				};
+				button-center {
+					label = "center";
+					linux,code = <28>; /* KEY_ENTER */
+					gpios = <&pio 0 20 1>; /* PA20, physical pin 37, active-low */
+				};
+			};
+		};
+	};
+};
