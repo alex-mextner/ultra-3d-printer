@@ -1,0 +1,27 @@
+--- a/panels/main_menu.py
++++ b/panels/main_menu.py
+@@ -443,7 +443,23 @@
+         self.labels["devices"].get_style_context().add_class("heater-grid")
+ 
+         name = Gtk.Label()
+-        temp = Gtk.Label(label=_("Temp (°C)"))
++        # Icon-only dashboard rows (2026-07-30, graph-width follow-up): the
++        # full "Temp (°C)" header text is much wider than the actual values
++        # it sits above ("21.4" etc.) -- since this header shares column 1
++        # of this Grid with those value buttons, its own (wide) natural
++        # width was forcing the ENTIRE value column to stay that wide too,
++        # leaving a large dead gap between the short numbers and the graph
++        # that started at column 1's now-unnecessarily-wide right edge.
++        # Shortened to "°C" (still communicates the unit) and capped with
++        # set_size_request -- the same size-locking idiom already used for
++        # the bottom nav row's icon-only buttons above -- so this header can
++        # never re-inflate the column regardless of locale/translation
++        # length. This directly frees the space graph_panel's hexpand=True
++        # (see the "hexpand=False" comment on landscape_left_panel above)
++        # was already set up to claim, but couldn't while this header
++        # anchored column 1's minimum width.
++        temp = Gtk.Label(label=_("°C"))
++        temp.set_size_request(40, -1)
+ 
+         self.labels["devices"].attach(name, 0, 0, 1, 1)
+         self.labels["devices"].attach(temp, 1, 0, 1, 1)
