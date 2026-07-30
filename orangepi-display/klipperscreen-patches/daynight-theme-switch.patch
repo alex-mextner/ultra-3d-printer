@@ -12,7 +12,7 @@
          self.show_cursor = self._config.get_main_config().getboolean("show_cursor", fallback=False)
          self.setup_gtk_settings()
          self.style_provider = Gtk.CssProvider()
-@@ -684,6 +689,138 @@
+@@ -684,6 +689,163 @@
              screen, self.style_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
          )
  
@@ -33,10 +33,35 @@
 +
 +        Off by default on purpose: pulling this code must not silently change
 +        behaviour for anyone who did not ask for the feature.
++
++        NOTHING may escape this method. It runs from __init__, which is BEFORE
++        screen.py's own `if self._config.errors: show_error_modal(); return`
++        guard, and an exception in __init__ becomes RuntimeError -> the unit
++        dies -> three of those hit systemd's StartLimitBurst=3 and the kiosk is
++        black with nothing on screen to explain why. A cosmetic feature must
++        never be able to do that, so the whole body is wrapped.
++
++        This is not hypothetical. KlipperScreen parses configs with a plain
++        ConfigParser, i.e. BasicInterpolation is live, and validate_config only
++        ever reads the VALUE of keys it classifies as numbers/bools -- a `strs`
++        key such as light_theme is never dereferenced during validation. So
++        `light_theme: 100%off` validates fine, gets merged, and then raises
++        InterpolationSyntaxError on the first .get() -- which would be here.
 +        """
-+        conf = self._config.get_main_config()
 +        self._daynight_sun = None
 +        self._daynight_timer_id = None
++        self._daynight_enabled = False
++        self._daynight_light = "big-font-light"
++        self._daynight_dark = "big-font"
++        try:
++            self._daynight_setup()
++        except Exception:
++            logging.exception("daynight: setup failed, automatic theme switching is off")
++            self._daynight_enabled = False
++
++    def _daynight_setup(self):
++        """Real body of _daynight_init(); may raise, the caller swallows it."""
++        conf = self._config.get_main_config()
 +        self._daynight_enabled = conf.getboolean("auto_dark_theme", fallback=False)
 +        self._daynight_light = conf.get("light_theme", fallback="big-font-light")
 +        self._daynight_dark = conf.get("dark_theme", fallback="big-font")
