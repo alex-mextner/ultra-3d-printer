@@ -1,0 +1,1687 @@
+diff --git a/ks_includes/KlippyGtk.py b/ks_includes/KlippyGtk.py
+index 44b1617..8ae0eb1 100644
+--- a/ks_includes/KlippyGtk.py
++++ b/ks_includes/KlippyGtk.py
+@@ -323,13 +323,53 @@ class KlippyGtk:
+         dialog.connect("response", self.screen.lock_screen.reset_timeout)
+         dialog.connect("response", callback, *args)
+         dialog.get_style_context().add_class("dialog")
++        # 2026-07-31 black-background fix, dialog follow-up, part 1 of 2: see
++        # the matching content_area.add_class() below for the full writeup.
++        # Painting content_area alone left a ~1em black ring around it,
++        # confirmed live by pixel-sampling a second screenshot after that fix
++        # ((2,2) was still (0,0,0) while the card interior correctly showed
++        # @bg) -- '.dialog''s own `margin: 1em` (see styles/base.css) creates
++        # a gap between content_area and the dialog window's own edge, and
++        # that gap is painted by the WINDOW's background, which turns out to
++        # be exactly as unpainted as main_grid was. Same class + same @bg
++        # fallback on the dialog itself closes that ring. This does mean the
++        # dialog no longer shows '.dialog''s intended @text-inv "card"
++        # contrast against @bg -- accepted deliberately: that contrast was
++        # never actually visible on this device (the rendering path
++        # painting it was broken from the start), and a uniform @bg dialog
++        # consistent with every other panel beats a black ring around a
++        # correctly-colored card.
++        dialog.get_style_context().add_class("app_dialog_content")
+ 
+         content_area = dialog.get_content_area()
+-        content_area.set_margin_start(10)
+-        content_area.set_margin_end(5)
+-        content_area.set_margin_top(5)
++        # 2026-07-31 black-background fix, dialog follow-up, part 3: these
++        # were set_margin_start(10)/end(5)/top(5)/bottom(0). GTK margins are
++        # empty space OUTSIDE a widget's own painted rectangle -- they come
++        # out of the PARENT's territory, so content_area's background paint
++        # (added below) never reached them, leaving an unpainted ring
++        # exactly this size around the card no matter what CSS class/color
++        # was tried on content_area or on `dialog` itself (confirmed by
++        # pixel-sampling three separate live screenshots, one per attempted
++        # fix). Zeroed out; the equivalent spacing is now CSS padding on
++        # styles/base.css's `.app_dialog_content` instead, which IS inside
++        # the painted rectangle.
++        content_area.set_margin_start(0)
++        content_area.set_margin_end(0)
++        content_area.set_margin_top(0)
+         content_area.set_margin_bottom(0)
+         content_area.add(content)
++        # 2026-07-31 black-background fix, dialog follow-up, part 2 of 2 --
++        # see dialog.get_style_context().add_class() above for the full
++        # writeup (user report, live screenshot of the "Save configuration?"
++        # confirm dialog rendering solid black). content_area is the widget
++        # that actually spans the dialog's visible content area (same idiom
++        # as main_grid inside screen.py's overlay); the class on `dialog`
++        # above covers the '.dialog''s `margin: 1em` ring around it. Both
++        # share styles/base.css's shared background-color rule so this fixes
++        # every KlippyGtk.Dialog() caller (Save Config, PID Calibrate
++        # confirm, every _confirm_send_action) without touching either
++        # theme file.
++        content_area.get_style_context().add_class("app_dialog_content")
+ 
+         dialog.show_all()
+         # Change cursor to blank
+diff --git a/ks_includes/config.py b/ks_includes/config.py
+index 9eddbf8..3f275de 100644
+--- a/ks_includes/config.py
++++ b/ks_includes/config.py
+@@ -202,6 +202,9 @@ class KlipperScreenConfig:
+                     "auto_open_extrude",
+                     "start_locked",
+                     "keyboard_navigation",
++                    # day/night theme switching, see
++                    # orangepi-display/klipperscreen-patches/README.md
++                    "auto_dark_theme",
+                 )
+                 strs = (
+                     "default_printer",
+@@ -217,6 +220,8 @@ class KlipperScreenConfig:
+                     "print_view",
+                     "lock_password",
+                     "side_shortcut_target",
++                    "light_theme",
++                    "dark_theme",
+                 )
+                 numbers = (
+                     "job_complete_timeout",
+@@ -228,6 +233,8 @@ class KlipperScreenConfig:
+                     "height",
+                     "autolock_timeout",
+                     "screensaver_wake_delay",
++                    "latitude",
++                    "longitude",
+                 )
+             elif section.startswith("printer "):
+                 bools = (
+diff --git a/ks_includes/widgets/heatergraph.py b/ks_includes/widgets/heatergraph.py
+index d1118f9..b2412d5 100644
+--- a/ks_includes/widgets/heatergraph.py
++++ b/ks_includes/widgets/heatergraph.py
+@@ -26,7 +26,20 @@ class HeaterGraph(Gtk.DrawingArea):
+         self.connect("button_press_event", screen.screensaver.reset_timeout)
+         self.connect("button_press_event", screen.lock_screen.reset_timeout)
+         self.connect("button_release_event", self.event_cb)
+-        self.font_size = round(font_size * 0.75)
++        # GH issue #5: this used to be `round(font_size * 0.75)`. `font_size`
++        # here is KlippyGtk's internal ~8px layout baseline (screen_px /
++        # font_ratio), NOT the theme's `* { font-size: 14px }` CSS override --
++        # raw Cairo text (ctx.set_font_size below) never consults CSS at all,
++        # so the old formula rendered axis labels at ~6px against 14px body
++        # text everywhere else. Bumped the multiplier so axis text is clearly
++        # legible; draw_graph/graph_lines/graph_time below were reworked to
++        # size margins from actually-measured text extents (instead of a
++        # flat per-character guess) and to skip x-axis time labels that would
++        # overlap, so the bigger font fits the now-narrow (~77px) dashboard
++        # graph without crowding out the trend line or smearing timestamps
++        # together. See orangepi-display/klipperscreen-patches/ for the
++        # measured before/after numbers.
++        self.font_size = round(font_size * 1.3)
+         self.fullscreen = fullscreen
+         if fullscreen:
+             GLib.timeout_add_seconds(1, self.update_graph)
+@@ -89,9 +102,26 @@ class HeaterGraph(Gtk.DrawingArea):
+         success, color = style_context.lookup_color("lines")
+         if not success:
+             color = Gdk.RGBA(0.5, 0.5, 0.5, 1.0)
+-        x = round(self.font_size * 2.75)
++        # Left margin sized to fit the widest possible y-axis label ("999",
++        # self.max_temp is capped there in __init__) at the *actual* font in
++        # use, instead of the old flat `font_size * 2.75` guess -- that guess
++        # was tuned for the old ~6px font and didn't scale correctly (or
++        # tightly) once the font got bigger. Set the font here (once) so this
++        # measurement and every show_text() below use the same size.
++        ctx.set_font_size(self.font_size)
++        # x_advance (index 4), not ink-only "width" (index 2) -- see the
++        # identical note in graph_time below for why ink width under-
++        # measures the space text actually needs.
++        label_margin = ctx.text_extents("999")[4]
++        x = round(6 + label_margin + 4)
+         y = 10
+-        width = da.get_allocated_width() - 15
++        # Right margin: was a flat 15px, cheap on the old wide graph but a
++        # relatively big bite (~20%) out of the plot once the dashboard
++        # redesign narrowed this widget to ~77px total. graph_time's clamp
++        # (see below) keeps the rightmost x-axis label from ever running
++        # past gsize[1][0] regardless of this value, so shrinking the
++        # margin hands a few more pixels back to the trend line safely.
++        width = da.get_allocated_width() - 8
+         height = da.get_allocated_height() - self.font_size * 2
+         gsize = [[x, y], [width, height]]
+ 
+@@ -196,6 +226,20 @@ class HeaterGraph(Gtk.DrawingArea):
+         font_size_multiplier = round(self.font_size * 1.5)
+         ctx.set_font_size(self.font_size)
+ 
++        # GH issue #5: at the bigger font above, ticks on a narrow graph sit
++        # closer together than the label text itself is wide -- drawing
++        # every one of them unconditionally is exactly what produced the
++        # illegible smeared timestamps in the original bug report. Instead,
++        # track the left edge of the most recently drawn label (scanning
++        # right-to-left, i.e. newest-to-oldest) and skip drawing the text
++        # for any tick whose label would overlap it -- the gridline itself
++        # is still drawn every tick, only the text is thinned out. On a wide
++        # graph (e.g. the full temperature.py panel) most/all labels still
++        # fit and still get drawn; on this ~77px dashboard graph this
++        # naturally reduces to just the most recent timestamp, which is the
++        # honest amount of room available.
++        min_label_left = math.inf
++
+         i = 0
+         while True:
+             x = first - i * steplen
+@@ -206,11 +250,37 @@ class HeaterGraph(Gtk.DrawingArea):
+             ctx.line_to(x, gsize[1][1])
+             ctx.stroke()
+ 
+-            ctx.set_source_rgb(color.red, color.green, color.blue)
+-            ctx.move_to(x - font_size_multiplier, gsize[1][1] + font_size_multiplier)
+-
+-            ctx.show_text(f"{now - datetime.timedelta(minutes=2) * i:%H:%M}")
+-            ctx.stroke()
++            label = f"{now - datetime.timedelta(minutes=2) * i:%H:%M}"
++            # x_advance (index 4), not the ink-only "width" (index 2) --
++            # width excludes each glyph's left-side bearing, so using it
++            # under-measures how far the rendered text actually reaches and
++            # left too small a real gap between adjacent labels (confirmed
++            # live: two labels rendered touching with zero visible gap in
++            # the fullscreen dialog even though the "+gap" check below
++            # should have caught it with the ink-only width).
++            label_w = ctx.text_extents(label)[4]
++            # Minimum gap between adjacent labels scales with font size --
++            # a flat 4px reads as a visible gap at ~10px font but as no gap
++            # at all at the much bigger font `show_fullscreen_graph` ends up
++            # with (it re-enters this same constructor with `font_size * 2`,
++            # and the 0.75->1.3 multiplier bump compounds through that
++            # second pass more than the old 0.75 did).
++            gap = max(4, round(self.font_size * 0.4))
++            # Clamp so the label's right edge never overruns the plot's
++            # right edge. `x` for i=0 ("now") drifts within the 120s window
++            # (up to ~6px on this graph, more on the 2x fullscreen dialog)
++            # and can land close enough to the right edge that the
++            # unclamped position runs the text off the visible area --
++            # confirmed live in the fullscreen dialog, where "18:30" was
++            # rendering as a clipped "18:3" before this clamp.
++            label_left = min(x - font_size_multiplier, gsize[1][0] - label_w)
++            label_right = label_left + label_w
++            if label_right + gap <= min_label_left:
++                ctx.set_source_rgb(color.red, color.green, color.blue)
++                ctx.move_to(label_left, gsize[1][1] + font_size_multiplier)
++                ctx.show_text(label)
++                ctx.stroke()
++                min_label_left = label_left
+             i += 1 + self.printer.get_tempstore_size() // 601
+ 
+     def is_showing(self, device):
+diff --git a/ks_includes/widgets/keypad.py b/ks_includes/widgets/keypad.py
+index cbcdaa4..9f9da7a 100644
+--- a/ks_includes/widgets/keypad.py
++++ b/ks_includes/widgets/keypad.py
+@@ -16,6 +16,14 @@ class Keypad(Gtk.Box):
+ 
+         # Header: Entry + Close
+         self.entry = Gtk.Entry(hexpand=True, xalign=0.5, max_length=entry_max)
++        # Without an explicit width-chars, GtkEntry requests a much wider
++        # natural size than its content needs (measured ~165px on this
++        # screen's font/CSS vs. ~60px once bounded), which alone exceeds the
++        # whole keypad's ~150-160px column budget on a 320px-wide display
++        # and pushes the numpad grid off the right edge of the screen. Cap
++        # it to the actual number of characters the field can hold.
++        self.entry.set_width_chars(entry_max)
++        self.entry.set_max_width_chars(entry_max)
+         self.entry.connect("activate", self._on_keypad_clicked, "E")
+ 
+         close_btn = self._gtk.Button("cancel", scale=0.66)
+diff --git a/panels/base_panel.py b/panels/base_panel.py
+index 0f43fde..f66b7c4 100644
+--- a/panels/base_panel.py
++++ b/panels/base_panel.py
+@@ -76,14 +76,48 @@ class BasePanel(ScreenPanel):
+             self.control[item].connect("clicked", self._screen.remove_keyboard)
+ 
+         # Action bar
++        # 2026-07-31 gap-tightening: in the landscape/non-vertical layout,
++        # _build_main_grid() makes this Box VERTICAL with vexpand=True,
++        # spanning the full ~212px content height -- and every one of the
++        # (usually 4 of 6, since printer_select/estop are hidden by default)
++        # VISIBLE icons was being handed an equal, large share of that
++        # height and centering its ~30px icon inside it. That's what
++        # produced the huge blank gaps between back/home/notification-bell/
++        # power in the sidebar (confirmed live via screenshot: icons ended
++        # up evenly spaced ~62px apart on a 212px-tall column with only 4
++        # visible -- (211-27)/3 = 61.3, i.e. plain equal-space distribution,
++        # not content-driven sizing).
++        #
++        # First attempt -- switching Gtk.Box.add() (expand=True, fill=True,
++        # GTK3's default child packing) to pack_start(child, False, False,
++        # 0) -- measured LIVE as having ZERO effect (identical icon Y
++        # positions before/after, confirmed via a pixel-column luminance
++        # scan of both screenshots). Root cause: GtkBox's real per-child
++        # expand decision is `pack_expand OR
++        # gtk_widget_compute_expand(child)` -- it ORs the pack-time flag
++        # with the CHILD WIDGET's own computed vexpand, not just the
++        # pack-time flag alone. self._gtk.Button() sets `vexpand=True`
++        # unconditionally in its Gtk.Button(...) constructor call
++        # (ks_includes/KlippyGtk.py), so every one of these six buttons
++        # still reported vexpand=True regardless of the pack_start argument,
++        # and Box kept expanding them. Fixed by explicitly forcing
++        # set_vexpand(False) on each control button here -- that's what
++        # actually stops gtk_widget_compute_expand() from returning True,
++        # so pack_start's False finally has an effect and each button
++        # claims only its natural size. The `spacing=5` constructor arg
++        # above is then what actually separates them (a small, real, fixed
++        # gap) -- leftover height goes unused at the bottom of the bar
++        # instead of being smeared between icons.
++        for _ctrl_name in ("back", "home", "printer_select", "shortcut", "estop", "shutdown"):
++            self.control[_ctrl_name].set_vexpand(False)
+         self.action_bar = Gtk.Box(spacing=5)
+         self.action_bar.get_style_context().add_class("action_bar")
+-        self.action_bar.add(self.control["back"])
+-        self.action_bar.add(self.control["home"])
+-        self.action_bar.add(self.control["printer_select"])
+-        self.action_bar.add(self.control["shortcut"])
+-        self.action_bar.add(self.control["estop"])
+-        self.action_bar.add(self.control["shutdown"])
++        self.action_bar.pack_start(self.control["back"], False, False, 0)
++        self.action_bar.pack_start(self.control["home"], False, False, 0)
++        self.action_bar.pack_start(self.control["printer_select"], False, False, 0)
++        self.action_bar.pack_start(self.control["shortcut"], False, False, 0)
++        self.action_bar.pack_start(self.control["estop"], False, False, 0)
++        self.action_bar.pack_start(self.control["shutdown"], False, False, 0)
+         self.show_printer_select(len(self._config.get_printers()) > 1)
+ 
+         # Titlebar
+@@ -130,6 +164,16 @@ class BasePanel(ScreenPanel):
+ 
+         # Main layout
+         self.main_grid = Gtk.Grid()
++        # 2026-07-31 black-background fix: main_grid is the sole overlay child
++        # of screen.py's Gtk.Overlay and (confirmed live via
++        # GtkStyleContext.get_property(background-color)) gets its own separate
++        # GdkWindow that starts fully transparent (rgba 0,0,0,0), unlike the
++        # toplevel window which correctly resolves @bg. With no compositor
++        # running (raw X11/DRM), that transparent surface renders as solid
++        # black instead of showing the toplevel window bg through it -- this is
++        # the actual black-background-behind-buttons bug. Explicit class so
++        # base.css can paint @bg on it directly.
++        self.main_grid.get_style_context().add_class("main_grid")
+         self._build_main_grid()
+ 
+         self.update_time()
+diff --git a/panels/console.py b/panels/console.py
+index 7101a53..81b0bf6 100644
+--- a/panels/console.py
++++ b/panels/console.py
+@@ -43,9 +43,27 @@ class Panel(ScreenPanel):
+         options.attach(o2_button, 1, 0, 1, 1)
+ 
+         sw = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
++        # 2026-07-31 overflow fix (user report, live screenshot): Gtk.TextView
++        # defaults to Gtk.WrapMode.NONE, so any gcode response/echo line wider
++        # than the 320px screen (e.g. "Must home axis first: 25.000000...")
++        # just ran off the right edge with no way to read the rest -- the
++        # ScrolledWindow's horizontal scrollbar defaults to overlay mode on
++        # this theme (see main-menu-single-column.patch's
++        # set_overlay_scrolling(True) discussion) and auto-hides, and there is
++        # no touchscreen/mouse on this kiosk to hover-then-drag it into view,
++        # so the clipped tail was permanently unreachable, not just visually
++        # tight. WORD_CHAR wraps normally on word boundaries but still breaks
++        # a single unbroken run of characters if needed (long numbers/paths),
++        # matching the same mode already used for Notifications
++        # (hanging-indent-notifications.patch). NEVER on the horizontal
++        # scrollbar policy removes the now-pointless empty affordance and
++        # guarantees wrapping is what actually happens instead of a
++        # zero-height scroll range some GTK versions could substitute.
++        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+ 
+         tb = Gtk.TextBuffer()
+         tv = Gtk.TextView(buffer=tb, editable=False, cursor_visible=False)
++        tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+         tv.connect("size-allocate", self._autoscroll)
+         tv.connect("touch-event", self._screen.remove_keyboard)
+         tv.connect("button-press-event", self._screen.remove_keyboard)
+diff --git a/panels/extrude.py b/panels/extrude.py
+index 858ea24..fb24386 100644
+--- a/panels/extrude.py
++++ b/panels/extrude.py
+@@ -138,14 +138,26 @@ class Panel(ScreenPanel):
+                 ctx.add_class("horizontal_togglebuttons_active")
+             speedgrid.attach(self.labels[f"speed{i}"], j, 0, 1, 1)
+ 
+-        distbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        # 2026-07-31 gap-tightening: distbox/speedbox are VERTICAL Boxes with
++        # only two children each (a caption Label + the value-button Grid).
++        # Both were packed with expand=True (pack_start's 2nd arg / the
++        # implicit default used by Box.add()), so any extra vertical space
++        # this grid row is handed by the parent gets split between the
++        # caption label and the button grid -- and since a GtkLabel's own
++        # valign defaults to fill, that extra space renders as blank
++        # padding above/below the "Distance (mm)"/"Speed (mm/s)" text and
++        # around the button row, not anything visually useful. expand=False
++        # on both children, plus vexpand=False on the Box itself, makes each
++        # Box (and this grid row, since nothing else in it still asks for
++        # vexpand) size to its actual natural content height instead.
++        distbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=False)
+         self.labels["extrude_dist"] = Gtk.Label(_("Distance (mm)"))
+-        distbox.pack_start(self.labels["extrude_dist"], True, True, 0)
+-        distbox.add(distgrid)
+-        speedbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        distbox.pack_start(self.labels["extrude_dist"], False, False, 0)
++        distbox.pack_start(distgrid, False, False, 0)
++        speedbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=False)
+         self.labels["extrude_speed"] = Gtk.Label(_("Speed (mm/s)"))
+-        speedbox.pack_start(self.labels["extrude_speed"], True, True, 0)
+-        speedbox.add(speedgrid)
++        speedbox.pack_start(self.labels["extrude_speed"], False, False, 0)
++        speedbox.pack_start(speedgrid, False, False, 0)
+ 
+         filament_sensors = self._printer.get_filament_sensors()
+         sensors = Gtk.Grid(valign=Gtk.Align.CENTER, row_spacing=5, column_spacing=5)
+diff --git a/panels/fine_tune.py b/panels/fine_tune.py
+index a47bf4c..e23c050 100644
+--- a/panels/fine_tune.py
++++ b/panels/fine_tune.py
+@@ -64,7 +64,24 @@ class Panel(ScreenPanel):
+             if i == self.e_delta:
+                 ctx.add_class("horizontal_togglebuttons_active")
+             extgrid.attach(self.labels[f"edelta{i}"], j, 0, 1, 1)
+-        grid = Gtk.Grid(column_homogeneous=True)
++        # 2026-07-31 overflow fix (user report, live screenshot): landscape
++        # mode's 3 columns (Z / Speed / Extrude) don't span each other here
++        # (each column's cells are single-span, unlike the temperature-panel
++        # bug from earlier tonight), but column_homogeneous=True still forces
++        # all 3 to match the single widest button anywhere in the grid --
++        # "  0.000mm" on the Z-offset button, min/natural 100px. 3 * 100 =
++        # 300px against a real ~284px budget (320px screen - ~36px sidebar),
++        # confirmed live (get_allocation(), since removed): grid allocated
++        # exactly 300px starting at x=36, i.e. ending at x=336, 16px past the
++        # physical screen -- and unlike most other panels tonight, THIS one
++        # has no ScrolledWindow at all (self.content.add(grid) directly), so
++        # that overflow wasn't reachable by any scroll, not even an
++        # inaccessible one. column_homogeneous=False lets each column size to
++        # its own actual content instead: Z (~100px, still driven by
++        # "0.000mm"), Speed (~73px, "Speed +" is the longest cell there),
++        # Extrude (~94px, "Extrusion +"/"Extrusion -") -- total ~267px,
++        # comfortably inside the real budget with room to spare.
++        grid = Gtk.Grid(column_homogeneous=False)
+ 
+         self.labels["z+"] = self._gtk.Button("z-farther", "Z+", "color1")
+         self.labels["z-"] = self._gtk.Button("z-closer", "Z-", "color1")
+diff --git a/panels/main_menu.py b/panels/main_menu.py
+index f702390..7a93978 100644
+--- a/panels/main_menu.py
++++ b/panels/main_menu.py
+@@ -15,14 +15,36 @@ class Panel(MenuPanel):
+     def __init__(self, screen, title, items=None):
+         super().__init__(screen, title, items)
+         self.left_panel = None
++        self.graph_panel = None
+         self.devices = {}
+         self.graph_update = None
+         self.active_heater = None
+         self.h = self.f = 0
++        # Layout (2026-07-30, dashboard redesign): landscape (non-vertical)
++        # mode now uses a 2x2 main_menu Grid -- row 0 is the temp device
++        # list (left) + heater graph (right, "top-right" per explicit user
++        # request), row 1 is a single edge-to-edge row of icon-only nav
++        # buttons spanning both columns. See the `else` branch below and
++        # _build_button_row(). column_homogeneous=True splits row 0 evenly
++        # between the device list and the graph. row_homogeneous starts
++        # True (needed by the vertical_mode branch's 5-equal-row split) and
++        # is set False for the landscape branch so the short button row
++        # isn't stretched to match the tall top row.
+         self.main_menu = Gtk.Grid(
+             row_homogeneous=True, column_homogeneous=True, hexpand=True, vexpand=True
+         )
+         self.menu_scroll = self._gtk.ScrolledWindow()
++        # Overlay scrolling (2026-07-30, part of the Print-button fix): a
++        # non-overlay GTK scrollbar reserves real layout width (measured at
++        # ~47px for this theme's 14px font -- base.css `scrollbar slider {
++        # min-width: 2.5em}` -- see main-menu-single-column.patch/README for
++        # the full chain). On this pane's ~100px budget that would nearly halve
++        # the width actually available to the menu buttons themselves.
++        # Overlay mode draws the scrollbar on top of the content instead of
++        # beside it, so it costs no layout width; it still auto-hides when
++        # not scrolling/hovering, which is fine on a D-pad-only device with
++        # no persistent mouse hover anyway.
++        self.menu_scroll.set_overlay_scrolling(True)
+         self.numpad_visible = False
+ 
+         logging.info("### Making MainMenu")
+@@ -36,14 +58,128 @@ class Panel(MenuPanel):
+             self.menu_scroll.add(self.labels["menu"])
+             self.main_menu.attach(self.menu_scroll, 0, 3, 1, 2)
+         else:
+-            self.main_menu.attach(self.create_left_panel(), 0, 0, 1, 1)
+-            self.labels["menu"] = self.arrangeMenuItems(items, 2, True)
+-            self.menu_scroll.add(self.labels["menu"])
+-            self.main_menu.attach(self.menu_scroll, 1, 0, 1, 1)
++            # row_homogeneous=False (2026-07-30 dashboard redesign): this
++            # Grid now has 2 rows in landscape mode too (top: device list +
++            # graph, bottom: the nav button row) -- False lets the short
++            # button row take only the height it needs instead of being
++            # forced to match the tall top row.
++            self.main_menu.set_row_homogeneous(False)
++            # column_homogeneous=False (2026-07-30, ROOT CAUSE of the
++            # button-row overflow, found via on-device GTK widget-width
++            # debug logging -- see orangepi-display/klipperscreen-patches/
++            # for the exact numbers): the device-list column (heater-grid)
++            # has a CSS `min-width: 6.5em` on its name column (so
++            # "OrangePi CPU" doesn't truncate), giving that column a hard
++            # GTK minimum width of ~205px. With column_homogeneous left
++            # True (the constructor default, needed by vertical_mode's
++            # single-column case where it's a no-op), Gtk.Grid forces BOTH
++            # columns to match that 205px minimum -- so main_menu's overall
++            # minimum width became 410px against a real ~288px budget
++            # (320px screen minus the ~32px action-bar sidebar), and GTK
++            # allocates the full 410px anyway rather than violate the
++            # min-width contract, overflowing off the right edge of the
++            # physical 320px display. The button row spans both columns
++            # (column-span=2) so it inherited that same inflated 410px
++            # width no matter how small the buttons themselves were sized
++            # (confirmed: capping each button's own size_request to 46px
++            # had zero effect on the actual allocated row width -- the
++            # inflation came entirely from column 0, not from the row).
++            # False lets column 0 take only the ~205px the device list
++            # actually needs and column 1 (graph) take the rest, so
++            # main_menu's total naturally fits inside the real budget and
++            # the button row (still spanning both columns) is allocated
++            # its correct ~288px full width instead.
++            self.main_menu.set_column_homogeneous(False)
++            # column_spacing=14 (2026-07-30, gap-tightening follow-up): the
++            # explicit gap between the device-list column and the graph
++            # column, per user-specified target (~12-16px). Set directly on
++            # this Grid rather than via CSS margin/padding tricks -- Gtk.Grid
++            # column-spacing is a single authoritative px value between
++            # adjacent columns, immune to the em-based CSS sizing quirks
++            # that caused several earlier bugs tonight on this same screen.
++            self.main_menu.set_column_spacing(14)
++            landscape_left_panel = self.create_left_panel()
++            # hexpand=False here (2026-07-30, graph-width fix): the device
++            # list's own minimum is a hard ~205px (CSS min-width on the
++            # name column so "OrangePi CPU" doesn't truncate -- see the
++            # column_homogeneous comment above). With hexpand left True,
++            # Gtk.Grid split the small leftover surplus (~77px of the
++            # ~282px budget) evenly between this column and the graph
++            # column, so the device list grabbed most of it anyway (ending
++            # up ~243px) and the graph was squeezed to a barely-visible
++            # ~39px sliver (confirmed via the widget-width debug log).
++            # False pins this column to its natural ~205px and hands the
++            # entire surplus to graph_panel (still hexpand=True below),
++            # roughly doubling the graph's width to ~77-80px -- still
++            # narrow on a 320px screen, but a real, readable trend graph
++            # rather than a sliver.
++            landscape_left_panel.set_hexpand(False)
++            self.main_menu.attach(landscape_left_panel, 0, 0, 1, 1)
++            self.graph_panel = Gtk.Box(
++                orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True
++            )
++            self.main_menu.attach(self.graph_panel, 1, 0, 1, 1)
++
++            # Bottom nav row (2026-07-30 dashboard redesign, per explicit
++            # user request): all 5 items in a single edge-to-edge row
++            # spanning both columns, icons only (no text labels) so they
++            # actually fit on a 320px-wide screen. arrangeMenuItems()/
++            # AutoGrid can't produce this -- AutoGrid hardcodes 3 columns
++            # for a 5-item list regardless of the max_columns argument (see
++            # the `length in {3, 5, 6}` branch in
++            # ks_includes/widgets/autogrid.py) -- so a plain Gtk.Grid is
++            # built by hand via _build_button_row() instead.
++            self.labels["menu"] = self._build_button_row(items)
++            self.labels["menu"].set_vexpand(False)
++            # Icon-only + width-capped (2026-07-30, overflow fix): hide each
++            # button's text label (kept in the tree, just hidden, so
++            # keyboard nav/highlight/click are unaffected) AND force a
++            # small explicit size via set_size_request(). Hiding the label
++            # alone was NOT enough -- these Button widgets are the same
++            # objects menu.py built for the single-column vertical menu
++            # (~270px wide, image_position=TOP, icon+label stacked), and a
++            # hidden label doesn't shrink the button's own reported
++            # min/natural size back down. Result, verified on-device: 5 of
++            # them side by side overflowed the 320px screen (screenshot
++            # showed only ~3.5 of 5 buttons, the rest clipped past the
++            # right edge). set_size_request() overrides both the minimum
++            # AND natural size GTK uses during layout, so it reliably caps
++            # each button regardless of what its (now-hidden) internal
++            # content would otherwise ask for. 46x40px per button x 5 (+
++            # small CSS margins) fits comfortably inside the ~282px
++            # available (320px screen minus the ~38px fixed left sidebar).
++            for _child in self.labels["menu"].get_children():
++                _lbl = find_widget(_child, Gtk.Label)
++                if _lbl is not None:
++                    _lbl.set_no_show_all(True)
++                    _lbl.hide()
++                _child.set_size_request(46, 40)
++            self.main_menu.attach(self.labels["menu"], 0, 1, 2, 1)
+         self.content.add(self.main_menu)
+ 
++    def _build_button_row(self, items):
++        """Lay out `items` as a single homogeneous row spanning full width.
++
++        Stand-in for arrangeMenuItems()/AutoGrid for this one case (see the
++        comment at the call site): a plain Gtk.Grid with one row and one
++        column per enabled item, all equally sized and expanding to fill
++        the available width edge-to-edge.
++        """
++        enabled = []
++        for item in items:
++            key = list(item)[0]
++            if not self.evaluate_enable(item[key]["enable"]):
++                continue
++            if item[key]["panel"] and self._is_shortcut_item(item[key]):
++                continue
++            enabled.append(self.labels[key])
++        row = Gtk.Grid(row_homogeneous=True, column_homogeneous=True, hexpand=True, vexpand=False)
++        for i, widget in enumerate(enabled):
++            row.attach(widget, i, 0, 1, 1)
++        return row
++
+     def update_graph_visibility(self, force_hide=False):
+-        if self.left_panel is None:
++        if self.left_panel is None or self.graph_panel is None:
+             logging.info("No left panel")
+             return
+         count = 0
+@@ -59,15 +195,15 @@ class Panel(MenuPanel):
+             else:
+                 self.devices[device]["name"].get_style_context().remove_class("graph_label")
+         if count > 0 and not force_hide:
+-            if self.labels["da"] not in self.left_panel:
+-                self.left_panel.add(self.labels["da"])
++            if self.labels["da"] not in self.graph_panel:
++                self.graph_panel.add(self.labels["da"])
+             self.labels["da"].queue_draw()
+             self.labels["da"].show()
+             if self.graph_update is None:
+                 # This has a high impact on load
+                 self.graph_update = GLib.timeout_add_seconds(5, self.update_graph)
+-        elif self.labels["da"] in self.left_panel:
+-            self.left_panel.remove(self.labels["da"])
++        elif self.labels["da"] in self.graph_panel:
++            self.graph_panel.remove(self.labels["da"])
+             if self.graph_update is not None:
+                 GLib.source_remove(self.graph_update)
+                 self.graph_update = None
+@@ -134,12 +270,60 @@ class Panel(MenuPanel):
+         if self._show_heater_power and self._printer.device_has_power(device):
+             self.labels["da"].add_object(device, "powers", rgb, True, False)
+ 
+-        name = self._gtk.Button(
+-            image, self.prettify(devname), None, self.bts, Gtk.PositionType.LEFT, 1
+-        )
++        # Icon-only (2026-07-30, dashboard icon-only pass): drop the name
++        # TEXT entirely (label=None) rather than building it with a label
++        # and hiding that afterwards -- KlippyGtk.Button() already treats
++        # label=None as "pure icon button" (skips set_label()/format_label()
++        # altogether), and that's the SAME idiom already used elsewhere in
++        # this exact codebase for icon-only buttons (base_panel.py's
++        # back/home/estop/shutdown/printer_select sidebar buttons; bed_mesh.
++        # py's save/delete row: `self._gtk.Button("complete", None, "color4",
++        # self.bts)`) -- not a new pattern invented here.
++        #
++        # Scale: Button() bumps whatever `scale` is passed by 1.4x
++        # internally whenever label is None (icon-only buttons render
++        # bigger since there's no label sharing the box with the image --
++        # see KlippyGtk.Button: `if label is None: scale = scale * 1.4`).
++        # Dividing button_image_scale by that same 1.4 here cancels the
++        # bump back out, landing on the exact same rendered pixel size
++        # (button_image_scale=1.38 -> width=height=img_scale*1.38 ~= 22px
++        # on this screen's img_scale=16) as the bottom nav row's icon-only
++        # buttons (panels/menu.py's create_menu_items -> self._gtk.Button
++        # (icon, name, style, scale=None) -> falls back to the same
++        # button_image_scale since a label IS passed there, no 1.4 bump on
++        # that side) -- per explicit user request to match that size.
++        icon_scale = self._gtk.button_image_scale / 1.4
++        name = self._gtk.Button(image, None, None, icon_scale, Gtk.PositionType.LEFT, 1)
+         name.connect("clicked", self.toggle_visibility, device)
+         name.set_alignment(0, 0.5)
++        # set_size_request (2026-07-30, gap-tightening follow-up): the
++        # `name_icon_only` CSS min-width (2.3em) turned out to undershoot --
++        # live GTK measurement (DBG_WIDTH log) showed this button's actual
++        # natural width is 44px, not the ~32px the CSS comment assumed,
++        # because the icon glyph itself (~22px, left-aligned via
++        # set_alignment above) doesn't fill that whole cell -- the
++        # left-border/padding/GTK-button-chrome account for the rest, but
++        # the icon sits flush-left, leaving ~20px of dead space at the
++        # RIGHT of its own cell, before column_spacing (set on this Grid,
++        # see create_left_panel) even applies. That dead space, not the
++        # column_spacing value, was the dominant visible gap. Locking this
++        # button to a tight 30px overrides both CSS min-width and GTK's own
++        # natural-size calculation (same technique already proven for the
++        # bottom nav row's icon-only buttons and the "°C" header above) so
++        # the icon's cell hugs its actual content.
++        name.set_size_request(26, -1)
+         name.get_style_context().add_class(class_name)
++        # Marker class (2026-07-30): lets CSS give THIS (icon-only) button a
++        # much narrower min-width floor than temperature.py's own device
++        # list, which keeps full name text and still needs the original
++        # wide floor -- see the theme stylesheets' own comment on
++        # `name_icon_only` for why this has to be a new class rather than
++        # editing the shared `.heater-grid button.graph_label` rule in
++        # place (that rule is also used, unmodified, by panels/temperature.
++        # py's separate add_device()/create_left_panel(), which still shows
++        # full device names and would truncate them if the floor shrank
++        # globally).
++        name.get_style_context().add_class("name_icon_only")
+         visible = self._config.get_config().getboolean(
+             f"graph {self._screen.state.printer_name}", device, fallback=True
+         )
+@@ -235,10 +419,31 @@ class Panel(MenuPanel):
+ 
+     def create_left_panel(self):
+         self.labels["devices"] = Gtk.Grid(vexpand=False)
++        # column_spacing=6 (2026-07-30, gap-tightening follow-up): explicit
++        # gap between the icon column and the value column, per
++        # user-specified target (~4-8px) -- same rationale/technique as
++        # main_menu's own column_spacing set just above.
++        self.labels["devices"].set_column_spacing(4)
+         self.labels["devices"].get_style_context().add_class("heater-grid")
+ 
+         name = Gtk.Label()
+-        temp = Gtk.Label(label=_("Temp (°C)"))
++        # Icon-only dashboard rows (2026-07-30, graph-width follow-up): the
++        # full "Temp (°C)" header text is much wider than the actual values
++        # it sits above ("21.4" etc.) -- since this header shares column 1
++        # of this Grid with those value buttons, its own (wide) natural
++        # width was forcing the ENTIRE value column to stay that wide too,
++        # leaving a large dead gap between the short numbers and the graph
++        # that started at column 1's now-unnecessarily-wide right edge.
++        # Shortened to "°C" (still communicates the unit) and capped with
++        # set_size_request -- the same size-locking idiom already used for
++        # the bottom nav row's icon-only buttons above -- so this header can
++        # never re-inflate the column regardless of locale/translation
++        # length. This directly frees the space graph_panel's hexpand=True
++        # (see the "hexpand=False" comment on landscape_left_panel above)
++        # was already set up to claim, but couldn't while this header
++        # anchored column 1's minimum width.
++        temp = Gtk.Label(label=_("°C"))
++        temp.set_size_request(40, -1)
+ 
+         self.labels["devices"].attach(name, 0, 0, 1, 1)
+         self.labels["devices"].attach(temp, 1, 0, 1, 1)
+@@ -250,7 +455,7 @@ class Panel(MenuPanel):
+         scroll.get_style_context().add_class("heater-list")
+         scroll.add(self.labels["devices"])
+ 
+-        self.left_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        self.left_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
+         self.left_panel.add(scroll)
+ 
+         for d in self._printer.get_temp_devices():
+@@ -272,8 +477,13 @@ class Panel(MenuPanel):
+             self.main_menu.attach(top, 0, 0, 1, 3)
+             self.main_menu.attach(self.menu_scroll, 0, 3, 1, 2)
+         else:
+-            self.main_menu.remove_column(1)
+-            self.main_menu.attach(self.menu_scroll, 1, 0, 1, 1)
++            # Landscape numpad takes over the whole main_menu area (both
++            # rows/columns) rather than just one column -- see show_numpad
++            # for why. Restore the 3 normal widgets to their cells.
++            self.main_menu.remove(self.labels["keypad"])
++            self.main_menu.attach(self.left_panel, 0, 0, 1, 1)
++            self.main_menu.attach(self.graph_panel, 1, 0, 1, 1)
++            self.main_menu.attach(self.labels["menu"], 0, 1, 2, 1)
+         self.main_menu.show_all()
+         self.numpad_visible = False
+         self._screen.base_panel.set_control_sensitive(False, control="back")
+@@ -332,8 +542,15 @@ class Panel(MenuPanel):
+             self.main_menu.attach(top, 0, 0, 1, 2)
+             self.main_menu.attach(self.labels["keypad"], 0, 2, 1, 2)
+         else:
+-            self.main_menu.remove_column(1)
+-            self.main_menu.attach(self.labels["keypad"], 1, 0, 1, 1)
++            # This landscape layout has 3 widgets in a 2x2 grid (device
++            # list top-left, graph top-right, button row spanning the
++            # bottom) and the keypad needs more room than any single one
++            # of those cells -- so it replaces all of them, spanning the
++            # whole main_menu area, rather than swapping in for just one
++            # column like the old 1x2 layout did.
++            for child in list(self.main_menu.get_children()):
++                self.main_menu.remove(child)
++            self.main_menu.attach(self.labels["keypad"], 0, 0, 2, 2)
+         self.main_menu.show_all()
+         self.numpad_visible = True
+         self._screen.base_panel.set_control_sensitive(True, control="back")
+diff --git a/panels/move.py b/panels/move.py
+index 81e1248..e27b5fb 100644
+--- a/panels/move.py
++++ b/panels/move.py
+@@ -112,6 +112,22 @@ class Panel(ScreenPanel):
+             self.set_toolhead_label()
+         grid.attach(extra_button, 2, 0, 1, 1)
+ 
++        if not self._screen.vertical_mode:
++            # 2026-07-31 Move-panel bottom-clipping fix, main lever. This grid
++            # is row_homogeneous, so EVERY jog row is forced to the height of
++            # the tallest button in any row. Exactly one button here wraps to
++            # two lines -- "Disable Motors" (70px) -- and it was dragging the
++            # second row (X-/Y-/X+/Z-, all single-line, 53px is enough) up to
++            # 70px too, wasting 17px for nothing. Measured live: that alone was
++            # more than the panel's height deficit, which was pushing the
++            # distance selector off the bottom of the 320x240 screen. Natural
++            # row heights keep every label at full size (nothing ellipsized or
++            # shrunk) and simply stop paying for a second tall row that has no
++            # tall content. Portrait/vertical branch deliberately untouched --
++            # it lays these buttons out differently (adjust lives inside this
++            # grid there) and does not have the landscape height problem.
++            grid.set_row_homogeneous(False)
++
+         distgrid = Gtk.Grid()
+         for j, i in enumerate(self.distances):
+             self.labels[i] = self._gtk.Button(label=i)
+@@ -138,15 +154,57 @@ class Panel(ScreenPanel):
+         bottomgrid.attach(self.labels["pos_x"], 0, 0, 1, 1)
+         bottomgrid.attach(self.labels["pos_y"], 1, 0, 1, 1)
+         bottomgrid.attach(self.labels["pos_z"], 2, 0, 1, 1)
+-        bottomgrid.attach(self.labels["move_dist"], 0, 1, 3, 1)
+-        if not self._screen.vertical_mode:
+-            bottomgrid.attach(adjust, 3, 0, 1, 2)
+-
+-        self.labels["move_menu"] = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
++        if self._screen.vertical_mode:
++            bottomgrid.attach(self.labels["move_dist"], 0, 1, 3, 1)
++        else:
++            # 2026-07-31 Move-panel bottom-clipping fix (320x240 landscape
++            # kiosk): bottomgrid used to need TWO internal rows here (X/Y/Z on
++            # row 0, the "Move Distance (mm)" caption spanning 3 cols on row 1,
++            # the gear spanning both rows at col 3), while move_menu below is
++            # row_homogeneous and gave it only ONE row's worth of height out of
++            # 5 -- that overflow pushed distgrid (the 1/5/10/25/50 selector)
++            # off the bottom edge of the screen, so the distance values were
++            # unreadable. Collapsed to a single row: X, Y, Z and the gear side
++            # by side, caption dropped. Dropping it is safe on this screen --
++            # the distance selector sits immediately below and is self-evident,
++            # the panel is already titled "Move", and vertical space is the
++            # scarcest resource here. The vertical/portrait branch above is
++            # unchanged and keeps the caption.
++            bottomgrid.attach(adjust, 3, 0, 1, 1)
++
++        # row_homogeneous=False (was True): forcing all 5 rows to the tallest
++        # row's height wasted vertical space on the two short rows (bottomgrid,
++        # distgrid) and was the other half of the bottom-clipping bug above --
++        # same class of fix as column_homogeneous=False on the dashboard grid.
++        self.labels["move_menu"] = Gtk.Grid(row_homogeneous=False, column_homogeneous=True)
+         self.labels["move_menu"].attach(grid, 0, 0, 1, 3)
+         self.labels["move_menu"].attach(bottomgrid, 0, 3, 1, 1)
+         self.labels["move_menu"].attach(distgrid, 0, 4, 1, 1)
+ 
++        # 2026-07-31 Move-panel bottom-clipping fix, final trim. The two
++        # row-homogeneity fixes above do the heavy lifting; this class only
++        # shaves base.css's per-button margin .2em + padding .25em chrome,
++        # worth ~2px per jog button and ~4px per position readout. Small, but
++        # free, and it keeps every label full-size -- notably the two-line
++        # "Disable Motors" -- instead of ellipsizing or shrinking text to fit.
++        #
++        # CAUTION for whoever measures this panel next: get_preferred_height()
++        # is width-agnostic and reports distgrid's minimum as 44px, which looks
++        # like starvation because distgrid is only ever allocated ~33-36px.
++        # That figure is NOT what GTK uses here -- this is a height-for-width
++        # layout, and get_preferred_height_for_width() at distgrid's real
++        # 282px width returns 33px, which is exactly what it receives. Measured
++        # after the fix: content needs 194px height-for-width against the 212px
++        # available (240px screen minus the 28px title bar), i.e. ~18px of
++        # genuine slack, with every row getting at least its real request.
++        # Unlike the row-homogeneity changes above, this class is applied
++        # unconditionally, so it takes effect in portrait too (harmless there --
++        # it only makes an already-tighter layout slightly more compact).
++        for _w in grid.get_children():
++            _w.get_style_context().add_class("move_compact")
++        for p in ("pos_x", "pos_y", "pos_z"):
++            self.labels[p].get_style_context().add_class("move_compact")
++
+         self.content.add(self.labels["move_menu"])
+ 
+         printer_cfg = self._printer.get_config_section("printer")
+diff --git a/panels/notifications.py b/panels/notifications.py
+index 282c959..932eea3 100644
+--- a/panels/notifications.py
++++ b/panels/notifications.py
+@@ -23,12 +23,21 @@ class Panel(ScreenPanel):
+         super().__init__(screen, title)
+         self.empty = _("Notification log empty")
+         self.tb = Gtk.TextBuffer(text=self.empty)
+-        tv = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Pango.WrapMode.WORD_CHAR)
+-        tv.set_buffer(self.tb)
+-        tv.connect("size-allocate", self._autoscroll)
++        # Hanging indent so a wrapped continuation line lands under the
++        # message text (after "HH:MM:SS ") instead of back at the far-left
++        # margin, where it reads as a stray/unrelated entry (GitHub #6).
++        # GTK3 CSS has no text-indent equivalent -- this is the Gtk.TextTag
++        # indent property, applied to every inserted entry in
++        # add_notification(). Width is (re)computed in _update_indent()
++        # against the panel's actual font, so it tracks theme/font changes
++        # instead of a hardcoded guess.
++        self.indent_tag = self.tb.create_tag("hanging_indent")
++        self.tv = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Pango.WrapMode.WORD_CHAR)
++        self.tv.set_buffer(self.tb)
++        self.tv.connect("size-allocate", self._autoscroll)
+ 
+         scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+-        scroll.add(tv)
++        scroll.add(self.tv)
+ 
+         clear_button = self._gtk.Button(
+             "refresh", _("Clear") + " ", None, self.bts, Gtk.PositionType.RIGHT, 1
+@@ -43,8 +52,15 @@ class Panel(ScreenPanel):
+         self.content.add(content_box)
+ 
+     def activate(self):
++        self._update_indent()
+         self.refresh()
+ 
++    def _update_indent(self):
++        # "00:00:00 " matches the literal "HH:MM:SS " prefix every entry
++        # starts with (see log_notification() in screen.py).
++        width = self.tv.create_pango_layout("00:00:00 ").get_pixel_size()[0]
++        self.indent_tag.set_property("indent", -width)
++
+     def add_notification(self, log):
+         if log["level"] == 0:
+             if "error" in log["message"].lower() or "cannot" in log["message"].lower():
+@@ -57,12 +73,18 @@ class Panel(ScreenPanel):
+             color = COLORS["warning"]
+         else:
+             color = COLORS["error"]
++        start_offset = self.tb.get_end_iter().get_offset()
+         self.tb.insert_markup(
+             self.tb.get_end_iter(),
+             f'\n<span color="{COLORS["time"]}">{log["time"]}</span> '
+             f'<span color="{color}"><b>{remove_newlines(log["message"])}</b></span>',
+             -1,
+         )
++        self.tb.apply_tag(
++            self.indent_tag,
++            self.tb.get_iter_at_offset(start_offset),
++            self.tb.get_end_iter(),
++        )
+ 
+     def clear(self, widget):
+         self.tb.set_text("")
+diff --git a/panels/system.py b/panels/system.py
+index 4396c93..7cffc7e 100644
+--- a/panels/system.py
++++ b/panels/system.py
+@@ -175,12 +175,36 @@ class Panel(ScreenPanel):
+         self.cpu_flowbox = Gtk.FlowBox(
+             selection_mode=Gtk.SelectionMode.NONE,
+             homogeneous=True,
+-            column_spacing=32,
++            # 2026-07-31 overflow fix, continued: column_spacing 32 -> 10.
++            # halign FILL + hexpand True (both still needed -- see below) had
++            # FlowBox stretch its 2 (now-capped) columns across the entire
++            # width the grid handed it, and with 32px between them that put
++            # the 2nd column's right edge past x=320 (confirmed live: capping
++            # to 2-per-line alone only fixed the *count*, a follow-up
++            # screenshot still showed the 2nd core's value clipped to a
++            # single bracket-like glyph at the screen edge). Each label is a
++            # few characters ("  0%".."100%"); it doesn't need anywhere near
++            # 32px of daylight between columns on a 320px screen.
++            column_spacing=10,
+             row_spacing=0,
+             halign=Gtk.Align.FILL,
+             hexpand=True,
+         )
+         self.cpu_flowbox.set_min_children_per_line(1)
++        # 2026-07-31 overflow fix (user report, live screenshot): with no
++        # max_children_per_line set, Gtk.FlowBox picked 3-per-line on this
++        # panel's ~150-160px column (column 0 -- "Cores:" -- and the sidebar
++        # eat most of the 320px screen), but 3 "  0%"-style labels plus two
++        # 32px column_spacing gaps don't actually fit that budget -- the 3rd
++        # core's percentage ran off the right edge of the screen (visible on
++        # a live screenshot as a single clipped glyph), leaving only 2 fully
++        # readable per line anyway and 1 wrapped alone to its own line below.
++        # Capping at 2 makes FlowBox commit to the width that's actually
++        # available instead of guessing 3 and clipping the overflow -- a
++        # clean 2-wide grid for any core count (Orange Pi One is quad-core,
++        # so this is 2 rows of 2 here; more cores just add more rows, which
++        # is fine, this whole section already scrolls).
++        self.cpu_flowbox.set_max_children_per_line(2)
+         self.cpu_flowbox.get_style_context().add_class("monospaced")
+ 
+         for i in range(self.cpu_count):
+@@ -209,6 +233,26 @@ class Panel(ScreenPanel):
+         self.populate_info()
+ 
+         scroll = self._gtk.ScrolledWindow()
++        # 2026-07-31 overflow fix, THE decisive lever (found by live
++        # get_allocation() logging, since removed -- guessing at spacing
++        # constants first was not enough, see the two notes above). This is a
++        # CustomScrolledWindow (ks_includes/widgets/scroll.py) with
++        # `overlay_scrolling: False` by default, so its vertical scrollbar --
++        # base.css `scrollbar slider {min-width: 2.5em}` == ~35px at this
++        # theme's 14px font -- eats real layout width out of the ~284px
++        # content area (320px screen minus the ~36px sidebar), leaving the
++        # viewport only ~249px. This panel is long and always scrolls, so
++        # that scrollbar is ALWAYS present. Measured: self.grid's minimum
++        # width is 273px (the "Cores:" label column 97px + the core-percent
++        # FlowBox 166px + spacing), and GTK honours a widget's minimum over
++        # the space actually available, so the grid was allocated its full
++        # 273px and simply got clipped by the 249px viewport -- cutting the
++        # right-hand core column mid-glyph, exactly as reported. Overlay
++        # scrolling draws the scrollbar on top of the content instead of
++        # beside it, returning those ~35px to the viewport (284px > 273px, so
++        # the grid now fits with room to spare). Same fix, same reason, as
++        # main-menu-single-column.patch and the Temperature preset column.
++        scroll.set_overlay_scrolling(True)
+         scroll.add(self.grid)
+         self.content.add(scroll)
+ 
+@@ -234,7 +278,16 @@ class Panel(ScreenPanel):
+     def populate_info(self):
+         # date
+         self.add_label_to_grid(self.prettify("date"), 0, bold=True)
+-        self.labels["date"] = Gtk.Label(label="", xalign=0)
++        # 2026-07-31 overflow fix (user report, live screenshot): unlike
++        # every value label built through add_label_to_grid() above (which
++        # already sets wrap=True + WORD_CHAR), this one was constructed
++        # directly with neither -- a full `now.strftime("%a %b %e %H:%M:%S
++        # %Z %Y")` string ("Fri Jul 31 01:39:50 MSK 2026") is long enough
++        # that it ran off the right edge of the 320px screen, cutting off
++        # the year. wrap=True + WORD_CHAR (matching add_label_to_grid's
++        # convention exactly) lets it break onto a second line instead.
++        self.labels["date"] = Gtk.Label(label="", xalign=0, wrap=True)
++        self.labels["date"].set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+         self.grid.attach(self.labels["date"], 1, self.current_row - 1, 1, 1)
+         self.add_label_to_grid("", 0)
+ 
+diff --git a/panels/temperature.py b/panels/temperature.py
+index c004663..da90038 100644
+--- a/panels/temperature.py
++++ b/panels/temperature.py
+@@ -31,7 +31,7 @@ class Panel(ScreenPanel):
+         self.tempdelta = self.tempdeltas[-2]
+         self.show_preheat = self._printer.state not in ("printing", "paused")
+         self.preheat_options = self._screen._config.get_preheat_options()
+-        self.grid = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
++        self.grid = Gtk.Grid(row_homogeneous=True, column_homogeneous=False)
+         self._gtk.reset_temp_color()
+         self.extra_selection = kwargs.get("extra", None)
+         self.numpad_visible = False
+@@ -46,22 +46,56 @@ class Panel(ScreenPanel):
+         self.content.add(self.grid)
+ 
+     def create_right_panel(self):
++        # 2026-07-31 right-panel overflow fix (user report: "Cooldown" label
++        # clipped at the screen's right edge, no ellipsis -- see
++        # orangepi-display/klipperscreen-patches/README.md for the full
++        # live-measurement writeup). Root cause: this used to be a single
++        # Gtk.Grid(column_homogeneous=True) with `cooldown` spanning 2 of 3
++        # columns and the preheat/delta_adjust widget spanning all 3 on the
++        # row below. A widget spanning multiple columns in a homogeneous
++        # Gtk.Grid inflates EVERY column's minimum-size computation to its
++        # own (undivided) minimum rather than minimum/span -- confirmed live
++        # (get_preferred_width() logging, since removed): the grid reported
++        # minimum_width == natural_width == 141px regardless of how the
++        # inner content was restructured, well beyond the ~79px actually
++        # available (320px screen - ~36px sidebar - 205px left device list,
++        # the latter a hard floor from `.heater-grid button {min-width:
++        # 6.5em}` used elsewhere to keep "OrangePi CPU" from clipping).
++        # Switching to two plain Gtk.Box containers (a horizontal one for
++        # cooldown+adjust, a vertical one stacking that atop the preheat/
++        # delta widget) sidesteps the homogeneous-grid-with-span pathology
++        # entirely -- Box sizing is a simple sum/max over children with no
++        # span-related inflation, and correctly shrinks down toward each
++        # child's real minimum when space is tight, letting Pango ellipsize
++        # properly instead of drawing past the window edge.
++        #
++        # cooldown's label is intentionally dropped (label=None, icon-only --
++        # same idiom already used for `adjust` right next to it, and for the
++        # dashboard's bottom nav row per dashboard-icon-only-rows.patch).
++        # With a label, ellipsize-END *did* correctly stop the text from
++        # running past the screen edge once the Box refactor below gave it a
++        # real (small) allocation instead of an inflated one, but the
++        # available width only left room for the icon plus literal "..." --
++        # worse than no text at all. Icon-only reads cleanly at this budget
++        # and matches the sibling button.
+         cooldown = self._gtk.Button(
+-            "cool-down", _("Cooldown"), "color4", self.bts, Gtk.PositionType.LEFT, 1
++            "cool-down", None, "color4", self.bts, Gtk.PositionType.LEFT, 1
+         )
+         adjust = self._gtk.Button(
+             "fine-tune", None, "color3", self.bts * 1.4, Gtk.PositionType.LEFT, 1
+         )
+         cooldown.connect("clicked", self.set_temperature, "cooldown")
+         adjust.connect("clicked", self.switch_preheat_adjust)
++        cooldown.set_hexpand(True)
++        adjust.set_hexpand(False)
+ 
+-        right = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
+-        right.attach(cooldown, 0, 0, 2, 1)
+-        right.attach(adjust, 2, 0, 1, 1)
+-        if self.show_preheat:
+-            right.attach(self.preheat(), 0, 1, 3, 2)
+-        else:
+-            right.attach(self.delta_adjust(), 0, 1, 3, 2)
++        top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
++        top_row.pack_start(cooldown, True, True, 0)
++        top_row.pack_start(adjust, False, False, 0)
++
++        right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
++        right.pack_start(top_row, False, False, 0)
++        right.pack_start(self.preheat() if self.show_preheat else self.delta_adjust(), True, True, 0)
+         return right
+ 
+     def switch_preheat_adjust(self, widget):
+@@ -76,23 +110,75 @@ class Panel(ScreenPanel):
+         self.grid.show_all()
+ 
+     def preheat(self):
++        # 2026-07-31 right-panel overflow fix, continued: was a 2-column grid
++        # (PLA|ABS / PETG|FLEX), which on the ~79px budget available here
++        # left each button ~35px wide -- entire second column (ABS/FLEX) was
++        # rendering past the screen's right edge, fully invisible, same bug
++        # as the "Cooldown" clipping above. Single column instead: each
++        # preset button gets the full available width (still tight enough to
++        # wrap PLA/ABS/PETG/FLEX onto two lines rather than fit on one, but
++        # every character stays on-screen and reachable), the extra vertical
++        # length scrolls via the existing ScrolledWindow instead of needing
++        # horizontal room. The scroll's own width fix is below.
+         self.labels["preheat_grid"] = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
+         i = 0
+         for option in self.preheat_options:
+             if option != "cooldown":
+                 self.labels[option] = self._gtk.Button(label=option, style=f"color{(i % 4) + 1}")
+                 self.labels[option].connect("clicked", self.set_temperature, option)
+-                self.labels["preheat_grid"].attach(self.labels[option], (i % 2), int(i / 2), 1, 1)
++                self.labels["preheat_grid"].attach(self.labels[option], 0, i, 1, 1)
+                 i += 1
+         scroll = self._gtk.ScrolledWindow()
++        # Without this, CustomScrolledWindow's own preferred-width query
++        # (confirmed live) reported minimum_width == natural_width == 141px
++        # regardless of preheat_grid's actual (much smaller) content width --
++        # a GtkScrolledWindow reserves room for a possible horizontal
++        # scrollbar/natural-width propagation unless told not to. NEVER
++        # forecloses horizontal scrolling entirely (not needed, single column
++        # now), and the two width calls pin the scrolled window to its
++        # child's real minimum instead of that inflated floor.
++        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
++        scroll.set_min_content_width(1)
++        scroll.set_propagate_natural_width(False)
++        # THE decisive one for legibility (2026-07-31, second pass after a
++        # review caught the labels still wrapping as "P-"/"LA"): this is a
++        # CustomScrolledWindow (ks_includes/widgets/scroll.py), which sets
++        # `overlay_scrolling: False` by default -- so its vertical scrollbar
++        # takes REAL layout width out of the ~77px this column gets, leaving
++        # preheat_grid just 30px against a 49px natural width (measured live).
++        # At 30px, Pango falls back to WORD_CHAR character-level wrapping and
++        # "PLA" renders as "P-" / "LA" on two lines. base.css sizes that
++        # scrollbar `scrollbar slider {min-width: 2.5em}` == ~35px at this
++        # theme's 14px font -- nearly half the column. Overlay scrolling draws
++        # it on top of the content instead of beside it, costing zero layout
++        # width; identical reasoning and identical fix to the one already
++        # applied to the main menu (main-menu-single-column.patch), and the
++        # auto-hide behaviour it brings is a non-issue on a D-pad-only kiosk
++        # with no mouse hover.
++        scroll.set_overlay_scrolling(True)
+         scroll.add(self.labels["preheat_grid"])
+         return scroll
+ 
+     def delta_adjust(self):
+         # Create buttons for increase and decrease
+-        self.labels["increase"] = self._gtk.Button("increase", None, "color1")
++        # 2026-07-31 landscape overflow fix, the binding constraint (found by
++        # live get_preferred_width() logging, since removed -- the 2x2
++        # tempgrid below only needs 56px, so it was never the problem):
++        # KlippyGtk.Button() multiplies its icon scale by an extra 1.4 when
++        # `label is None`, i.e. exactly for icon-only buttons like these two.
++        # That made each -/+ button 42px minimum, so the pair needed 84px
++        # against the 79px this column actually gets -- a 5px deficit that
++        # kept the row (and everything right of it) hanging off the screen.
++        # Passing button_image_scale / 1.4 cancels that icon-only bonus, the
++        # exact idiom already used for the dashboard's device rows in
++        # dashboard-icon-only-rows.patch. Icons land at the same visual size
++        # as the rest of the UI's icons rather than oversized, and the pair
++        # drops to ~70px. Landscape-only concern, but the scale is harmless
++        # in portrait too, so it is not branched.
++        icon_scale = self._gtk.button_image_scale / 1.4
++        self.labels["increase"] = self._gtk.Button("increase", None, "color1", icon_scale)
+         self.labels["increase"].connect("clicked", self.change_target_temp_incremental, "+")
+-        self.labels["decrease"] = self._gtk.Button("decrease", None, "color3")
++        self.labels["decrease"] = self._gtk.Button("decrease", None, "color3", icon_scale)
+         self.labels["decrease"].connect("clicked", self.change_target_temp_incremental, "-")
+ 
+         # Create buttons for temperature deltas
+@@ -106,21 +192,61 @@ class Panel(ScreenPanel):
+ 
+         # Create grid for temperature deltas
+         tempgrid = Gtk.Grid()
+-        for j, i in enumerate(self.tempdeltas):
+-            tempgrid.attach(self.labels[f"deg{i}"], j, 0, 1, 1)
++        if self._screen.vertical_mode:
++            for j, i in enumerate(self.tempdeltas):
++                tempgrid.attach(self.labels[f"deg{i}"], j, 0, 1, 1)
++        else:
++            # 2026-07-31 landscape overflow fix: 2x2 instead of 1x4. Four
++            # delta buttons side by side in the ~79px this column gets is
++            # ~20px each, which cannot hold "25" plus the
++            # .horizontal_togglebuttons border -- measured live, the row
++            # overflowed and "25" was off-screen entirely. 2x2 gives each
++            # button ~39px, comfortably enough, and the extra row costs
++            # height this column has to spare (the delta stack is much
++            # shorter than the preheat list it replaces).
++            for j, i in enumerate(self.tempdeltas):
++                tempgrid.attach(self.labels[f"deg{i}"], j % 2, j // 2, 1, 1)
+ 
+-        # Create grid for decrease button, increase button, temperature labels, and grid
+-        deltagrid = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
+         if self._screen.vertical_mode:
++            # Portrait branch unchanged -- it has the full screen width and
++            # none of the landscape height/width pressure.
++            deltagrid = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
+             deltagrid.attach(self.labels["decrease"], 0, 1, 1, 1)
+             deltagrid.attach(self.labels["increase"], 1, 1, 1, 1)
+             deltagrid.attach(tempgrid, 0, 2, 2, 1)
+-        else:
+-            deltagrid.attach(self.labels["decrease"], 0, 1, 1, 3)
+-            deltagrid.attach(self.labels["increase"], 1, 1, 1, 3)
+-            deltagrid.attach(Gtk.Label(_("Temperature") + " (°C)"), 0, 4, 2, 1)
+-            deltagrid.attach(tempgrid, 0, 5, 2, 2)
+-        return deltagrid
++            return deltagrid
++
++        # 2026-07-31 landscape overflow fix (the sibling of the preheat fix
++        # in create_right_panel above -- same panel, the OTHER branch, which
++        # you reach via the sliders button next to Cooldown, and which
++        # becomes the DEFAULT view while printing/paused since show_preheat
++        # is `state not in ("printing", "paused")`).
++        #
++        # Was a Gtk.Grid(column_homogeneous=True) with two children spanning
++        # both columns: a raw Gtk.Label("Temperature (°C)") and tempgrid. Per
++        # the same GTK pathology documented in create_right_panel, a
++        # column-spanning child inflates EVERY column's minimum to its own
++        # undivided minimum -- and that label is ~16 characters (~110-120px
++        # at this theme's 14px font) against the ~79px actually available.
++        # Measured live before the fix: this widget reported
++        # minimum_width == natural_width == 122px and was allocated
++        # x=241..363 on a 320px screen -- the "+" button, the "25" delta, the
++        # sliders button itself and even the titlebar clock were all pushed
++        # off the right edge.
++        #
++        # Plain Gtk.Box instead (sum/max sizing, no span inflation), and the
++        # "Temperature (°C)" caption is dropped: it is redundant here -- the
++        # panel is already titled "Temperature" and the device list carries a
++        # "Temp (°C)" column header two inches to the left. Same call, for
++        # the same reason, as dropping "Move Distance (mm)" in
++        # move-panel-bottom-clipping.patch.
++        deltabox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
++        pm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
++        pm_row.pack_start(self.labels["decrease"], True, True, 0)
++        pm_row.pack_start(self.labels["increase"], True, True, 0)
++        deltabox.pack_start(pm_row, True, True, 0)
++        deltabox.pack_start(tempgrid, False, False, 0)
++        return deltabox
+ 
+     def change_temp_delta(self, widget, tempdelta):
+         logging.info(f"### tempdelta {tempdelta}")
+@@ -506,6 +632,7 @@ class Panel(ScreenPanel):
+         scroll.add(self.labels["devices"])
+ 
+         self.left_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        self.left_panel.set_hexpand(False)
+         self.left_panel.add(scroll)
+ 
+         self.popover_buttons = {
+@@ -546,7 +673,8 @@ class Panel(ScreenPanel):
+             self.grid.attach(top, 0, 0, 1, 3)
+             self.grid.attach(self.create_right_panel(), 0, 3, 1, 2)
+         else:
+-            self.grid.remove_column(1)
++            self.grid.remove(self.labels["keypad"])
++            self.grid.attach(self.left_panel, 0, 0, 1, 1)
+             self.grid.attach(self.create_right_panel(), 1, 0, 1, 1)
+         self.grid.show_all()
+         self.numpad_visible = False
+@@ -622,7 +750,8 @@ class Panel(ScreenPanel):
+             self.grid.attach(self.labels["keypad"], 0, 2, 1, 2)
+         else:
+             self.grid.remove_column(1)
+-            self.grid.attach(self.labels["keypad"], 1, 0, 1, 1)
++            self.grid.remove(self.left_panel)
++            self.grid.attach(self.labels["keypad"], 0, 0, 2, 1)
+         self.grid.show_all()
+         self.numpad_visible = True
+         self.popover.popdown()
+diff --git a/screen.py b/screen.py
+index 4efa3ac..5f2f872 100755
+--- a/screen.py
++++ b/screen.py
+@@ -101,7 +101,10 @@ class KlipperScreen(Gtk.ApplicationWindow):
+         self.env = Environment(extensions=["jinja2.ext.i18n"], autoescape=True)
+         self.env.install_gettext_translations(self._config.get_lang())
+ 
++        self._focus_clear_timeout_id = None
++        self._last_focus_widget = None
+         self.connect("key-press-event", self._key_press_event)
++        self.connect("set-focus", self._on_set_focus)
+         self.connect("configure_event", self.update_size)
+         display = Gdk.Display.get_default()
+         self.display_number = os.environ.get("DISPLAY") or ":0"
+@@ -148,6 +151,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
+         self.vertical_mode = self.aspect_ratio < 1.0
+         logging.info(f"Screen resolution: {self.width}x{self.height}")
+         self.theme = self._config.get_main_config().get("theme")
++        # 2026-07-31 day/night theme switching: when [main] auto_dark_theme is
++        # on, the theme comes from the sun's altitude rather than from the
++        # config. Done BEFORE the change_theme() call below so that a restart
++        # after dark does not flash the light theme first.
++        self._daynight_init()
+         self.show_cursor = self._config.get_main_config().getboolean("show_cursor", fallback=False)
+         self.setup_gtk_settings()
+         self.style_provider = Gtk.CssProvider()
+@@ -160,9 +168,50 @@ class KlipperScreen(Gtk.ApplicationWindow):
+         self.base_panel = BasePanel(self)
+         self.change_theme(self.theme)
+         self.overlay = Gtk.Overlay()
++        # 2026-07-31 black-background fix: self.overlay has no CSS rule of its
++        # own and (per live GtkStyleContext introspection) resolves
++        # background-color to transparent black -- give it an explicit class so
++        # base.css can paint @bg on it as a safety net. See main_grid below for
++        # the actual root-cause widget.
++        self.overlay.get_style_context().add_class("main_overlay")
+         self.add(self.overlay)
+         self.overlay.add_overlay(self.base_panel.main_grid)
+         self.show_all()
++        # Clear default GTK startup focus (2026-07-30, stray-highlight fix):
++        # GTK3 auto-assigns keyboard focus to the first focusable+sensitive
++        # widget in the window the moment show_all() maps everything --
++        # confirmed live (temporary logging.info right after show_all()) to
++        # land on base_panel.control["shortcut"] (the sidebar notification
++        # bell), since it's the first can-focus=True widget in the action
++        # bar that isn't set_no_show_all-hidden at startup (back/home start
++        # insensitive via set_control_sensitive(False, ...) in
++        # BasePanel.__init__, but insensitive still isn't the same as
++        # unfocusable to GTK's initial focus walk -- shortcut is the first
++        # one that's both sensitive AND visible). Confirmed via repeated
++        # fresh-restart screenshots (systemctl restart -> screenshot with
++        # zero key/mouse input): the bell renders with a persistent
++        # focus-highlight box from the FIRST frame after boot, all the way
++        # through "Initializing Klipper Connection" and into the fully
++        # loaded main_menu dashboard, indefinitely -- because
++        # _reset_focus_clear_timeout()'s 10s auto-clear (see
++        # _key_press_event below) only ever arms on a key PRESS; a screen
++        # where the user hasn't touched a button yet never starts that
++        # timer at all, so this default focus persists with no time bound.
++        # This is likely the actual mechanism behind reports of an
++        # unexplained highlight appearing "at rest" with no real
++        # interaction -- not a bug in the per-widget button_active/graph_label
++        # CSS toggling in main_menu.py (add_device/show_numpad/hide_numpad
++        # were re-checked and correctly pair add_class/remove_class 1:1, no
++        # discrepancy found there), and not GTK :hover/prelight (confirmed
++        # separately live: moving the mouse away from a device row does not
++        # change that row's rendered state, and a synthetic xdotool click
++        # cleanly clears once its own numpad closes) -- purely unrequested
++        # initial keyboard focus with no matching real user action behind
++        # it. set_focus(None) here matches exactly what
++        # _clear_focus_on_timeout() already does at idle, just moved earlier
++        # so nothing is ever implicitly focused before the user's first
++        # real key press.
++        self.set_focus(None)
+         self.update_cursor(self.show_cursor)
+         min_ver = (3, 8)
+         if sys.version_info < min_ver:
+@@ -640,6 +689,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
+             screen, self.style_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+         )
+ 
++    # ----------------------------------------------------------------------
++    # Automatic light/dark theme switching by sunrise/sunset.
++    # Math lives in ks_includes/daynight_sun.py (pure stdlib, no network).
++    # ----------------------------------------------------------------------
++    DAYNIGHT_POLL_SECONDS = 300
++
++    def _daynight_init(self):
++        """Set up sun-driven theme switching. Called from __init__.
++
++        Optional [main] options in KlipperScreen.conf:
++            auto_dark_theme    bool,  default False (feature off)
++            light_theme        str,   default "big-font-light"
++            dark_theme         str,   default "big-font"
++            latitude/longitude float, default Moscow (see daynight_sun.py)
++
++        Off by default on purpose: pulling this code must not silently change
++        behaviour for anyone who did not ask for the feature.
++
++        NOTHING may escape this method. It runs from __init__, which is BEFORE
++        screen.py's own `if self._config.errors: show_error_modal(); return`
++        guard, and an exception in __init__ becomes RuntimeError -> the unit
++        dies -> three of those hit systemd's StartLimitBurst=3 and the kiosk is
++        black with nothing on screen to explain why. A cosmetic feature must
++        never be able to do that, so the whole body is wrapped.
++
++        This is not hypothetical. KlipperScreen parses configs with a plain
++        ConfigParser, i.e. BasicInterpolation is live, and validate_config only
++        ever reads the VALUE of keys it classifies as numbers/bools -- a `strs`
++        key such as light_theme is never dereferenced during validation. So
++        `light_theme: 100%off` validates fine, gets merged, and then raises
++        InterpolationSyntaxError on the first .get() -- which would be here.
++        """
++        self._daynight_sun = None
++        self._daynight_timer_id = None
++        self._daynight_enabled = False
++        self._daynight_light = "big-font-light"
++        self._daynight_dark = "big-font"
++        try:
++            self._daynight_setup()
++        except Exception:
++            logging.exception("daynight: setup failed, automatic theme switching is off")
++            self._daynight_enabled = False
++
++    def _daynight_setup(self):
++        """Real body of _daynight_init(); may raise, the caller swallows it."""
++        conf = self._config.get_main_config()
++        self._daynight_enabled = conf.getboolean("auto_dark_theme", fallback=False)
++        self._daynight_light = conf.get("light_theme", fallback="big-font-light")
++        self._daynight_dark = conf.get("dark_theme", fallback="big-font")
++        if not self._daynight_enabled:
++            return
++        try:
++            # Lazy import inside try/except on purpose: daynight_sun.py lives
++            # INSIDE this KlipperScreen checkout and a KlipperScreen update will
++            # delete it. A missing module must mean "feature off", not a kiosk
++            # that refuses to start.
++            from ks_includes import daynight_sun
++        except Exception as e:
++            logging.error(f"daynight: daynight_sun not importable ({e}), theme switching off")
++            self._daynight_enabled = False
++            return
++        self._daynight_sun = daynight_sun
++        try:
++            self._daynight_lat = conf.getfloat("latitude", fallback=daynight_sun.DEFAULT_LATITUDE)
++            self._daynight_lon = conf.getfloat("longitude", fallback=daynight_sun.DEFAULT_LONGITUDE)
++        except ValueError:
++            self._daynight_lat = daynight_sun.DEFAULT_LATITUDE
++            self._daynight_lon = daynight_sun.DEFAULT_LONGITUDE
++            logging.warning("daynight: latitude/longitude not numeric, using defaults")
++        try:
++            self.theme = self._daynight_wanted_theme()
++        except Exception:
++            logging.exception("daynight: could not pick a theme, keeping the configured one")
++            return
++        self._daynight_log_schedule()
++        # NOTE: _daynight_tick returns True. The one-shot _clear_focus_on_timeout
++        # below returns False; copying that here would give a timer that fires
++        # exactly once and then silently never again.
++        self._daynight_timer_id = GLib.timeout_add_seconds(
++            self.DAYNIGHT_POLL_SECONDS, self._daynight_tick
++        )
++        logging.info(
++            f"daynight: enabled at {self._daynight_lat}/{self._daynight_lon}, "
++            f"theme now {self.theme}, checking every {self.DAYNIGHT_POLL_SECONDS}s"
++        )
++
++    def _daynight_wanted_theme(self):
++        """Name of the theme that should be active right now."""
++        day = self._daynight_sun.is_daytime(
++            latitude=self._daynight_lat, longitude=self._daynight_lon
++        )
++        return self._daynight_light if day else self._daynight_dark
++
++    def _daynight_tick(self):
++        """Periodic check, every 5 minutes.
++
++        Polling rather than one exact GLib timer on next_transition(): a poll
++        self-heals after a system clock jump (this Orange Pi has no RTC battery,
++        so NTP corrects the clock by a large step on every boot) and after
++        suspend, and it costs 59 us per call. Worst-case reaction lag is 5
++        minutes, which is nothing for a sunset.
++
++        Returns True so the GLib source stays alive.
++        """
++        try:
++            wanted = self._daynight_wanted_theme()
++            if wanted != self.theme:
++                logging.info(f"daynight: switching theme {self.theme} -> {wanted}")
++                self.theme = wanted
++                self.change_theme(wanted)
++                self._daynight_reload_visible_panel()
++                self._daynight_log_schedule()
++        except Exception:
++            logging.exception("daynight: periodic check failed")
++        return True
++
++    def _daynight_reload_visible_panel(self):
++        """Make the swap visible on the panel that is already on screen.
++
++        change_theme() swaps the CSS immediately but NOT the icons of the
++        content panel: its reload_icon_theme() only marks panels in
++        panels_reinit, and a panel is rebuilt on the next show_panel(). A kiosk
++        sits on the dashboard for days with no show_panel() at all, so without
++        this we would get dark icons on a dark background. reload_panels()
++        rebuilds the visible panel right away.
++
++        Verified live 2026-07-31: WITHOUT this rebuild the dashboard does not
++        merely keep the wrong icons, it renders BROKEN -- only the temperature
++        graph survives on an otherwise empty background, because every button
++        still holds a pixbuf loaded from the other theme's images/ directory.
++        So the rebuild is mandatory, not cosmetic.
++
++        reload_panels() resets the navigation stack to the root panel. The one
++        case where that is worse than a broken repaint is an open on-screen
++        keyboard (it would throw away what is being typed), so that is the only
++        thing guarded against -- a theme flip happens twice a day.
++        """
++        if self.keyboard is not None or not self._cur_panels:
++            logging.info("daynight: keyboard open or no panel yet, rebuild deferred")
++            return
++        logging.info("daynight: rebuilding panels so the new theme's icons take effect")
++        self.reload_panels()
++
++    def _daynight_log_schedule(self):
++        """One log line: today's sunrise/sunset and when the theme flips next."""
++        try:
++            times = self._daynight_sun.sun_times(
++                latitude=self._daynight_lat, longitude=self._daynight_lon
++            )
++            nxt = self._daynight_sun.next_transition(
++                latitude=self._daynight_lat, longitude=self._daynight_lon
++            )
++            when = nxt.isoformat(timespec="seconds") if nxt else "not within 190 days"
++            logging.info(f"daynight: {times.describe()}; next theme switch {when}")
++        except Exception:
++            logging.exception("daynight: could not compute the schedule")
++
+     def change_theme(self, theme_name=None):
+         if not theme_name:
+             theme_name = self._config.get_main_config().get("theme")
+@@ -1425,10 +1631,59 @@ class KlipperScreen(Gtk.ApplicationWindow):
+ 
+     def _key_press_event(self, widget, event):
+         keyval_name = Gdk.keyval_name(event.keyval)
++        handled = False
+         if keyval_name == "Escape":
+             self._menu_go_back(home=True)
+-        elif keyval_name == "BackSpace" and len(self._cur_panels) > 1 and self.keyboard is None:
++        elif keyval_name == "BackSpace" and self.keyboard is None:
+             self.base_panel.back()
++        elif keyval_name in ("Up", "Down", "Left", "Right") and self.get_focus() is None:
++            # Resume-from-idle fix (2026-07-30): if the 10s idle timeout
++            # below already cleared focus, GTK's built-in directional-focus
++            # fallback from "nothing focused" is asymmetric -- Up lands on
++            # the last menu item (e.g. Print) but Down jumps straight to
++            # the sidebar's notification bell, unrelated to wherever the
++            # user actually was (e.g. "More"). Confirmed live: this, not a
++            # broken focus chain, was the real mechanism behind the
++            # originally-reported "Down on More jumps to the bell" bug --
++            # ordinary pacing on a 5-button pad routinely exceeds the 10s
++            # window. Restore the last focused widget instead of letting
++            # GTK's fallback fire, so the first arrow press after a pause
++            # just re-highlights where the user left off (it does not also
++            # move in the pressed direction -- that would risk a double
++            # step once focus tracking below also updates). Subsequent
++            # presses within the window behave exactly as before.
++            if self._last_focus_widget is not None:
++                try:
++                    mapped = self._last_focus_widget.get_mapped()
++                except Exception:
++                    mapped = False
++                if mapped:
++                    self.set_focus(self._last_focus_widget)
++                    handled = True
++        self._reset_focus_clear_timeout()
++        return handled
++
++    def _on_set_focus(self, window, widget):
++        # Track the most recent non-None focus target continuously (not
++        # just at clear-timeout time) so it always reflects wherever the
++        # user last navigated, for the resume-from-idle restore above.
++        if widget is not None:
++            self._last_focus_widget = widget
++
++    def _reset_focus_clear_timeout(self):
++        # This is a 5-button D-pad, not a touchscreen: focus only exists to
++        # show where a button/arrow press will land. Leaving the highlight
++        # on indefinitely after the last press makes an otherwise idle,
++        # at-rest screen look like something is stuck/selected, so clear it
++        # after a few seconds of no further input instead.
++        if self._focus_clear_timeout_id is not None:
++            GLib.source_remove(self._focus_clear_timeout_id)
++        self._focus_clear_timeout_id = GLib.timeout_add_seconds(10, self._clear_focus_on_timeout)
++
++    def _clear_focus_on_timeout(self):
++        self.set_focus(None)
++        self._focus_clear_timeout_id = None
++        return False
+ 
+     def update_size(self, *args):
+         width, height = self.get_size()
+diff --git a/styles/base.css b/styles/base.css
+index 91f526b..6d49a80 100644
+--- a/styles/base.css
++++ b/styles/base.css
+@@ -25,6 +25,61 @@ button:disabled {
+     opacity: .5;
+ }
+ 
++/* 2026-07-31 black-background fix: screen.py's root Gtk.Overlay (class
++ * main_overlay) and its sole overlay child, base_panel's Gtk.Grid (class
++ * main_grid), each resolve background-color to transparent by default --
++ * confirmed live via GtkStyleContext introspection: the toplevel 'window'
++ * node correctly resolves @bg, but main_grid gets its own separate
++ * GdkWindow that starts fully transparent (rgba 0,0,0,0) and, with no
++ * compositor running (raw X11/DRM, no window manager), that renders as
++ * solid black instead of showing the window bg through it -- visible as a
++ * black background behind every button/plaque on every panel. Targeted
++ * classes rather than a blanket 'grid'/'overlay' type selector: plain
++ * Gtk.Grid is used ~70 other places in the codebase (some nested inside
++ * intentionally differently-colored ancestors) and job_status.py has its
++ * own Gtk.Overlay for a progress indicator over a thumbnail image, where
++ * painting an opaque @bg would visibly break that overlay.
++ *
++ * 2026-07-31 follow-up: .heatergraph added to this list. Same root cause,
++ * different widget -- HeaterGraph (ks_includes/widgets/heatergraph.py) is a
++ * Gtk.DrawingArea, which owns its own native GdkWindow same as main_grid
++ * did, and draw_graph() repaints it each frame via
++ * `Gtk.render_background(style_context, ctx, ...)` using ITS OWN style
++ * context. With no background-color rule matching '.heatergraph', that
++ * resolves to transparent and renders solid black on this compositor-less
++ * X11/DRM setup -- invisible on the embedded dashboard/Temperature-panel
++ * graph (its container, main_grid, already painted @bg behind it after the
++ * fix above, showing through where the graph doesn't happen to overpaint),
++ * but fully exposed in the fullscreen graph dialog
++ * (show_fullscreen_graph()/KlippyGtk.Dialog()), where this DrawingArea is
++ * the dialog's only real content and there is no @bg-painted ancestor
++ * behind it -- confirmed live, whole dialog rendered black except the
++ * explicitly-drawn grid lines/axis text/curves.
++ *
++ * 2026-07-31 second follow-up: every Gtk.Dialog built by KlippyGtk.Dialog()
++ * (Save Config confirm, PID Calibrate confirm, every _confirm_send_action
++ * popup) -- same root cause again, confirmed by pixel-sampling a live
++ * screenshot of the "Save configuration?" dialog: (0,0,0) pure black at
++ * the corners/margins AND behind the message text, not this theme's @bg or
++ * @text-inv. Each such dialog is a fresh top-level GdkWindow realized at
++ * runtime (unlike the one persistent KlipperScreen window mapped at
++ * startup, which the original diagnosis above confirmed resolves @bg
++ * correctly) -- on this compositor-less raw X11/DRM setup a newly realized
++ * surface starts unpainted. Fixed on content_area (see
++ * ks_includes/KlippyGtk.py's Dialog(), class app_dialog_content) rather
++ * than the dialog window itself: content_area is the Gtk.Box that actually
++ * spans the dialog's visible area (same idiom as main_grid inside
++ * screen.py's overlay), and painting it directly sidesteps needing the
++ * window-level '.dialog'/'window' rules below to themselves resolve
++ * correctly on a freshly-realized surface. Deliberately @bg, not the
++ * '.dialog' rule's @text-inv "card" color below -- @bg keeps this fallback
++ * visually consistent with every other panel/dialog on the device instead
++ * of introducing a second, dialog-only background color that only shows up
++ * on the rendering path that was broken to begin with. */
++.main_overlay,
++.main_grid,
++.heatergraph,
++.app_dialog_content,
+ list row,
+ treeview.view,
+ window {
+@@ -306,11 +361,54 @@ trough {
+     padding: 0.25em 2.5em;
+ }
+ 
++/* 2026-07-31 black-background fix, dialog case (user report, live
++ * screenshot: the "Save configuration?" confirm dialog rendered solid
++ * black). Root cause, same family as .main_overlay/.main_grid/.heatergraph
++ * above: every Gtk.Dialog built by KlippyGtk.Dialog() (Save Config confirm,
++ * PID Calibrate confirm, every _confirm_send_action popup) is a fresh
++ * top-level GdkWindow realized at *runtime*, unlike the one persistent
++ * KlipperScreen window mapped at startup that the original diagnosis above
++ * confirmed does resolve @bg correctly. On this compositor-less raw
++ * X11/DRM setup, that runtime-realized surface never paints its
++ * CSS-declared background no matter what selector targets the window node
++ * itself -- confirmed by pixel-sampling four separate live screenshots:
++ * neither `window {background-color: @bg}` above nor `.dialog`'s own
++ * `background-color: @text-inv` below ever painted anything on the actual
++ * GtkWindow, class name or not.
++ *
++ * The fix that actually worked: paint content_area (the Gtk.Box that
++ * holds the dialog's real content, see KlippyGtk.py's Dialog(), class
++ * app_dialog_content, background-color: @bg in the shared rule above) --
++ * same idiom as main_grid inside screen.py's overlay, sidestepping the
++ * broken window-level paint entirely rather than trying to fix it. That
++ * alone left a black ring around the card exactly the size of the layout
++ * gap between content_area and the window edge (GTK margins/padding are
++ * empty space OUTSIDE a widget's own painted rectangle -- they're the
++ * PARENT's territory to paint, and this parent doesn't). So `margin: 1em`
++ * here and content_area's three set_margin_*(10/5/5/0) calls in
++ * KlippyGtk.py are both gone (zeroed), and this rule's `padding` moved to
++ * `.app_dialog_content` below instead, where it's applied to the widget
++ * that's actually proven to paint -- content_area now spans the entire
++ * window with no gap left for the broken layer to show through, and the
++ * equivalent inset for text/buttons comes from padding INSIDE that already
++ * -painted rectangle instead of margin outside it. */
+ .dialog {
+-    border: .1em solid @text-inv;
+-    padding: 0.25em 2.5em;
+     background-color: @text-inv;
+-    margin: 1em;
++    margin: 0;
++    padding: 0;
++    /* border removed (was `.1em solid @text-inv`, 2026-07-31): it reserved
++     * ~1-2px of box-model space between content_area and the window's true
++     * edge, same class of gap as the margin/padding above -- confirmed live,
++     * a hairline strip of unpainted black remained at the bottom/right edge
++     * after zeroing margin+padding, exactly border-width sized. This border
++     * was never visible anyway once background-color started actually
++     * painting (it's the same @text-inv as the fill, zero contrast against
++     * it by design), so removing it costs nothing visually and closes the
++     * last of the gap. */
++}
++
++.app_dialog_content {
++    padding: 0.25em 2.5em;
+ }
+ 
+ .dialog button {
+@@ -336,6 +434,19 @@ trough {
+     min-height: 0;
+ }
+ 
++/* 2026-07-31 Move-panel bottom-clipping fix (full measurement and the
++ * height-for-width caveat are in panels/move.py). The row-homogeneity fixes
++ * there close the height deficit on their own; this rule only shaves
++ * base.css's per-button margin .2em + padding .25em chrome for that panel,
++ * worth ~2px per jog button and ~4px per position readout. Scoped to an
++ * explicit class so no other panel's button metrics change, and chosen over
++ * ellipsizing or shrinking text so every label (notably the two-line
++ * "Disable Motors") stays full-size. */
++.move_compact {
++    margin: .05em;
++    padding: .05em;
++}
++
+ .horizontal_togglebuttons:first-child {
+     border-top-left-radius: .75em;
+     border-bottom-left-radius: .75em;
