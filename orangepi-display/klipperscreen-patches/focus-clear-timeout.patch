@@ -1,0 +1,33 @@
+--- /home/ultra/KlipperScreen/screen.py.orig-backup	2026-07-30 12:20:54.790190140 +0300
++++ /home/ultra/KlipperScreen/screen.py	2026-07-30 12:20:56.712827477 +0300
+@@ -101,6 +101,7 @@
+         self.env = Environment(extensions=["jinja2.ext.i18n"], autoescape=True)
+         self.env.install_gettext_translations(self._config.get_lang())
+ 
++        self._focus_clear_timeout_id = None
+         self.connect("key-press-event", self._key_press_event)
+         self.connect("configure_event", self.update_size)
+         display = Gdk.Display.get_default()
+@@ -1429,6 +1430,22 @@
+             self._menu_go_back(home=True)
+         elif keyval_name == "BackSpace" and len(self._cur_panels) > 1 and self.keyboard is None:
+             self.base_panel.back()
++        self._reset_focus_clear_timeout()
++
++    def _reset_focus_clear_timeout(self):
++        # This is a 5-button D-pad, not a touchscreen: focus only exists to
++        # show where a button/arrow press will land. Leaving the highlight
++        # on indefinitely after the last press makes an otherwise idle,
++        # at-rest screen look like something is stuck/selected, so clear it
++        # after a few seconds of no further input instead.
++        if self._focus_clear_timeout_id is not None:
++            GLib.source_remove(self._focus_clear_timeout_id)
++        self._focus_clear_timeout_id = GLib.timeout_add_seconds(10, self._clear_focus_on_timeout)
++
++    def _clear_focus_on_timeout(self):
++        self.set_focus(None)
++        self._focus_clear_timeout_id = None
++        return False
+ 
+     def update_size(self, *args):
+         width, height = self.get_size()

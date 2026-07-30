@@ -57,6 +57,36 @@
  * has no ellipsize, so absent a min-width push the name column ends up
  * with whatever's left over rather than what long labels like
  * "OrangePi CPU" actually need.
+ *
+ * Second regression fixed 2026-07-30 (found after the first fix landed --
+ * same root cause, different widgets the first pass didn't touch):
+ *   - `.horizontal_togglebuttons { min-height: 2.9em }` (base.css) is the
+ *     Move panel's "Move Distance (mm)" row (move.py adds this exact
+ *     class per distance button). At 14px that's ~41px, enough on its own
+ *     to push the whole distance-value row off the bottom of a 240px-tall
+ *     screen -- confirmed via live screenshot showing only the top pixel
+ *     sliver of those buttons. Shrunk the same way `.heater-grid button`
+ *     already was above.
+ *   - Main dashboard's "Print" button (3rd item in the right-hand menu
+ *     column) clips to "Pri" at the bottom/right edge -- NOT fixed yet.
+ *     Tried reducing `button.color1-4` padding; that made it WORSE (the
+ *     button's own box then fit on screen, but its icon+label no longer
+ *     fit inside that now-smaller box, so it rendered as a fully empty
+ *     bordered rectangle -- confirmed via temporary debug borders, then
+ *     reverted). Root layout (AutoGrid column count, main_menu.py) needs
+ *     understanding before touching this again; see docs/issues.md. Low
+ *     priority in practice: Print opens the gcodes panel, and printing
+ *     isn't possible yet anyway (extruder disassembled, X homing
+ *     untrusted -- see printer-status.md).
+ *   - Focus indicator was simply MISSING: this theme's style.css was
+ *     written from scratch and never carried over the stock z-bolt
+ *     theme's `button:focus { background-color: @active }` rule --
+ *     base.css alone only styles `.button_active`/`button:active`
+ *     (a manually-toggled class / mouse-press state), not keyboard/D-pad
+ *     focus. On a 5-button-only device with no touch input, an invisible
+ *     focus state is a real navigation defect, not cosmetic -- confirmed
+ *     live (Tab/arrow-key focus produced no visible highlight anywhere).
+ *     Re-added below, copied from z-bolt/style.css.
  */
 
 * {
@@ -84,4 +114,19 @@
  * "..." by GTK's 50/50 leftover-space split with the temp-value column. */
 .heater-grid button.graph_label {
     min-width: 6.5em;
+}
+
+/* Move panel's "Move Distance (mm)" selector row -- same fix as
+ * .heater-grid button above, same reason (base.css's 2.9em floor doesn't
+ * scale down for this screen). */
+.horizontal_togglebuttons {
+    min-height: 1.6em;
+}
+
+/* Focus indicator: this theme never had one of its own (see comment
+ * above) -- copied verbatim from styles/z-bolt/style.css so keyboard/
+ * D-pad focus is visible again. */
+button:focus,
+button:active {
+    background-color: @active;
 }
