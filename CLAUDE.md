@@ -7,6 +7,7 @@
   - Открыть: `docs/serve-ramps.sh` (нужен `python3`/`python` в PATH) поднимает `http.server` на порту 8000 в `docs/` → `http://localhost:8000/ramps-diagnostics.html`. Либо просто открыть файл напрямую (`file://...`).
 - **`printer-configs/`** — живые конфиги принтера (printer.cfg, moonraker.conf, crowsnest.conf, autotune_tmc.cfg, KlipperScreen.conf, mainsail.cfg), источник истины, см. раздел ниже про правила правки.
 - **`scripts/deploy.sh`** — единственный способ выкатить `printer-configs/` на принтер (diff → подтверждение → бэкап на принтере → заливка → restart Klipper → проверка `ready`).
+- **`scripts/export-mainsail-ui.sh`** → **`printer-configs/moonraker-db-mainsail-ui.json`** — снимок настроек Mainsail UI (имя принтера, раскладка дашборда, тема), которые пользователь меняет через сам веб-интерфейс, а не через файлы конфига (см. раздел ниже). Только для наглядности/бэкапа, `deploy.sh` этот файл не трогает.
 - **`.env`** (в `.gitignore`, не в git) — все секреты (пароли Wi-Fi/SSH).
 
 ## Инструмент для shell-команд
@@ -42,3 +43,9 @@
 С 2026-07-29 `printer-configs/` (printer.cfg, moonraker.conf, crowsnest.conf, autotune_tmc.cfg, KlipperScreen.conf, mainsail.cfg) в этом репозитории — источник истины. Правка конфигов напрямую на принтере по SSH (редактирование `~/printer_data/config/*` руками) **больше не допускается**.
 
 Порядок: правь файлы в `printer-configs/` → закоммить → выкатывай через `scripts/deploy.sh` (он же перезапускает Klipper и ждёт `ready`, см. сам скрипт). Деплой ручной, не по CI/автослиянию в main — причина в `docs/printer-status.md` (стол сейчас греется без полной защиты по 220В, нельзя менять конфиг без присмотра пользователя).
+
+## Настройки Mainsail UI (имя принтера, раскладка дашборда) — отдельный слой, НЕ файловый конфиг
+
+Имя принтера, раскладка виджетов дашборда и тема, которые пользователь настраивает прямо в веб-интерфейсе Mainsail (Settings → General / Dashboard), живут в **базе данных Moonraker** (namespace `mainsail`, отдаётся `GET /server/database/item?namespace=mainsail`), а не в `printer.cfg`/`mainsail.cfg`/`moonraker.conf`. Это отдельный слой хранения от файловых конфигов в `printer-configs/`, и он не покрывается правилом «править только в репозитории» из раздела выше — эти настройки штатно меняются через сам UI.
+
+Чтобы такие изменения не терялись бесследно для истории репозитория: запусти `bash scripts/export-mainsail-ui.sh` — заберёт текущее имя принтера/раскладку/тему из БД Moonraker и запишет точечный снимок в `printer-configs/moonraker-db-mainsail-ui.json`. Это **только снимок для наглядности и бэкапа** — `scripts/deploy.sh` его не деплоит, обратной синхронизации (снимок → БД принтера) нет и не планируется (БД Moonraker — живое состояние, слепой откат небезопасен). Запускать вручную, когда пользователь поменял что-то в Mainsail UI и хочет зафиксировать это в git.
