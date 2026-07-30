@@ -1,0 +1,95 @@
+diff --git a/ks_includes/widgets/heatergraph.py b/ks_includes/widgets/heatergraph.py
+index d1118f9..8576977 100644
+--- a/ks_includes/widgets/heatergraph.py
++++ b/ks_includes/widgets/heatergraph.py
+@@ -26,7 +26,20 @@ class HeaterGraph(Gtk.DrawingArea):
+         self.connect("button_press_event", screen.screensaver.reset_timeout)
+         self.connect("button_press_event", screen.lock_screen.reset_timeout)
+         self.connect("button_release_event", self.event_cb)
+-        self.font_size = round(font_size * 0.75)
++        # GH issue #5: this used to be `round(font_size * 0.75)`. `font_size`
++        # here is KlippyGtk's internal ~8px layout baseline (screen_px /
++        # font_ratio), NOT the theme's `* { font-size: 14px }` CSS override --
++        # raw Cairo text (ctx.set_font_size below) never consults CSS at all,
++        # so the old formula rendered axis labels at ~6px against 14px body
++        # text everywhere else. Bumped the multiplier so axis text is clearly
++        # legible; draw_graph/graph_lines/graph_time below were reworked to
++        # size margins from actually-measured text extents (instead of a
++        # flat per-character guess) and to skip x-axis time labels that would
++        # overlap, so the bigger font fits the now-narrow (~77px) dashboard
++        # graph without crowding out the trend line or smearing timestamps
++        # together. See orangepi-display/klipperscreen-patches/ for the
++        # measured before/after numbers.
++        self.font_size = round(font_size * 1.3)
+         self.fullscreen = fullscreen
+         if fullscreen:
+             GLib.timeout_add_seconds(1, self.update_graph)
+@@ -89,9 +102,24 @@ class HeaterGraph(Gtk.DrawingArea):
+         success, color = style_context.lookup_color("lines")
+         if not success:
+             color = Gdk.RGBA(0.5, 0.5, 0.5, 1.0)
+-        x = round(self.font_size * 2.75)
++        # Left margin sized to fit the widest possible y-axis label ("999",
++        # self.max_temp is capped there in __init__) at the *actual* font in
++        # use, instead of the old flat `font_size * 2.75` guess -- that guess
++        # was tuned for the old ~6px font and didn't scale correctly (or
++        # tightly) once the font got bigger. Set the font here (once) so this
++        # measurement and every show_text() below use the same size.
++        ctx.set_font_size(self.font_size)
++        label_margin = ctx.text_extents("999")[2]
++        x = round(6 + label_margin + 4)
+         y = 10
+-        width = da.get_allocated_width() - 15
++        # Right margin: was a flat 15px, cheap on the old wide graph but a
++        # relatively big bite (~20%) out of the plot once the dashboard
++        # redesign narrowed this widget to ~77px total -- nothing is drawn
++        # in that margin (the single surviving x-axis label from
++        # graph_time's overlap check below sits under the plot, not past
++        # its right edge), so shrinking it hands a few more pixels back to
++        # the trend line without losing anything.
++        width = da.get_allocated_width() - 8
+         height = da.get_allocated_height() - self.font_size * 2
+         gsize = [[x, y], [width, height]]
+ 
+@@ -196,6 +224,20 @@ class HeaterGraph(Gtk.DrawingArea):
+         font_size_multiplier = round(self.font_size * 1.5)
+         ctx.set_font_size(self.font_size)
+ 
++        # GH issue #5: at the bigger font above, ticks on a narrow graph sit
++        # closer together than the label text itself is wide -- drawing
++        # every one of them unconditionally is exactly what produced the
++        # illegible smeared timestamps in the original bug report. Instead,
++        # track the left edge of the most recently drawn label (scanning
++        # right-to-left, i.e. newest-to-oldest) and skip drawing the text
++        # for any tick whose label would overlap it -- the gridline itself
++        # is still drawn every tick, only the text is thinned out. On a wide
++        # graph (e.g. the full temperature.py panel) most/all labels still
++        # fit and still get drawn; on this ~77px dashboard graph this
++        # naturally reduces to just the most recent timestamp, which is the
++        # honest amount of room available.
++        min_label_left = math.inf
++
+         i = 0
+         while True:
+             x = first - i * steplen
+@@ -206,11 +248,15 @@ class HeaterGraph(Gtk.DrawingArea):
+             ctx.line_to(x, gsize[1][1])
+             ctx.stroke()
+ 
+-            ctx.set_source_rgb(color.red, color.green, color.blue)
+-            ctx.move_to(x - font_size_multiplier, gsize[1][1] + font_size_multiplier)
+-
+-            ctx.show_text(f"{now - datetime.timedelta(minutes=2) * i:%H:%M}")
+-            ctx.stroke()
++            label = f"{now - datetime.timedelta(minutes=2) * i:%H:%M}"
++            label_left = x - font_size_multiplier
++            label_right = label_left + ctx.text_extents(label)[2]
++            if label_right + 4 <= min_label_left:
++                ctx.set_source_rgb(color.red, color.green, color.blue)
++                ctx.move_to(label_left, gsize[1][1] + font_size_multiplier)
++                ctx.show_text(label)
++                ctx.stroke()
++                min_label_left = label_left
+             i += 1 + self.printer.get_tempstore_size() // 601
+ 
+     def is_showing(self, device):
