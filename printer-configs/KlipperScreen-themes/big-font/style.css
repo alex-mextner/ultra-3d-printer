@@ -116,6 +116,33 @@
     min-width: 6.5em;
 }
 
+/* Icon-only dashboard rows (2026-07-30, main_menu.py add_device): name
+ * buttons on the MAIN DASHBOARD only carry an extra `name_icon_only`
+ * marker class (main_menu.py's add_device -- NOT panels/temperature.py's
+ * separate, unmodified add_device/create_left_panel, which still shows
+ * full device names and still needs the 6.5em floor above). This
+ * selector is MORE specific (4 selectors: type + 3 classes) than
+ * `.heater-grid button.graph_label` (3 selectors) above, so it wins
+ * regardless of source order, without touching the shared rule that
+ * temperature.py's device list still depends on. 2.3em is just enough
+ * for one ~22px icon (button_image_scale-sized, see main_menu.py) plus
+ * this rule's own padding (.15em each side) and the unconditional
+ * .graph_label left border (.4em, base.css) -- measured live via a
+ * temporary get_preferred_width() dump, not guessed; see
+ * orangepi-display/klipperscreen-patches/dashboard-icon-only.patch for
+ * the before/after numbers. */
+.heater-grid button.graph_label.name_icon_only {
+    /* CORRECTION (2026-07-30, gap-tightening follow-up): see the matching,
+     * more detailed comment in big-font-light/style.css (the currently
+     * active theme) -- the 2.3em min-width above was never the binding
+     * constraint (real natural width measured 44px via live GTK
+     * introspection); the actual culprit was this rule's own inherited
+     * padding plus GTK's default image-button chrome, neither touched by
+     * a min-width-only override. */
+    min-width: 0;
+    padding: 0;
+}
+
 /* Move panel's "Move Distance (mm)" selector row -- same fix as
  * .heater-grid button above, same reason (base.css's 2.9em floor doesn't
  * scale down for this screen). */

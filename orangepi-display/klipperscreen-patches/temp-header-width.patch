@@ -1,27 +1,52 @@
 --- a/panels/main_menu.py
 +++ b/panels/main_menu.py
-@@ -443,7 +443,23 @@
+@@ -90,6 +90,14 @@
+             # the button row (still spanning both columns) is allocated
+             # its correct ~288px full width instead.
+             self.main_menu.set_column_homogeneous(False)
++            # column_spacing=14 (2026-07-30, gap-tightening follow-up): the
++            # explicit gap between the device-list column and the graph
++            # column, per user-specified target (~12-16px). Set directly on
++            # this Grid rather than via CSS margin/padding tricks -- Gtk.Grid
++            # column-spacing is a single authoritative px value between
++            # adjacent columns, immune to the em-based CSS sizing quirks
++            # that caused several earlier bugs tonight on this same screen.
++            self.main_menu.set_column_spacing(14)
+             landscape_left_panel = self.create_left_panel()
+             # hexpand=False here (2026-07-30, graph-width fix): the device
+             # list's own minimum is a hard ~205px (CSS min-width on the
+@@ -333,6 +341,22 @@
+         name = self._gtk.Button(image, None, None, icon_scale, Gtk.PositionType.LEFT, 1)
+         name.connect("clicked", self.toggle_visibility, device)
+         name.set_alignment(0, 0.5)
++        # set_size_request (2026-07-30, gap-tightening follow-up): the
++        # `name_icon_only` CSS min-width (2.3em) turned out to undershoot --
++        # live GTK measurement (DBG_WIDTH log) showed this button's actual
++        # natural width is 44px, not the ~32px the CSS comment assumed,
++        # because the icon glyph itself (~22px, left-aligned via
++        # set_alignment above) doesn't fill that whole cell -- the
++        # left-border/padding/GTK-button-chrome account for the rest, but
++        # the icon sits flush-left, leaving ~20px of dead space at the
++        # RIGHT of its own cell, before column_spacing (set on this Grid,
++        # see create_left_panel) even applies. That dead space, not the
++        # column_spacing value, was the dominant visible gap. Locking this
++        # button to a tight 30px overrides both CSS min-width and GTK's own
++        # natural-size calculation (same technique already proven for the
++        # bottom nav row's icon-only buttons and the "°C" header above) so
++        # the icon's cell hugs its actual content.
++        name.set_size_request(26, -1)
+         name.get_style_context().add_class(class_name)
+         # Marker class (2026-07-30): lets CSS give THIS (icon-only) button a
+         # much narrower min-width floor than temperature.py's own device
+@@ -440,6 +464,11 @@
+ 
+     def create_left_panel(self):
+         self.labels["devices"] = Gtk.Grid(vexpand=False)
++        # column_spacing=6 (2026-07-30, gap-tightening follow-up): explicit
++        # gap between the icon column and the value column, per
++        # user-specified target (~4-8px) -- same rationale/technique as
++        # main_menu's own column_spacing set just above.
++        self.labels["devices"].set_column_spacing(4)
          self.labels["devices"].get_style_context().add_class("heater-grid")
  
          name = Gtk.Label()
--        temp = Gtk.Label(label=_("Temp (°C)"))
-+        # Icon-only dashboard rows (2026-07-30, graph-width follow-up): the
-+        # full "Temp (°C)" header text is much wider than the actual values
-+        # it sits above ("21.4" etc.) -- since this header shares column 1
-+        # of this Grid with those value buttons, its own (wide) natural
-+        # width was forcing the ENTIRE value column to stay that wide too,
-+        # leaving a large dead gap between the short numbers and the graph
-+        # that started at column 1's now-unnecessarily-wide right edge.
-+        # Shortened to "°C" (still communicates the unit) and capped with
-+        # set_size_request -- the same size-locking idiom already used for
-+        # the bottom nav row's icon-only buttons above -- so this header can
-+        # never re-inflate the column regardless of locale/translation
-+        # length. This directly frees the space graph_panel's hexpand=True
-+        # (see the "hexpand=False" comment on landscape_left_panel above)
-+        # was already set up to claim, but couldn't while this header
-+        # anchored column 1's minimum width.
-+        temp = Gtk.Label(label=_("°C"))
-+        temp.set_size_request(40, -1)
- 
-         self.labels["devices"].attach(name, 0, 0, 1, 1)
-         self.labels["devices"].attach(temp, 1, 0, 1, 1)

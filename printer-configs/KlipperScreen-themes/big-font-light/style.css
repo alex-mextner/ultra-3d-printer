@@ -270,6 +270,45 @@
     min-width: 6.5em;
 }
 
+/* Icon-only dashboard rows (2026-07-30, main_menu.py add_device): name
+ * buttons on the MAIN DASHBOARD only carry an extra `name_icon_only`
+ * marker class (main_menu.py's add_device -- NOT panels/temperature.py's
+ * separate, unmodified add_device/create_left_panel, which still shows
+ * full device names and still needs the 6.5em floor above). This
+ * selector is MORE specific (4 selectors: type + 3 classes) than
+ * `.heater-grid button.graph_label` (3 selectors) above, so it wins
+ * regardless of source order, without touching the shared rule that
+ * temperature.py's device list still depends on. 2.3em is just enough
+ * for one ~22px icon (button_image_scale-sized, see main_menu.py) plus
+ * this rule's own padding (.15em each side) and the unconditional
+ * .graph_label left border (.4em, base.css) -- measured live via a
+ * temporary get_preferred_width() dump, not guessed; see
+ * orangepi-display/klipperscreen-patches/dashboard-icon-only.patch for
+ * the before/after numbers.
+ *
+ * CORRECTION (2026-07-30, gap-tightening follow-up): the 2.3em floor
+ * above was never actually the binding constraint. Live GTK measurement
+ * (DBG_WIDTH log) showed this button's real natural width is 44px, well
+ * past the 2.3em(~32px) floor -- and set_size_request(30,-1) in
+ * main_menu.py's add_device() had ZERO effect on that number, because
+ * Gtk.Widget.set_size_request() can only WIDEN a widget past its natural
+ * content-driven minimum, never shrink it below what the widget's own
+ * children genuinely need -- so the real culprit was this rule's OWN
+ * inherited `padding: 0 .15em` (from the shared `.heater-grid button`
+ * rule above) plus GTK/Adwaita's own default button chrome for the
+ * `image-button` style class GTK auto-adds to icon-only buttons (visible
+ * in a DBG_STATE dump: `name_classes=[...'image-button'...]`), neither of
+ * which the old min-width-only override touched. Explicit `padding: 0`
+ * here (more specific than the shared rule, so it wins) removes this
+ * rule's own contribution; `min-width: 0` removes the (already-moot)
+ * floor entirely, letting the button shrink to whatever its actual
+ * content (icon pixbuf + the unconditional .graph_label left border)
+ * needs. */
+.heater-grid button.graph_label.name_icon_only {
+    min-width: 0;
+    padding: 0;
+}
+
 .horizontal_togglebuttons {
     min-height: 1.6em;
 }
