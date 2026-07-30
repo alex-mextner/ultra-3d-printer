@@ -1,0 +1,157 @@
+diff --git a/ks_includes/KlippyGtk.py b/ks_includes/KlippyGtk.py
+index 44b1617..8ae0eb1 100644
+--- a/ks_includes/KlippyGtk.py
++++ b/ks_includes/KlippyGtk.py
+@@ -323,13 +323,53 @@ class KlippyGtk:
+         dialog.connect("response", self.screen.lock_screen.reset_timeout)
+         dialog.connect("response", callback, *args)
+         dialog.get_style_context().add_class("dialog")
++        # 2026-07-31 black-background fix, dialog follow-up, part 1 of 2: see
++        # the matching content_area.add_class() below for the full writeup.
++        # Painting content_area alone left a ~1em black ring around it,
++        # confirmed live by pixel-sampling a second screenshot after that fix
++        # ((2,2) was still (0,0,0) while the card interior correctly showed
++        # @bg) -- '.dialog''s own `margin: 1em` (see styles/base.css) creates
++        # a gap between content_area and the dialog window's own edge, and
++        # that gap is painted by the WINDOW's background, which turns out to
++        # be exactly as unpainted as main_grid was. Same class + same @bg
++        # fallback on the dialog itself closes that ring. This does mean the
++        # dialog no longer shows '.dialog''s intended @text-inv "card"
++        # contrast against @bg -- accepted deliberately: that contrast was
++        # never actually visible on this device (the rendering path
++        # painting it was broken from the start), and a uniform @bg dialog
++        # consistent with every other panel beats a black ring around a
++        # correctly-colored card.
++        dialog.get_style_context().add_class("app_dialog_content")
+ 
+         content_area = dialog.get_content_area()
+-        content_area.set_margin_start(10)
+-        content_area.set_margin_end(5)
+-        content_area.set_margin_top(5)
++        # 2026-07-31 black-background fix, dialog follow-up, part 3: these
++        # were set_margin_start(10)/end(5)/top(5)/bottom(0). GTK margins are
++        # empty space OUTSIDE a widget's own painted rectangle -- they come
++        # out of the PARENT's territory, so content_area's background paint
++        # (added below) never reached them, leaving an unpainted ring
++        # exactly this size around the card no matter what CSS class/color
++        # was tried on content_area or on `dialog` itself (confirmed by
++        # pixel-sampling three separate live screenshots, one per attempted
++        # fix). Zeroed out; the equivalent spacing is now CSS padding on
++        # styles/base.css's `.app_dialog_content` instead, which IS inside
++        # the painted rectangle.
++        content_area.set_margin_start(0)
++        content_area.set_margin_end(0)
++        content_area.set_margin_top(0)
+         content_area.set_margin_bottom(0)
+         content_area.add(content)
++        # 2026-07-31 black-background fix, dialog follow-up, part 2 of 2 --
++        # see dialog.get_style_context().add_class() above for the full
++        # writeup (user report, live screenshot of the "Save configuration?"
++        # confirm dialog rendering solid black). content_area is the widget
++        # that actually spans the dialog's visible content area (same idiom
++        # as main_grid inside screen.py's overlay); the class on `dialog`
++        # above covers the '.dialog''s `margin: 1em` ring around it. Both
++        # share styles/base.css's shared background-color rule so this fixes
++        # every KlippyGtk.Dialog() caller (Save Config, PID Calibrate
++        # confirm, every _confirm_send_action) without touching either
++        # theme file.
++        content_area.get_style_context().add_class("app_dialog_content")
+ 
+         dialog.show_all()
+         # Change cursor to blank
+diff --git a/styles/base.css b/styles/base.css
+index 9812ee5..6d49a80 100644
+--- a/styles/base.css
++++ b/styles/base.css
+@@ -54,10 +54,32 @@ button:disabled {
+  * (show_fullscreen_graph()/KlippyGtk.Dialog()), where this DrawingArea is
+  * the dialog's only real content and there is no @bg-painted ancestor
+  * behind it -- confirmed live, whole dialog rendered black except the
+- * explicitly-drawn grid lines/axis text/curves. */
++ * explicitly-drawn grid lines/axis text/curves.
++ *
++ * 2026-07-31 second follow-up: every Gtk.Dialog built by KlippyGtk.Dialog()
++ * (Save Config confirm, PID Calibrate confirm, every _confirm_send_action
++ * popup) -- same root cause again, confirmed by pixel-sampling a live
++ * screenshot of the "Save configuration?" dialog: (0,0,0) pure black at
++ * the corners/margins AND behind the message text, not this theme's @bg or
++ * @text-inv. Each such dialog is a fresh top-level GdkWindow realized at
++ * runtime (unlike the one persistent KlipperScreen window mapped at
++ * startup, which the original diagnosis above confirmed resolves @bg
++ * correctly) -- on this compositor-less raw X11/DRM setup a newly realized
++ * surface starts unpainted. Fixed on content_area (see
++ * ks_includes/KlippyGtk.py's Dialog(), class app_dialog_content) rather
++ * than the dialog window itself: content_area is the Gtk.Box that actually
++ * spans the dialog's visible area (same idiom as main_grid inside
++ * screen.py's overlay), and painting it directly sidesteps needing the
++ * window-level '.dialog'/'window' rules below to themselves resolve
++ * correctly on a freshly-realized surface. Deliberately @bg, not the
++ * '.dialog' rule's @text-inv "card" color below -- @bg keeps this fallback
++ * visually consistent with every other panel/dialog on the device instead
++ * of introducing a second, dialog-only background color that only shows up
++ * on the rendering path that was broken to begin with. */
+ .main_overlay,
+ .main_grid,
+ .heatergraph,
++.app_dialog_content,
+ list row,
+ treeview.view,
+ window {
+@@ -339,11 +361,54 @@ trough {
+     padding: 0.25em 2.5em;
+ }
+ 
++/* 2026-07-31 black-background fix, dialog case (user report, live
++ * screenshot: the "Save configuration?" confirm dialog rendered solid
++ * black). Root cause, same family as .main_overlay/.main_grid/.heatergraph
++ * above: every Gtk.Dialog built by KlippyGtk.Dialog() (Save Config confirm,
++ * PID Calibrate confirm, every _confirm_send_action popup) is a fresh
++ * top-level GdkWindow realized at *runtime*, unlike the one persistent
++ * KlipperScreen window mapped at startup that the original diagnosis above
++ * confirmed does resolve @bg correctly. On this compositor-less raw
++ * X11/DRM setup, that runtime-realized surface never paints its
++ * CSS-declared background no matter what selector targets the window node
++ * itself -- confirmed by pixel-sampling four separate live screenshots:
++ * neither `window {background-color: @bg}` above nor `.dialog`'s own
++ * `background-color: @text-inv` below ever painted anything on the actual
++ * GtkWindow, class name or not.
++ *
++ * The fix that actually worked: paint content_area (the Gtk.Box that
++ * holds the dialog's real content, see KlippyGtk.py's Dialog(), class
++ * app_dialog_content, background-color: @bg in the shared rule above) --
++ * same idiom as main_grid inside screen.py's overlay, sidestepping the
++ * broken window-level paint entirely rather than trying to fix it. That
++ * alone left a black ring around the card exactly the size of the layout
++ * gap between content_area and the window edge (GTK margins/padding are
++ * empty space OUTSIDE a widget's own painted rectangle -- they're the
++ * PARENT's territory to paint, and this parent doesn't). So `margin: 1em`
++ * here and content_area's three set_margin_*(10/5/5/0) calls in
++ * KlippyGtk.py are both gone (zeroed), and this rule's `padding` moved to
++ * `.app_dialog_content` below instead, where it's applied to the widget
++ * that's actually proven to paint -- content_area now spans the entire
++ * window with no gap left for the broken layer to show through, and the
++ * equivalent inset for text/buttons comes from padding INSIDE that already
++ * -painted rectangle instead of margin outside it. */
+ .dialog {
+-    border: .1em solid @text-inv;
+-    padding: 0.25em 2.5em;
+     background-color: @text-inv;
+-    margin: 1em;
++    margin: 0;
++    padding: 0;
++    /* border removed (was `.1em solid @text-inv`, 2026-07-31): it reserved
++     * ~1-2px of box-model space between content_area and the window's true
++     * edge, same class of gap as the margin/padding above -- confirmed live,
++     * a hairline strip of unpainted black remained at the bottom/right edge
++     * after zeroing margin+padding, exactly border-width sized. This border
++     * was never visible anyway once background-color started actually
++     * painting (it's the same @text-inv as the fill, zero contrast against
++     * it by design), so removing it costs nothing visually and closes the
++     * last of the gap. */
++}
++
++.app_dialog_content {
++    padding: 0.25em 2.5em;
+ }
+ 
+ .dialog button {

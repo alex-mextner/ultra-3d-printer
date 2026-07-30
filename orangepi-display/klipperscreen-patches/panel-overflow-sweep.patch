@@ -65,7 +65,7 @@
          return right
  
      def switch_preheat_adjust(self, widget):
-@@ -76,15 +110,52 @@
+@@ -76,23 +110,75 @@
          self.grid.show_all()
  
      def preheat(self):
@@ -119,6 +119,103 @@
          scroll.add(self.labels["preheat_grid"])
          return scroll
  
+     def delta_adjust(self):
+         # Create buttons for increase and decrease
+-        self.labels["increase"] = self._gtk.Button("increase", None, "color1")
++        # 2026-07-31 landscape overflow fix, the binding constraint (found by
++        # live get_preferred_width() logging, since removed -- the 2x2
++        # tempgrid below only needs 56px, so it was never the problem):
++        # KlippyGtk.Button() multiplies its icon scale by an extra 1.4 when
++        # `label is None`, i.e. exactly for icon-only buttons like these two.
++        # That made each -/+ button 42px minimum, so the pair needed 84px
++        # against the 79px this column actually gets -- a 5px deficit that
++        # kept the row (and everything right of it) hanging off the screen.
++        # Passing button_image_scale / 1.4 cancels that icon-only bonus, the
++        # exact idiom already used for the dashboard's device rows in
++        # dashboard-icon-only-rows.patch. Icons land at the same visual size
++        # as the rest of the UI's icons rather than oversized, and the pair
++        # drops to ~70px. Landscape-only concern, but the scale is harmless
++        # in portrait too, so it is not branched.
++        icon_scale = self._gtk.button_image_scale / 1.4
++        self.labels["increase"] = self._gtk.Button("increase", None, "color1", icon_scale)
+         self.labels["increase"].connect("clicked", self.change_target_temp_incremental, "+")
+-        self.labels["decrease"] = self._gtk.Button("decrease", None, "color3")
++        self.labels["decrease"] = self._gtk.Button("decrease", None, "color3", icon_scale)
+         self.labels["decrease"].connect("clicked", self.change_target_temp_incremental, "-")
+ 
+         # Create buttons for temperature deltas
+@@ -106,21 +192,61 @@
+ 
+         # Create grid for temperature deltas
+         tempgrid = Gtk.Grid()
+-        for j, i in enumerate(self.tempdeltas):
+-            tempgrid.attach(self.labels[f"deg{i}"], j, 0, 1, 1)
++        if self._screen.vertical_mode:
++            for j, i in enumerate(self.tempdeltas):
++                tempgrid.attach(self.labels[f"deg{i}"], j, 0, 1, 1)
++        else:
++            # 2026-07-31 landscape overflow fix: 2x2 instead of 1x4. Four
++            # delta buttons side by side in the ~79px this column gets is
++            # ~20px each, which cannot hold "25" plus the
++            # .horizontal_togglebuttons border -- measured live, the row
++            # overflowed and "25" was off-screen entirely. 2x2 gives each
++            # button ~39px, comfortably enough, and the extra row costs
++            # height this column has to spare (the delta stack is much
++            # shorter than the preheat list it replaces).
++            for j, i in enumerate(self.tempdeltas):
++                tempgrid.attach(self.labels[f"deg{i}"], j % 2, j // 2, 1, 1)
+ 
+-        # Create grid for decrease button, increase button, temperature labels, and grid
+-        deltagrid = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
+         if self._screen.vertical_mode:
++            # Portrait branch unchanged -- it has the full screen width and
++            # none of the landscape height/width pressure.
++            deltagrid = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
+             deltagrid.attach(self.labels["decrease"], 0, 1, 1, 1)
+             deltagrid.attach(self.labels["increase"], 1, 1, 1, 1)
+             deltagrid.attach(tempgrid, 0, 2, 2, 1)
+-        else:
+-            deltagrid.attach(self.labels["decrease"], 0, 1, 1, 3)
+-            deltagrid.attach(self.labels["increase"], 1, 1, 1, 3)
+-            deltagrid.attach(Gtk.Label(_("Temperature") + " (°C)"), 0, 4, 2, 1)
+-            deltagrid.attach(tempgrid, 0, 5, 2, 2)
+-        return deltagrid
++            return deltagrid
++
++        # 2026-07-31 landscape overflow fix (the sibling of the preheat fix
++        # in create_right_panel above -- same panel, the OTHER branch, which
++        # you reach via the sliders button next to Cooldown, and which
++        # becomes the DEFAULT view while printing/paused since show_preheat
++        # is `state not in ("printing", "paused")`).
++        #
++        # Was a Gtk.Grid(column_homogeneous=True) with two children spanning
++        # both columns: a raw Gtk.Label("Temperature (°C)") and tempgrid. Per
++        # the same GTK pathology documented in create_right_panel, a
++        # column-spanning child inflates EVERY column's minimum to its own
++        # undivided minimum -- and that label is ~16 characters (~110-120px
++        # at this theme's 14px font) against the ~79px actually available.
++        # Measured live before the fix: this widget reported
++        # minimum_width == natural_width == 122px and was allocated
++        # x=241..363 on a 320px screen -- the "+" button, the "25" delta, the
++        # sliders button itself and even the titlebar clock were all pushed
++        # off the right edge.
++        #
++        # Plain Gtk.Box instead (sum/max sizing, no span inflation), and the
++        # "Temperature (°C)" caption is dropped: it is redundant here -- the
++        # panel is already titled "Temperature" and the device list carries a
++        # "Temp (°C)" column header two inches to the left. Same call, for
++        # the same reason, as dropping "Move Distance (mm)" in
++        # move-panel-bottom-clipping.patch.
++        deltabox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
++        pm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
++        pm_row.pack_start(self.labels["decrease"], True, True, 0)
++        pm_row.pack_start(self.labels["increase"], True, True, 0)
++        deltabox.pack_start(pm_row, True, True, 0)
++        deltabox.pack_start(tempgrid, False, False, 0)
++        return deltabox
+ 
+     def change_temp_delta(self, widget, tempdelta):
+         logging.info(f"### tempdelta {tempdelta}")
 --- a/panels/system.py
 +++ b/panels/system.py
 @@ -175,12 +175,36 @@
@@ -236,7 +333,7 @@
          tv.connect("button-press-event", self._screen.remove_keyboard)
 --- a/styles/base.css
 +++ b/styles/base.css
-@@ -38,9 +38,26 @@
+@@ -38,9 +38,48 @@
   * Gtk.Grid is used ~70 other places in the codebase (some nested inside
   * intentionally differently-colored ancestors) and job_status.py has its
   * own Gtk.Overlay for a progress indicator over a thumbnail image, where
@@ -257,10 +354,90 @@
 + * (show_fullscreen_graph()/KlippyGtk.Dialog()), where this DrawingArea is
 + * the dialog's only real content and there is no @bg-painted ancestor
 + * behind it -- confirmed live, whole dialog rendered black except the
-+ * explicitly-drawn grid lines/axis text/curves. */
++ * explicitly-drawn grid lines/axis text/curves.
++ *
++ * 2026-07-31 second follow-up: every Gtk.Dialog built by KlippyGtk.Dialog()
++ * (Save Config confirm, PID Calibrate confirm, every _confirm_send_action
++ * popup) -- same root cause again, confirmed by pixel-sampling a live
++ * screenshot of the "Save configuration?" dialog: (0,0,0) pure black at
++ * the corners/margins AND behind the message text, not this theme's @bg or
++ * @text-inv. Each such dialog is a fresh top-level GdkWindow realized at
++ * runtime (unlike the one persistent KlipperScreen window mapped at
++ * startup, which the original diagnosis above confirmed resolves @bg
++ * correctly) -- on this compositor-less raw X11/DRM setup a newly realized
++ * surface starts unpainted. Fixed on content_area (see
++ * ks_includes/KlippyGtk.py's Dialog(), class app_dialog_content) rather
++ * than the dialog window itself: content_area is the Gtk.Box that actually
++ * spans the dialog's visible area (same idiom as main_grid inside
++ * screen.py's overlay), and painting it directly sidesteps needing the
++ * window-level '.dialog'/'window' rules below to themselves resolve
++ * correctly on a freshly-realized surface. Deliberately @bg, not the
++ * '.dialog' rule's @text-inv "card" color below -- @bg keeps this fallback
++ * visually consistent with every other panel/dialog on the device instead
++ * of introducing a second, dialog-only background color that only shows up
++ * on the rendering path that was broken to begin with. */
  .main_overlay,
  .main_grid,
 +.heatergraph,
++.app_dialog_content,
  list row,
  treeview.view,
  window {
+@@ -322,11 +361,54 @@
+     padding: 0.25em 2.5em;
+ }
+ 
++/* 2026-07-31 black-background fix, dialog case (user report, live
++ * screenshot: the "Save configuration?" confirm dialog rendered solid
++ * black). Root cause, same family as .main_overlay/.main_grid/.heatergraph
++ * above: every Gtk.Dialog built by KlippyGtk.Dialog() (Save Config confirm,
++ * PID Calibrate confirm, every _confirm_send_action popup) is a fresh
++ * top-level GdkWindow realized at *runtime*, unlike the one persistent
++ * KlipperScreen window mapped at startup that the original diagnosis above
++ * confirmed does resolve @bg correctly. On this compositor-less raw
++ * X11/DRM setup, that runtime-realized surface never paints its
++ * CSS-declared background no matter what selector targets the window node
++ * itself -- confirmed by pixel-sampling four separate live screenshots:
++ * neither `window {background-color: @bg}` above nor `.dialog`'s own
++ * `background-color: @text-inv` below ever painted anything on the actual
++ * GtkWindow, class name or not.
++ *
++ * The fix that actually worked: paint content_area (the Gtk.Box that
++ * holds the dialog's real content, see KlippyGtk.py's Dialog(), class
++ * app_dialog_content, background-color: @bg in the shared rule above) --
++ * same idiom as main_grid inside screen.py's overlay, sidestepping the
++ * broken window-level paint entirely rather than trying to fix it. That
++ * alone left a black ring around the card exactly the size of the layout
++ * gap between content_area and the window edge (GTK margins/padding are
++ * empty space OUTSIDE a widget's own painted rectangle -- they're the
++ * PARENT's territory to paint, and this parent doesn't). So `margin: 1em`
++ * here and content_area's three set_margin_*(10/5/5/0) calls in
++ * KlippyGtk.py are both gone (zeroed), and this rule's `padding` moved to
++ * `.app_dialog_content` below instead, where it's applied to the widget
++ * that's actually proven to paint -- content_area now spans the entire
++ * window with no gap left for the broken layer to show through, and the
++ * equivalent inset for text/buttons comes from padding INSIDE that already
++ * -painted rectangle instead of margin outside it. */
+ .dialog {
+-    border: .1em solid @text-inv;
+-    padding: 0.25em 2.5em;
+     background-color: @text-inv;
+-    margin: 1em;
++    margin: 0;
++    padding: 0;
++    /* border removed (was `.1em solid @text-inv`, 2026-07-31): it reserved
++     * ~1-2px of box-model space between content_area and the window's true
++     * edge, same class of gap as the margin/padding above -- confirmed live,
++     * a hairline strip of unpainted black remained at the bottom/right edge
++     * after zeroing margin+padding, exactly border-width sized. This border
++     * was never visible anyway once background-color started actually
++     * painting (it's the same @text-inv as the fill, zero contrast against
++     * it by design), so removing it costs nothing visually and closes the
++     * last of the gap. */
++}
++
++.app_dialog_content {
++    padding: 0.25em 2.5em;
+ }
+ 
+ .dialog button {

@@ -1,0 +1,30 @@
+diff --git a/panels/fine_tune.py b/panels/fine_tune.py
+index a47bf4c..e23c050 100644
+--- a/panels/fine_tune.py
++++ b/panels/fine_tune.py
+@@ -64,7 +64,24 @@ class Panel(ScreenPanel):
+             if i == self.e_delta:
+                 ctx.add_class("horizontal_togglebuttons_active")
+             extgrid.attach(self.labels[f"edelta{i}"], j, 0, 1, 1)
+-        grid = Gtk.Grid(column_homogeneous=True)
++        # 2026-07-31 overflow fix (user report, live screenshot): landscape
++        # mode's 3 columns (Z / Speed / Extrude) don't span each other here
++        # (each column's cells are single-span, unlike the temperature-panel
++        # bug from earlier tonight), but column_homogeneous=True still forces
++        # all 3 to match the single widest button anywhere in the grid --
++        # "  0.000mm" on the Z-offset button, min/natural 100px. 3 * 100 =
++        # 300px against a real ~284px budget (320px screen - ~36px sidebar),
++        # confirmed live (get_allocation(), since removed): grid allocated
++        # exactly 300px starting at x=36, i.e. ending at x=336, 16px past the
++        # physical screen -- and unlike most other panels tonight, THIS one
++        # has no ScrolledWindow at all (self.content.add(grid) directly), so
++        # that overflow wasn't reachable by any scroll, not even an
++        # inaccessible one. column_homogeneous=False lets each column size to
++        # its own actual content instead: Z (~100px, still driven by
++        # "0.000mm"), Speed (~73px, "Speed +" is the longest cell there),
++        # Extrude (~94px, "Extrusion +"/"Extrusion -") -- total ~267px,
++        # comfortably inside the real budget with room to spare.
++        grid = Gtk.Grid(column_homogeneous=False)
+ 
+         self.labels["z+"] = self._gtk.Button("z-farther", "Z+", "color1")
+         self.labels["z-"] = self._gtk.Button("z-closer", "Z-", "color1")

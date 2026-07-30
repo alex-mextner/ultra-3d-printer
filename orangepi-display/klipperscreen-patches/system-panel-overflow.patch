@@ -1,0 +1,87 @@
+diff --git a/panels/system.py b/panels/system.py
+index 4396c93..7cffc7e 100644
+--- a/panels/system.py
++++ b/panels/system.py
+@@ -175,12 +175,36 @@ class Panel(ScreenPanel):
+         self.cpu_flowbox = Gtk.FlowBox(
+             selection_mode=Gtk.SelectionMode.NONE,
+             homogeneous=True,
+-            column_spacing=32,
++            # 2026-07-31 overflow fix, continued: column_spacing 32 -> 10.
++            # halign FILL + hexpand True (both still needed -- see below) had
++            # FlowBox stretch its 2 (now-capped) columns across the entire
++            # width the grid handed it, and with 32px between them that put
++            # the 2nd column's right edge past x=320 (confirmed live: capping
++            # to 2-per-line alone only fixed the *count*, a follow-up
++            # screenshot still showed the 2nd core's value clipped to a
++            # single bracket-like glyph at the screen edge). Each label is a
++            # few characters ("  0%".."100%"); it doesn't need anywhere near
++            # 32px of daylight between columns on a 320px screen.
++            column_spacing=10,
+             row_spacing=0,
+             halign=Gtk.Align.FILL,
+             hexpand=True,
+         )
+         self.cpu_flowbox.set_min_children_per_line(1)
++        # 2026-07-31 overflow fix (user report, live screenshot): with no
++        # max_children_per_line set, Gtk.FlowBox picked 3-per-line on this
++        # panel's ~150-160px column (column 0 -- "Cores:" -- and the sidebar
++        # eat most of the 320px screen), but 3 "  0%"-style labels plus two
++        # 32px column_spacing gaps don't actually fit that budget -- the 3rd
++        # core's percentage ran off the right edge of the screen (visible on
++        # a live screenshot as a single clipped glyph), leaving only 2 fully
++        # readable per line anyway and 1 wrapped alone to its own line below.
++        # Capping at 2 makes FlowBox commit to the width that's actually
++        # available instead of guessing 3 and clipping the overflow -- a
++        # clean 2-wide grid for any core count (Orange Pi One is quad-core,
++        # so this is 2 rows of 2 here; more cores just add more rows, which
++        # is fine, this whole section already scrolls).
++        self.cpu_flowbox.set_max_children_per_line(2)
+         self.cpu_flowbox.get_style_context().add_class("monospaced")
+ 
+         for i in range(self.cpu_count):
+@@ -209,6 +233,26 @@ class Panel(ScreenPanel):
+         self.populate_info()
+ 
+         scroll = self._gtk.ScrolledWindow()
++        # 2026-07-31 overflow fix, THE decisive lever (found by live
++        # get_allocation() logging, since removed -- guessing at spacing
++        # constants first was not enough, see the two notes above). This is a
++        # CustomScrolledWindow (ks_includes/widgets/scroll.py) with
++        # `overlay_scrolling: False` by default, so its vertical scrollbar --
++        # base.css `scrollbar slider {min-width: 2.5em}` == ~35px at this
++        # theme's 14px font -- eats real layout width out of the ~284px
++        # content area (320px screen minus the ~36px sidebar), leaving the
++        # viewport only ~249px. This panel is long and always scrolls, so
++        # that scrollbar is ALWAYS present. Measured: self.grid's minimum
++        # width is 273px (the "Cores:" label column 97px + the core-percent
++        # FlowBox 166px + spacing), and GTK honours a widget's minimum over
++        # the space actually available, so the grid was allocated its full
++        # 273px and simply got clipped by the 249px viewport -- cutting the
++        # right-hand core column mid-glyph, exactly as reported. Overlay
++        # scrolling draws the scrollbar on top of the content instead of
++        # beside it, returning those ~35px to the viewport (284px > 273px, so
++        # the grid now fits with room to spare). Same fix, same reason, as
++        # main-menu-single-column.patch and the Temperature preset column.
++        scroll.set_overlay_scrolling(True)
+         scroll.add(self.grid)
+         self.content.add(scroll)
+ 
+@@ -234,7 +278,16 @@ class Panel(ScreenPanel):
+     def populate_info(self):
+         # date
+         self.add_label_to_grid(self.prettify("date"), 0, bold=True)
+-        self.labels["date"] = Gtk.Label(label="", xalign=0)
++        # 2026-07-31 overflow fix (user report, live screenshot): unlike
++        # every value label built through add_label_to_grid() above (which
++        # already sets wrap=True + WORD_CHAR), this one was constructed
++        # directly with neither -- a full `now.strftime("%a %b %e %H:%M:%S
++        # %Z %Y")` string ("Fri Jul 31 01:39:50 MSK 2026") is long enough
++        # that it ran off the right edge of the 320px screen, cutting off
++        # the year. wrap=True + WORD_CHAR (matching add_label_to_grid's
++        # convention exactly) lets it break onto a second line instead.
++        self.labels["date"] = Gtk.Label(label="", xalign=0, wrap=True)
++        self.labels["date"].set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+         self.grid.attach(self.labels["date"], 1, self.current_row - 1, 1, 1)
+         self.add_label_to_grid("", 0)
+ 
