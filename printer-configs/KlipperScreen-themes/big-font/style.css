@@ -67,17 +67,24 @@
  *     screen -- confirmed via live screenshot showing only the top pixel
  *     sliver of those buttons. Shrunk the same way `.heater-grid button`
  *     already was above.
- *   - Main dashboard's "Print" button (3rd item in the right-hand menu
- *     column) clips to "Pri" at the bottom/right edge -- NOT fixed yet.
- *     Tried reducing `button.color1-4` padding; that made it WORSE (the
- *     button's own box then fit on screen, but its icon+label no longer
- *     fit inside that now-smaller box, so it rendered as a fully empty
- *     bordered rectangle -- confirmed via temporary debug borders, then
- *     reverted). Root layout (AutoGrid column count, main_menu.py) needs
- *     understanding before touching this again; see docs/issues.md. Low
- *     priority in practice: Print opens the gcodes panel, and printing
- *     isn't possible yet anyway (extruder disassembled, X homing
- *     untrusted -- see printer-status.md).
+ *   - Main dashboard's "Print" button (last item in the right-hand menu
+ *     column) used to clip to "Pri" at the bottom/right edge and be
+ *     unreachable by keyboard/D-pad focus. Tried reducing `button.color1-4`
+ *     padding first; that made it WORSE (the button's own box then fit on
+ *     screen, but its icon+label no longer fit inside that now-smaller box,
+ *     so it rendered as a fully empty bordered rectangle -- confirmed via
+ *     temporary debug borders, then reverted). Root cause was NOT CSS at
+ *     all: it was a request-size overflow in the AutoGrid/Grid layout
+ *     (`ks_includes/widgets/autogrid.py`'s `expand_last` giving the last of
+ *     5 items -- Print -- a colspan of 2 with no guard for a 1-column grid,
+ *     compounded by `column_homogeneous=True` on the parent Grid forcing
+ *     the whole pane to that doubled width) plus a keyboard-focus idle-
+ *     timeout/fallback interaction. FULLY FIXED 2026-07-30 in
+ *     `panels/main_menu.py` (see
+ *     `orangepi-display/klipperscreen-patches/main-menu-single-column.patch`
+ *     + README for the complete before/after and live verification
+ *     evidence) and `screen.py` (idle-focus-restore, same patch set). No
+ *     further CSS changes were needed here beyond what's already below.
  *   - Focus indicator was simply MISSING: this theme's style.css was
  *     written from scratch and never carried over the stock z-bolt
  *     theme's `button:focus { background-color: @active }` rule --

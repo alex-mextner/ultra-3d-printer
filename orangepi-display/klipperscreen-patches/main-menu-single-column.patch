@@ -1,8 +1,54 @@
 diff --git a/panels/main_menu.py b/panels/main_menu.py
-index f702390..2348d0e 100644
+index f702390..0ec98a5 100644
 --- a/panels/main_menu.py
 +++ b/panels/main_menu.py
-@@ -37,7 +37,25 @@ class Panel(MenuPanel):
+@@ -3,7 +3,7 @@ import logging
+ import gi
+ 
+ gi.require_version("Gtk", "3.0")
+-from gi.repository import GLib, Gtk
++from gi.repository import GLib, Gtk, Pango
+ 
+ from ks_includes.KlippyGtk import find_widget
+ from ks_includes.widgets.heatergraph import HeaterGraph
+@@ -19,10 +19,35 @@ class Panel(MenuPanel):
+         self.graph_update = None
+         self.active_heater = None
+         self.h = self.f = 0
++        # column_homogeneous=False (2026-07-30, part of the Print-button
++        # fix -- was True): with True, GTK forces this Grid's two columns
++        # (create_left_panel's heater graph, and menu_scroll below) to the
++        # SAME width -- whichever one asks for more. The heater graph/
++        # device-list column has its own real minimum-width need (~182px,
++        # driven by the device name/value list), and forcing the button
++        # column to match that would leave it no narrower than the graph
++        # column even when the buttons don't need that much -- and, before
++        # the expand_last fix below, was exactly how a single oversized
++        # child (Print) grew the ENTIRE grid rather than just its own
++        # column. False lets each column size to its own actual content,
++        # so the button column gets only what's left over after the graph
++        # column (~100px on this 320px screen) instead of being forced
++        # equal to it.
+         self.main_menu = Gtk.Grid(
+-            row_homogeneous=True, column_homogeneous=True, hexpand=True, vexpand=True
++            row_homogeneous=True, column_homogeneous=False, hexpand=True, vexpand=True
+         )
+         self.menu_scroll = self._gtk.ScrolledWindow()
++        # Overlay scrolling (2026-07-30, part of the Print-button fix): a
++        # non-overlay GTK scrollbar reserves real layout width (measured at
++        # ~47px for this theme's 14px font -- base.css `scrollbar slider {
++        # min-width: 2.5em}` -- see main-menu-single-column.patch/README for
++        # the full chain). On this pane's ~100px budget that would nearly halve
++        # the width actually available to the menu buttons themselves.
++        # Overlay mode draws the scrollbar on top of the content instead of
++        # beside it, so it costs no layout width; it still auto-hides when
++        # not scrolling/hovering, which is fine on a D-pad-only device with
++        # no persistent mouse hover anyway.
++        self.menu_scroll.set_overlay_scrolling(True)
+         self.numpad_visible = False
+ 
+         logging.info("### Making MainMenu")
+@@ -37,7 +62,63 @@ class Panel(MenuPanel):
              self.main_menu.attach(self.menu_scroll, 0, 3, 1, 2)
          else:
              self.main_menu.attach(self.create_left_panel(), 0, 0, 1, 1)
@@ -25,7 +71,45 @@ index f702390..2348d0e 100644
 +            # width instead of splitting it, so nothing needs to be wider
 +            # than what's actually available; menu_scroll already scrolls
 +            # vertically (Gtk.PolicyType.AUTOMATIC) to reach the extra rows.
-+            self.labels["menu"] = self.arrangeMenuItems(items, 1, True)
++            #
++            # expand_last=False (2026-07-30 follow-up fix): AutoGrid's
++            # expand_last logic (ks_includes/widgets/autogrid.py) spans the
++            # LAST item of an odd-length list across colspan=2 with no
++            # guard for max_columns==1 -- so with True here and 5 items
++            # (Move/Temperature/Extrude/More/Print, odd), Print alone was
++            # forced into a 2-column-wide cell. Because both AutoGrid and
++            # its parent main_menu Grid have column_homogeneous=True, GTK
++            # grew the ENTIRE grid to satisfy that one oversized cell:
++            # measured natural width doubled from 79px to 158px, cascading
++            # up to main_menu requesting 410px total inside this 320px-wide
++            # window -- confirmed via live allocation dump and a pixel scan
++            # showing Print's content confined to a right-edge sliver
++            # (x=305-319, never left of ~305), i.e. a request-size overflow
++            # clipping Print to "Pri", not a scroll/clip-property bug.
++            # expand_last only ever made sense for >=2 columns (spreading a
++            # leftover odd item across the remaining width); in a grid
++            # that's deliberately 1 column already, colspan=2 is never
++            # valid and always overflows. False restores Print to the same
++            # 79px width as its siblings.
++            self.labels["menu"] = self.arrangeMenuItems(items, 1, False)
++            # Single-line labels for these 5 buttons only (2026-07-30,
++            # final part of the Print-button fix): the shared Button()/
++            # format_label() default (lines=2, WORD_CHAR wrap) is fine for
++            # most menus, but on this pane's narrow ~100px width it made
++            # "Temperature" hard-wrap mid-word ("Temperatur"/"e") -- legible
++            # but ugly, and taller than intended. Overriding just these
++            # buttons' labels to lines=1 (no wrap, ellipsize) keeps every
++            # row's height uniform and predictable; a long label ellipsizes
++            # cleanly instead of breaking mid-word. Scoped to this loop
++            # (main_menu's own 5 items) only, not the shared Button()
++            # default, so other menus/submenus that may rely on 2-line
++            # wrapping for longer labels are unaffected.
++            for _child in self.labels["menu"].get_children():
++                _lbl = find_widget(_child, Gtk.Label)
++                if _lbl is not None:
++                    _lbl.set_line_wrap(False)
++                    _lbl.set_lines(1)
++                    _lbl.set_ellipsize(Pango.EllipsizeMode.END)
              self.menu_scroll.add(self.labels["menu"])
              self.main_menu.attach(self.menu_scroll, 1, 0, 1, 1)
          self.content.add(self.main_menu)

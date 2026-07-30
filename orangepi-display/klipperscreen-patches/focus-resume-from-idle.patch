@@ -1,0 +1,57 @@
+--- a/screen.py
++++ b/screen.py
+@@ -102,7 +102,9 @@
+         self.env.install_gettext_translations(self._config.get_lang())
+
+         self._focus_clear_timeout_id = None
++        self._last_focus_widget = None
+         self.connect("key-press-event", self._key_press_event)
++        self.connect("set-focus", self._on_set_focus)
+         self.connect("configure_event", self.update_size)
+         display = Gdk.Display.get_default()
+         self.display_number = os.environ.get("DISPLAY") or ":0"
+@@ -1426,11 +1428,44 @@
+
+     def _key_press_event(self, widget, event):
+         keyval_name = Gdk.keyval_name(event.keyval)
++        handled = False
+         if keyval_name == "Escape":
+             self._menu_go_back(home=True)
+         elif keyval_name == "BackSpace" and self.keyboard is None:
+             self.base_panel.back()
++        elif keyval_name in ("Up", "Down", "Left", "Right") and self.get_focus() is None:
++            # Resume-from-idle fix (2026-07-30): if the 10s idle timeout
++            # below already cleared focus, GTK's built-in directional-focus
++            # fallback from "nothing focused" is asymmetric -- Up lands on
++            # the last menu item (e.g. Print) but Down jumps straight to
++            # the sidebar's notification bell, unrelated to wherever the
++            # user actually was (e.g. "More"). Confirmed live: this, not a
++            # broken focus chain, was the real mechanism behind the
++            # originally-reported "Down on More jumps to the bell" bug --
++            # ordinary pacing on a 5-button pad routinely exceeds the 10s
++            # window. Restore the last focused widget instead of letting
++            # GTK's fallback fire, so the first arrow press after a pause
++            # just re-highlights where the user left off (it does not also
++            # move in the pressed direction -- that would risk a double
++            # step once focus tracking below also updates). Subsequent
++            # presses within the window behave exactly as before.
++            if self._last_focus_widget is not None:
++                try:
++                    mapped = self._last_focus_widget.get_mapped()
++                except Exception:
++                    mapped = False
++                if mapped:
++                    self.set_focus(self._last_focus_widget)
++                    handled = True
+         self._reset_focus_clear_timeout()
++        return handled
++
++    def _on_set_focus(self, window, widget):
++        # Track the most recent non-None focus target continuously (not
++        # just at clear-timeout time) so it always reflects wherever the
++        # user last navigated, for the resume-from-idle restore above.
++        if widget is not None:
++            self._last_focus_widget = widget
+
+     def _reset_focus_clear_timeout(self):
+         # This is a 5-button D-pad, not a touchscreen: focus only exists to
