@@ -1,0 +1,367 @@
+/*
+ * big-font-light theme
+ *
+ * Sibling of ../big-font, NOT a modification of it -- both are kept
+ * installed so the theme can be switched with one line in
+ * printer-configs/KlipperScreen.conf (`theme: big-font` vs
+ * `theme: big-font-light`). Built 2026-07-30 in response to GitHub issue
+ * #10 ("no light theme for the big-font custom theme"). An earlier pass
+ * the same night only investigated (tried KlipperScreen's bundled
+ * material-light theme wholesale and rejected it -- see below for what was
+ * actually wrong with it -- then checked z-bolt/colorized and found them
+ * dark-family); no light theme was actually built until this pass.
+ *
+ * All the 320x240-panel LAYOUT fixes below (font-size bump, heatergraph/
+ * heater-grid/horizontal_togglebuttons sizing, buttons_slim border,
+ * focus-indicator existence) are copied verbatim from big-font/style.css --
+ * they are not color-related and apply identically regardless of palette.
+ * See that file's own header comment for the full reasoning/history behind
+ * each of those (font_size computation, the two 2026-07-30 regressions and
+ * how they were root-caused, etc.) -- not repeated here. What follows here
+ * is only what's new/different for a light palette: the color variables,
+ * the icon set, and several base.css rules that hardcode a literal color
+ * instead of a theme variable and therefore silently break when @bg flips
+ * from dark to light.
+ *
+ * ============================================================
+ * ICON SET -- the key challenge for any light KlipperScreen theme
+ * ============================================================
+ * big-font/images is a verbatim copy of styles/z-bolt/images: white-stroke
+ * line art (fill/stroke #ffffff throughout, confirmed by grepping every
+ * svg) meant to sit on a near-black @bg. On a light background those icons
+ * are close to invisible.
+ *
+ * CSS recoloring was checked and ruled out, not assumed: KlipperScreen
+ * loads every icon as a raw pixbuf, not as a GTK icon-theme/symbolic icon --
+ * confirmed by reading ks_includes/KlippyGtk.py directly:
+ * `_PixbufFromIcon()` calls `GdkPixbuf.Pixbuf.new_from_file_at_size(filename,
+ * ...)`. That's a flat rasterization of whatever colors are baked into the
+ * SVG; it never goes through Gtk.IconTheme.load_icon(), which is the only
+ * GTK3 path that honors CSS recoloring (`-gtk-icon-palette` on symbolic
+ * icons). So a `-gtk-icon-effect`/filter-based approach (option b) is not
+ * available here at all, confirmed rather than assumed.
+ *
+ * That left finding a real dark/colored icon set already in the repo
+ * (option a) vs. hand-recoloring z-bolt's SVGs (option c). Both are
+ * possible -- a find/replace of #ffffff -> a dark hex across a copy of
+ * z-bolt/images was actually tried first (still in git history of this
+ * folder) -- but styles/material-light/images on the live filesystem turned
+ * out to be a genuine, separate, purpose-built icon set, not the same
+ * white-line-art redrawn: its 106 filenames match z-bolt's exactly
+ * (diffed, zero missing/extra), and a grep of every file's fill/stroke
+ * values across the whole set shows #000000 dominating (individual files
+ * spot-checked too, e.g. wifi_excellent.svg, extruder.svg -- a completely
+ * different, simpler path than z-bolt's version of the same icon -- are
+ * Google Material Symbols-style solid-black glyphs). That's a strictly
+ * better source than a manual recolor: it's what KlipperScreen's own
+ * upstream light theme actually ships, not an improvised palette-swap.
+ * Used here (images/ in this folder is a copy of
+ * styles/material-light/images, not z-bolt's).
+ *
+ * Before trusting it, every near-white value that turned up in a raw grep
+ * of material-light/images was individually checked (not just the ffffff
+ * ones -- also e2e2e2/e8eaed/bebebe, since a light gray "cutout" fill would
+ * be just as invisible on a light bg as white would):
+ *   - battery-*.svg (7 files): each has `<svg fill="#e8eaed">` on the ROOT
+ *     element, but the one visible `<path>` inside sets its own
+ *     `fill:#000000` which wins -- the root attribute is dead, checked in
+ *     all 7, not just one.
+ *   - spoolman.svg: its only `stroke:#ffffff`/`fill:#bebebe` are inside a
+ *     `<clipPath>` definition (stroke-width:0) -- clipPath children are
+ *     never painted, they only define a mask shape; the actual visible
+ *     path is plain `fill:#000000`.
+ *   - filament.svg: real, visible `fill:#e2e2e2` on the strand-body fills
+ *     (between black stroke outlines) -- but #e2e2e2 is close enough to
+ *     this theme's @bg (#EDEFF2) that it reads as intended (a faint tint
+ *     inside black linework, not a broken cutout); this is very likely WHY
+ *     material-light picked that exact gray, i.e. it already assumes a
+ *     near-white canvas, which is what we're providing.
+ * Net: no icon file needed patching -- confirmed, not just inferred from
+ * the color audit above: all 106 files were loaded through the exact call
+ * KlippyGtk.py uses (`GdkPixbuf.Pixbuf.new_from_file_at_size`), composited
+ * onto this theme's actual @bg (#EDEFF2) into one contact sheet, and
+ * visually reviewed. Every icon rendered as a clean, intentional black
+ * glyph -- battery-0/25/50/75/100 show distinct, correctly-proportioned
+ * fill levels, nothing rendered as a solid blob or came out blank/invisible.
+ * That specifically rules out the failure mode a raw color-value grep can't
+ * see (a stroke-only path with no explicit fill relies on SVG's implicit
+ * fill:black, which usually gives a correct silhouette but would render
+ * stroke-only linework as a filled blob instead of an outline -- not what
+ * happened here for any of the 106). This also means the "material-light
+ * broke icons" verdict from the earlier investigation-only pass was almost
+ * certainly about material-light's own style.css (flat, low-contrast
+ * button color-blocks, per that pass's notes), not its images/ -- those are
+ * fine and are what's actually used here.
+ *
+ * ============================================================
+ * COLOR PALETTE -- contrast reasoning (WCAG relative-luminance formula,
+ * ratios computed by hand against this file's actual @bg/@text values, not
+ * assumed)
+ * ============================================================
+ * @bg:   #EDEFF2 (light, slightly cool gray -- not pure #FFFFFF, so that
+ *        @text-inv below can be pure white and still read as a distinct,
+ *        slightly-brighter "card" for .dialog, mirroring how the ORIGINAL
+ *        dark theme's near-black-but-not-quite @bg #13181C lets a pure
+ *        black .dialog read as a subtly different "card"). L~0.861.
+ * @text: #1A1D21 (near-black, not pure #000 -- softer on a screen this
+ *        size). Contrast vs @bg: ~14.7:1, far past the 4.5:1 body-text
+ *        floor.
+ * @text-inv: #ffffff (paired with @text; only matters where base.css uses
+ *        both of them together, e.g. `.dialog { border/background:
+ *        @text-inv }` + its `.message button { background: @text; color:
+ *        @text-inv }` -- both stay self-consistent under this flip since
+ *        they're used as an explicit pair, not just individually).
+ * @lines: #6B7178 (medium slate gray, for borders: dialog/menu/numpad/
+ *        buttons_slim/horizontal_togglebuttons). The original @lines
+ *        (#cccccc, light gray) reads fine as a border on a near-black bg
+ *        but would nearly vanish on this light one, so this had to change,
+ *        not just get reused. Contrast vs @bg: ~4.3:1.
+ * @active: #8FB6D1 (pale, clearly blue-tinted -- NOT dark). Used by
+ *        base.css for entry/trough/scrollbar-slider backgrounds and
+ *        `.horizontal_togglebuttons_active` (the currently-selected Move
+ *        Distance button). Kept deliberately light: @text sits on top of
+ *        it via inheritance (no override), and dark text needs a light
+ *        surface (contrast vs @text: ~7.9:1). Also intentionally NOT reused
+ *        for button:focus -- see next paragraph for why that had to split.
+ * button:focus / button:active / .button_active / button.active: literal
+ *        #4A82B0 (medium steel blue), overriding base.css's
+ *        `.active image, button:active, .button_active, button.active {
+ *        background-color: @active }` for everything except `.active
+ *        image`. This is the one deliberate departure from copying
+ *        big-font's `button:focus, button:active { background-color:
+ *        @active }` rule verbatim, and it's necessary, not stylistic: the
+ *        math doesn't leave room for one shared color to do both jobs.
+ *        Making @active light enough to read well under dark text (needs
+ *        L >= ~0.229 for 4.5:1) and dark enough to look like a distinct
+ *        focus-highlight against @bg (needs L <= ~0.254 for 3:1) is a
+ *        ~0.025-wide window -- and landing @active there would put it
+ *        right on top of @switch-scale-bg (#3584e4, L~0.229), erasing the
+ *        visual difference between a slider's filled and unfilled portions
+ *        (a regression the dark theme doesn't have, since it separates at
+ *        ~2.9:1 there). So @active stays light/pale for the passive
+ *        surfaces, and button:focus/:active get their own literal color
+ *        chosen only against the focus-visibility constraint: ~3.6:1
+ *        against @bg (clearly a distinct highlight, and already better than
+ *        the dark theme's own precedent -- its button:focus/:active step
+ *        was only ~2.1:1 against its own @bg, and that was confirmed live
+ *        as a working fix) and ~4.1:1 for @text on top of it (comfortably
+ *        legible). This matters here specifically because the
+ *        invisible-focus-ring bug in big-font's own history (button:focus
+ *        had NO rule at all before that fix) was a real navigation defect
+ *        on this 5-hardware-button, no-touch device -- worth being careful
+ *        about, not worth risking by reusing one color for two jobs that
+ *        turn out to conflict.
+ * @color1..@color4: these are 0.4em bottom-border accent stripes only
+ *        (button.color1-4, .dialog-*), never a text background, so the
+ *        brief's instinct that they "can likely stay similarly saturated"
+ *        is the right starting assumption -- but it was checked, not
+ *        trusted blindly, against this theme's actual @bg, and two of the
+ *        four originals fail outright:
+ *          color1 #ED6500 (orange)     vs @bg: 2.82:1 -> darkened to
+ *                                       #C2500A (4.10:1)
+ *          color2 #B10080 (magenta)    vs @bg: 5.73:1 -> kept as-is
+ *          color3 #009384 (teal)       vs @bg: 3.32:1 (passing but thin)
+ *                                       -> deepened slightly to #00786C
+ *                                       (4.67:1) for margin
+ *          color4 #A7E100 (yellow-green) vs @bg: 1.36:1 (nearly invisible)
+ *                                       -> darkened to #5A7A00 (4.32:1)
+ *        color4 in particular would have been a real visible defect if the
+ *        "just keep them" instinct had been followed without checking.
+ * @echo (#367554) / @error (#981E1F): kept as-is -- both are only ever used
+ *        as backgrounds (message popups, filament/endstop status badges),
+ *        paired below with an explicit forced white label color, exactly
+ *        like the original dark theme got white text on them "for free"
+ *        from its global @text=white. Once @text flips to dark for this
+ *        theme, that pairing breaks unless re-forced explicitly (base.css
+ *        never sets a text color on these selectors itself, it just relies
+ *        on the global default) -- see the override block below.
+ * @warning (#f9a825): kept as a BACKGROUND color (message_popup_warning
+ *        pairs fine with dark @text on top: ~8.6:1) but NOT reused as-is
+ *        for `.spoolman_low`, which uses @warning directly as a text color
+ *        sitting on the plain page background. Bright gold text on this
+ *        @bg measures ~2.0:1 -- unreadable. Same variable, two different
+ *        jobs, same kind of conflict as @active/focus above; fixed the
+ *        same way, with a separate literal (#8A5A00, a darker amber) scoped
+ *        to just that selector instead of touching @warning itself and
+ *        breaking the background usage.
+ * @switch-scale-bg (#3584e4): kept as-is, still reads clearly as "the blue
+ *        accent" against this palette and isn't a text-background pairing
+ *        problem (nothing renders a label directly on a scale trough fill).
+ *
+ * button.update (background: @color3, bold label, no color override in
+ * base.css) was deliberately NOT added to the forced-white-text list below:
+ * the math favors dark text here (@text on #00786C: ~4.7:1 vs white on the
+ * same: ~3.8:1) -- forcing white would have made it worse, not better, so
+ * it's left to inherit @text.
+ *
+ * `.action_bar :disabled { opacity: .85 }` from big-font/style.css was
+ * deliberately NOT copied here. That fix targeted white icons fading into
+ * a near-black @bg at the base.css default opacity (.6); dark icons fading
+ * into a light @bg at the same opacity is not obviously the same failure
+ * (dark ink at reduced opacity over a light surface tends to stay legible
+ * much longer than a light mark over a dark one -- the two directions
+ * aren't symmetric), and this phase doesn't include a live screenshot to
+ * confirm either way. Left at base.css's default (.6) rather than guessing;
+ * worth a real check next time this theme is live on the panel.
+ *
+ * This stylesheet itself was parse-checked (not just brace-counted) through
+ * the actual engine that will load it: copied to /tmp on the printer and
+ * fed to a live Gtk.CssProvider via the KlipperScreen venv's python (which
+ * has `gi`; the system python3 doesn't), listening for `parsing-error`
+ * signals. First attempt failed with a real, non-obvious bug a brace count
+ * would never catch: the deployment note below originally referenced a
+ * directory path followed directly by a wildcard asterisk, which -- as
+ * plain text -- happens to spell out the two characters that open a CSS
+ * comment. GTK's CSS lexer treats that as an error the instant it appears
+ * anywhere inside a comment block, even though CSS comments don't nest
+ * (it doesn't just scan ahead for the closing marker and ignore what's
+ * inside, the way a browser would). Reworded below to avoid forming that
+ * character pair, then reverified clean with zero parsing-error signals.
+ *
+ * ============================================================
+ * DEPLOYMENT NOTE
+ * ============================================================
+ * Neither scripts/deploy.sh nor scripts/install-display.sh copies anything
+ * under printer-configs/KlipperScreen-themes/ to the printer -- deploy.sh only
+ * ever syncs the FILES list (printer.cfg/moonraker.conf/crowsnest.conf/
+ * autotune_tmc.cfg/KlipperScreen.conf/mainsail.cfg), never a styles/
+ * directory. Whatever got styles/big-font/images onto the live device
+ * originally was a manual step outside any tracked script. This folder
+ * will need the same kind of manual `scp -r` to
+ * /home/ultra/KlipperScreen/styles/big-font-light/ before it can be
+ * selected. The active theme is chosen by the `theme:` key in
+ * printer-configs/KlipperScreen.conf (currently `theme: big-font`) --
+ * switching it to `theme: big-font-light` after that copy is what actually
+ * turns this on.
+ */
+
+@define-color color1 #C2500A;
+@define-color color2 #B10080;
+@define-color color3 #00786C;
+@define-color color4 #5A7A00;
+@define-color bg #EDEFF2;
+@define-color active #8FB6D1;
+@define-color echo #367554;
+@define-color warning #f9a825;
+@define-color error #981E1F;
+@define-color text #1A1D21;
+@define-color text-inv #ffffff;
+@define-color lines #6B7178;
+@define-color switch-scale-bg #3584e4;
+
+/* ===== Layout fixes below this line are copied verbatim from big-font/
+ * style.css -- not color-related, see that file for the full reasoning. */
+
+* {
+    font-size: 14px;
+}
+
+.heatergraph {
+    min-height: 65px;
+}
+
+.heater-grid button {
+    margin: .05em;
+    min-height: 1.6em;
+    padding: 0 .15em;
+}
+
+.heater-grid button.graph_label {
+    min-width: 6.5em;
+}
+
+.horizontal_togglebuttons {
+    min-height: 1.6em;
+}
+
+/* ===== Everything below this line is new/adapted for the light palette. */
+
+/* Focus/press highlight -- deliberately its own literal color, not @active.
+ * See the header comment ("button:focus / button:active / ...") for why
+ * one shared variable can't do both this job and @active's other jobs on a
+ * light background. This still fixes the same historical defect big-font's
+ * `button:focus, button:active { background-color: @active }` rule fixed
+ * (KlipperScreen/base.css has no button:focus rule of its own at all), just
+ * with a color chosen for that purpose specifically. */
+button:focus,
+button:active,
+.button_active,
+button.active {
+    background-color: #4A82B0;
+}
+
+/* buttons_slim (Notifications' Clear button, gcodes/console/gcode_macros/
+ * spoolman toolbar buttons) has no border in base.css and its background
+ * equals the window background, so it renders with no visible boundary at
+ * all -- true on any theme, not just this one. Same fix as big-font, using
+ * @lines (redefined above for this palette). */
+.buttons_slim {
+    border: .1em solid @lines;
+    padding-left: .3em;
+    padding-right: .3em;
+}
+
+/* Forced light text on the status/CTA backgrounds that stay dark-ish and
+ * saturated regardless of theme (@error/@echo). base.css never sets a text
+ * color on these selectors itself -- it relied on the old global
+ * @text: white applying everywhere "for free". Now that @text is dark for
+ * this theme, these need it forced back, or the text disappears into its
+ * own background. Covers both the container and a `label` descendant
+ * (GTK renders a button's text as a child `label` node -- see base.css's
+ * own `button:disabled label { color: grey }` for the same pattern) since
+ * it's not obvious from CSS alone which node actually holds the text for
+ * each of these. */
+.message,
+.message label,
+button.invalid,
+button.invalid label,
+.message_popup_echo,
+.message_popup_echo label,
+.message_popup_error,
+.message_popup_error label,
+.filament_sensor_detected,
+.filament_sensor_detected label,
+.filament_sensor_empty,
+.filament_sensor_empty label,
+.endstop-open,
+.endstop-open label,
+.endstop-triggered,
+.endstop-triggered label {
+    color: #ffffff;
+}
+
+/* @warning itself stays bright (kept as a background color, see header
+ * comment) but spoolman_low uses it directly as TEXT on the plain page
+ * background, where the bright gold fails contrast (~2.0:1). Darker amber,
+ * scoped to just this selector so the background usage elsewhere is
+ * unaffected. */
+.spoolman_low {
+    color: #8A5A00;
+}
+
+/* Two base.css rules hardcode a literal color instead of a theme variable,
+ * so they don't move when @bg/@text flip -- both would otherwise silently
+ * break on a light background (found by reading base.css line by line, not
+ * by testing live, so flag for confirmation once this theme is on-screen):
+ *   - `popover { border: 0.1em solid white; }` -- a white border around a
+ *     popover that will itself have a light @bg background: invisible.
+ *     Reuse @lines instead, same as every other border in this theme.
+ *   - `separator { background-color: rgba(255, 255, 255, 0.5); }` -- a
+ *     translucent white divider line, invisible over a light background.
+ *     Flipped to a translucent dark line of similar strength.
+ * `.frame-item { border-bottom: 1px solid rgba(255,255,255,0.05); }` is
+ * technically the same problem (a barely-there white hairline over what
+ * will now be a light bg), but at 5% alpha it's already meant to be almost
+ * imperceptible even in the original -- flipped to dark at a similarly low
+ * alpha for parity rather than left broken. */
+popover {
+    border-color: @lines;
+}
+
+separator {
+    background-color: rgba(0, 0, 0, 0.15);
+}
+
+.frame-item {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
