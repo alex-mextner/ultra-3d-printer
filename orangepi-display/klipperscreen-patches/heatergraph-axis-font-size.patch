@@ -1,5 +1,5 @@
 diff --git a/ks_includes/widgets/heatergraph.py b/ks_includes/widgets/heatergraph.py
-index d1118f9..8576977 100644
+index d1118f9..b2412d5 100644
 --- a/ks_includes/widgets/heatergraph.py
 +++ b/ks_includes/widgets/heatergraph.py
 @@ -26,7 +26,20 @@ class HeaterGraph(Gtk.DrawingArea):
@@ -24,7 +24,7 @@ index d1118f9..8576977 100644
          self.fullscreen = fullscreen
          if fullscreen:
              GLib.timeout_add_seconds(1, self.update_graph)
-@@ -89,9 +102,24 @@ class HeaterGraph(Gtk.DrawingArea):
+@@ -89,9 +102,26 @@ class HeaterGraph(Gtk.DrawingArea):
          success, color = style_context.lookup_color("lines")
          if not success:
              color = Gdk.RGBA(0.5, 0.5, 0.5, 1.0)
@@ -36,22 +36,24 @@ index d1118f9..8576977 100644
 +        # tightly) once the font got bigger. Set the font here (once) so this
 +        # measurement and every show_text() below use the same size.
 +        ctx.set_font_size(self.font_size)
-+        label_margin = ctx.text_extents("999")[2]
++        # x_advance (index 4), not ink-only "width" (index 2) -- see the
++        # identical note in graph_time below for why ink width under-
++        # measures the space text actually needs.
++        label_margin = ctx.text_extents("999")[4]
 +        x = round(6 + label_margin + 4)
          y = 10
 -        width = da.get_allocated_width() - 15
 +        # Right margin: was a flat 15px, cheap on the old wide graph but a
 +        # relatively big bite (~20%) out of the plot once the dashboard
-+        # redesign narrowed this widget to ~77px total -- nothing is drawn
-+        # in that margin (the single surviving x-axis label from
-+        # graph_time's overlap check below sits under the plot, not past
-+        # its right edge), so shrinking it hands a few more pixels back to
-+        # the trend line without losing anything.
++        # redesign narrowed this widget to ~77px total. graph_time's clamp
++        # (see below) keeps the rightmost x-axis label from ever running
++        # past gsize[1][0] regardless of this value, so shrinking the
++        # margin hands a few more pixels back to the trend line safely.
 +        width = da.get_allocated_width() - 8
          height = da.get_allocated_height() - self.font_size * 2
          gsize = [[x, y], [width, height]]
  
-@@ -196,6 +224,20 @@ class HeaterGraph(Gtk.DrawingArea):
+@@ -196,6 +226,20 @@ class HeaterGraph(Gtk.DrawingArea):
          font_size_multiplier = round(self.font_size * 1.5)
          ctx.set_font_size(self.font_size)
  
@@ -72,7 +74,7 @@ index d1118f9..8576977 100644
          i = 0
          while True:
              x = first - i * steplen
-@@ -206,11 +248,15 @@ class HeaterGraph(Gtk.DrawingArea):
+@@ -206,11 +250,37 @@ class HeaterGraph(Gtk.DrawingArea):
              ctx.line_to(x, gsize[1][1])
              ctx.stroke()
  
@@ -82,9 +84,31 @@ index d1118f9..8576977 100644
 -            ctx.show_text(f"{now - datetime.timedelta(minutes=2) * i:%H:%M}")
 -            ctx.stroke()
 +            label = f"{now - datetime.timedelta(minutes=2) * i:%H:%M}"
-+            label_left = x - font_size_multiplier
-+            label_right = label_left + ctx.text_extents(label)[2]
-+            if label_right + 4 <= min_label_left:
++            # x_advance (index 4), not the ink-only "width" (index 2) --
++            # width excludes each glyph's left-side bearing, so using it
++            # under-measures how far the rendered text actually reaches and
++            # left too small a real gap between adjacent labels (confirmed
++            # live: two labels rendered touching with zero visible gap in
++            # the fullscreen dialog even though the "+gap" check below
++            # should have caught it with the ink-only width).
++            label_w = ctx.text_extents(label)[4]
++            # Minimum gap between adjacent labels scales with font size --
++            # a flat 4px reads as a visible gap at ~10px font but as no gap
++            # at all at the much bigger font `show_fullscreen_graph` ends up
++            # with (it re-enters this same constructor with `font_size * 2`,
++            # and the 0.75->1.3 multiplier bump compounds through that
++            # second pass more than the old 0.75 did).
++            gap = max(4, round(self.font_size * 0.4))
++            # Clamp so the label's right edge never overruns the plot's
++            # right edge. `x` for i=0 ("now") drifts within the 120s window
++            # (up to ~6px on this graph, more on the 2x fullscreen dialog)
++            # and can land close enough to the right edge that the
++            # unclamped position runs the text off the visible area --
++            # confirmed live in the fullscreen dialog, where "18:30" was
++            # rendering as a clipped "18:3" before this clamp.
++            label_left = min(x - font_size_multiplier, gsize[1][0] - label_w)
++            label_right = label_left + label_w
++            if label_right + gap <= min_label_left:
 +                ctx.set_source_rgb(color.red, color.green, color.blue)
 +                ctx.move_to(label_left, gsize[1][1] + font_size_multiplier)
 +                ctx.show_text(label)
