@@ -1,0 +1,248 @@
+diff --git a/panels/main_menu.py b/panels/main_menu.py
+index 2348d0e..a7412d0 100644
+--- a/panels/main_menu.py
++++ b/panels/main_menu.py
+@@ -15,14 +15,36 @@ class Panel(MenuPanel):
+     def __init__(self, screen, title, items=None):
+         super().__init__(screen, title, items)
+         self.left_panel = None
++        self.graph_panel = None
+         self.devices = {}
+         self.graph_update = None
+         self.active_heater = None
+         self.h = self.f = 0
++        # Layout (2026-07-30, dashboard redesign): landscape (non-vertical)
++        # mode now uses a 2x2 main_menu Grid -- row 0 is the temp device
++        # list (left) + heater graph (right, "top-right" per explicit user
++        # request), row 1 is a single edge-to-edge row of icon-only nav
++        # buttons spanning both columns. See the `else` branch below and
++        # _build_button_row(). column_homogeneous=True splits row 0 evenly
++        # between the device list and the graph. row_homogeneous starts
++        # True (needed by the vertical_mode branch's 5-equal-row split) and
++        # is set False for the landscape branch so the short button row
++        # isn't stretched to match the tall top row.
+         self.main_menu = Gtk.Grid(
+             row_homogeneous=True, column_homogeneous=True, hexpand=True, vexpand=True
+         )
+         self.menu_scroll = self._gtk.ScrolledWindow()
++        # Overlay scrolling (2026-07-30, part of the Print-button fix): a
++        # non-overlay GTK scrollbar reserves real layout width (measured at
++        # ~47px for this theme's 14px font -- base.css `scrollbar slider {
++        # min-width: 2.5em}` -- see main-menu-single-column.patch/README for
++        # the full chain). On this pane's ~100px budget that would nearly halve
++        # the width actually available to the menu buttons themselves.
++        # Overlay mode draws the scrollbar on top of the content instead of
++        # beside it, so it costs no layout width; it still auto-hides when
++        # not scrolling/hovering, which is fine on a D-pad-only device with
++        # no persistent mouse hover anyway.
++        self.menu_scroll.set_overlay_scrolling(True)
+         self.numpad_visible = False
+ 
+         logging.info("### Making MainMenu")
+@@ -36,32 +58,120 @@ class Panel(MenuPanel):
+             self.menu_scroll.add(self.labels["menu"])
+             self.main_menu.attach(self.menu_scroll, 0, 3, 1, 2)
+         else:
+-            self.main_menu.attach(self.create_left_panel(), 0, 0, 1, 1)
+-            # max_columns=1, not 2: the button pane here is only ~half the
+-            # 320px screen wide (the other half is create_left_panel's
+-            # heater graph). At the big-font theme's 14px, a 2-column
+-            # AutoGrid forces both (homogeneous) columns as wide as the
+-            # widest single-column label -- "Temperature" -- which alone
+-            # needs more than half of that pane. The whole 2-column grid
+-            # then overflows its ~160px viewport with no horizontal
+-            # scrollbar to reach the overflow (scroll policy is NEVER on
+-            # that axis), clipping the right column (Temperature/More,
+-            # invisible off the right edge) and the last row (Print, which
+-            # spans both columns via expand_last) right at the screen edge
+-            # -- confirmed via AutoGrid diagnostic logging showing
+-            # col=0,row=2 for Print with a colspan of 2, i.e. it gets the
+-            # full oversized width, same as the column that's clipped.
+-            # A single column lets every button take the full ~160px pane
+-            # width instead of splitting it, so nothing needs to be wider
+-            # than what's actually available; menu_scroll already scrolls
+-            # vertically (Gtk.PolicyType.AUTOMATIC) to reach the extra rows.
+-            self.labels["menu"] = self.arrangeMenuItems(items, 1, True)
+-            self.menu_scroll.add(self.labels["menu"])
+-            self.main_menu.attach(self.menu_scroll, 1, 0, 1, 1)
++            # row_homogeneous=False (2026-07-30 dashboard redesign): this
++            # Grid now has 2 rows in landscape mode too (top: device list +
++            # graph, bottom: the nav button row) -- False lets the short
++            # button row take only the height it needs instead of being
++            # forced to match the tall top row.
++            self.main_menu.set_row_homogeneous(False)
++            # column_homogeneous=False (2026-07-30, ROOT CAUSE of the
++            # button-row overflow, found via on-device GTK widget-width
++            # debug logging -- see orangepi-display/klipperscreen-patches/
++            # for the exact numbers): the device-list column (heater-grid)
++            # has a CSS `min-width: 6.5em` on its name column (so
++            # "OrangePi CPU" doesn't truncate), giving that column a hard
++            # GTK minimum width of ~205px. With column_homogeneous left
++            # True (the constructor default, needed by vertical_mode's
++            # single-column case where it's a no-op), Gtk.Grid forces BOTH
++            # columns to match that 205px minimum -- so main_menu's overall
++            # minimum width became 410px against a real ~288px budget
++            # (320px screen minus the ~32px action-bar sidebar), and GTK
++            # allocates the full 410px anyway rather than violate the
++            # min-width contract, overflowing off the right edge of the
++            # physical 320px display. The button row spans both columns
++            # (column-span=2) so it inherited that same inflated 410px
++            # width no matter how small the buttons themselves were sized
++            # (confirmed: capping each button's own size_request to 46px
++            # had zero effect on the actual allocated row width -- the
++            # inflation came entirely from column 0, not from the row).
++            # False lets column 0 take only the ~205px the device list
++            # actually needs and column 1 (graph) take the rest, so
++            # main_menu's total naturally fits inside the real budget and
++            # the button row (still spanning both columns) is allocated
++            # its correct ~288px full width instead.
++            self.main_menu.set_column_homogeneous(False)
++            landscape_left_panel = self.create_left_panel()
++            # hexpand=False here (2026-07-30, graph-width fix): the device
++            # list's own minimum is a hard ~205px (CSS min-width on the
++            # name column so "OrangePi CPU" doesn't truncate -- see the
++            # column_homogeneous comment above). With hexpand left True,
++            # Gtk.Grid split the small leftover surplus (~77px of the
++            # ~282px budget) evenly between this column and the graph
++            # column, so the device list grabbed most of it anyway (ending
++            # up ~243px) and the graph was squeezed to a barely-visible
++            # ~39px sliver (confirmed via the widget-width debug log).
++            # False pins this column to its natural ~205px and hands the
++            # entire surplus to graph_panel (still hexpand=True below),
++            # roughly doubling the graph's width to ~77-80px -- still
++            # narrow on a 320px screen, but a real, readable trend graph
++            # rather than a sliver.
++            landscape_left_panel.set_hexpand(False)
++            self.main_menu.attach(landscape_left_panel, 0, 0, 1, 1)
++            self.graph_panel = Gtk.Box(
++                orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True
++            )
++            self.main_menu.attach(self.graph_panel, 1, 0, 1, 1)
++
++            # Bottom nav row (2026-07-30 dashboard redesign, per explicit
++            # user request): all 5 items in a single edge-to-edge row
++            # spanning both columns, icons only (no text labels) so they
++            # actually fit on a 320px-wide screen. arrangeMenuItems()/
++            # AutoGrid can't produce this -- AutoGrid hardcodes 3 columns
++            # for a 5-item list regardless of the max_columns argument (see
++            # the `length in {3, 5, 6}` branch in
++            # ks_includes/widgets/autogrid.py) -- so a plain Gtk.Grid is
++            # built by hand via _build_button_row() instead.
++            self.labels["menu"] = self._build_button_row(items)
++            self.labels["menu"].set_vexpand(False)
++            # Icon-only + width-capped (2026-07-30, overflow fix): hide each
++            # button's text label (kept in the tree, just hidden, so
++            # keyboard nav/highlight/click are unaffected) AND force a
++            # small explicit size via set_size_request(). Hiding the label
++            # alone was NOT enough -- these Button widgets are the same
++            # objects menu.py built for the single-column vertical menu
++            # (~270px wide, image_position=TOP, icon+label stacked), and a
++            # hidden label doesn't shrink the button's own reported
++            # min/natural size back down. Result, verified on-device: 5 of
++            # them side by side overflowed the 320px screen (screenshot
++            # showed only ~3.5 of 5 buttons, the rest clipped past the
++            # right edge). set_size_request() overrides both the minimum
++            # AND natural size GTK uses during layout, so it reliably caps
++            # each button regardless of what its (now-hidden) internal
++            # content would otherwise ask for. 46x40px per button x 5 (+
++            # small CSS margins) fits comfortably inside the ~282px
++            # available (320px screen minus the ~38px fixed left sidebar).
++            for _child in self.labels["menu"].get_children():
++                _lbl = find_widget(_child, Gtk.Label)
++                if _lbl is not None:
++                    _lbl.set_no_show_all(True)
++                    _lbl.hide()
++                _child.set_size_request(46, 40)
++            self.main_menu.attach(self.labels["menu"], 0, 1, 2, 1)
+         self.content.add(self.main_menu)
+ 
++    def _build_button_row(self, items):
++        """Lay out `items` as a single homogeneous row spanning full width.
++
++        Stand-in for arrangeMenuItems()/AutoGrid for this one case (see the
++        comment at the call site): a plain Gtk.Grid with one row and one
++        column per enabled item, all equally sized and expanding to fill
++        the available width edge-to-edge.
++        """
++        enabled = []
++        for item in items:
++            key = list(item)[0]
++            if not self.evaluate_enable(item[key]["enable"]):
++                continue
++            if item[key]["panel"] and self._is_shortcut_item(item[key]):
++                continue
++            enabled.append(self.labels[key])
++        row = Gtk.Grid(row_homogeneous=True, column_homogeneous=True, hexpand=True, vexpand=False)
++        for i, widget in enumerate(enabled):
++            row.attach(widget, i, 0, 1, 1)
++        return row
++
+     def update_graph_visibility(self, force_hide=False):
+-        if self.left_panel is None:
++        if self.left_panel is None or self.graph_panel is None:
+             logging.info("No left panel")
+             return
+         count = 0
+@@ -77,15 +187,15 @@ class Panel(MenuPanel):
+             else:
+                 self.devices[device]["name"].get_style_context().remove_class("graph_label")
+         if count > 0 and not force_hide:
+-            if self.labels["da"] not in self.left_panel:
+-                self.left_panel.add(self.labels["da"])
++            if self.labels["da"] not in self.graph_panel:
++                self.graph_panel.add(self.labels["da"])
+             self.labels["da"].queue_draw()
+             self.labels["da"].show()
+             if self.graph_update is None:
+                 # This has a high impact on load
+                 self.graph_update = GLib.timeout_add_seconds(5, self.update_graph)
+-        elif self.labels["da"] in self.left_panel:
+-            self.left_panel.remove(self.labels["da"])
++        elif self.labels["da"] in self.graph_panel:
++            self.graph_panel.remove(self.labels["da"])
+             if self.graph_update is not None:
+                 GLib.source_remove(self.graph_update)
+                 self.graph_update = None
+@@ -268,7 +378,7 @@ class Panel(MenuPanel):
+         scroll.get_style_context().add_class("heater-list")
+         scroll.add(self.labels["devices"])
+ 
+-        self.left_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        self.left_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, vexpand=True)
+         self.left_panel.add(scroll)
+ 
+         for d in self._printer.get_temp_devices():
+@@ -290,8 +400,13 @@ class Panel(MenuPanel):
+             self.main_menu.attach(top, 0, 0, 1, 3)
+             self.main_menu.attach(self.menu_scroll, 0, 3, 1, 2)
+         else:
+-            self.main_menu.remove_column(1)
+-            self.main_menu.attach(self.menu_scroll, 1, 0, 1, 1)
++            # Landscape numpad takes over the whole main_menu area (both
++            # rows/columns) rather than just one column -- see show_numpad
++            # for why. Restore the 3 normal widgets to their cells.
++            self.main_menu.remove(self.labels["keypad"])
++            self.main_menu.attach(self.left_panel, 0, 0, 1, 1)
++            self.main_menu.attach(self.graph_panel, 1, 0, 1, 1)
++            self.main_menu.attach(self.labels["menu"], 0, 1, 2, 1)
+         self.main_menu.show_all()
+         self.numpad_visible = False
+         self._screen.base_panel.set_control_sensitive(False, control="back")
+@@ -350,8 +465,15 @@ class Panel(MenuPanel):
+             self.main_menu.attach(top, 0, 0, 1, 2)
+             self.main_menu.attach(self.labels["keypad"], 0, 2, 1, 2)
+         else:
+-            self.main_menu.remove_column(1)
+-            self.main_menu.attach(self.labels["keypad"], 1, 0, 1, 1)
++            # This landscape layout has 3 widgets in a 2x2 grid (device
++            # list top-left, graph top-right, button row spanning the
++            # bottom) and the keypad needs more room than any single one
++            # of those cells -- so it replaces all of them, spanning the
++            # whole main_menu area, rather than swapping in for just one
++            # column like the old 1x2 layout did.
++            for child in list(self.main_menu.get_children()):
++                self.main_menu.remove(child)
++            self.main_menu.attach(self.labels["keypad"], 0, 0, 2, 2)
+         self.main_menu.show_all()
+         self.numpad_visible = True
+         self._screen.base_panel.set_control_sensitive(True, control="back")
