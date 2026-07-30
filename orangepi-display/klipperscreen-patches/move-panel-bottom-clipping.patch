@@ -1,0 +1,107 @@
+--- a/panels/move.py
++++ b/panels/move.py
+@@ -112,6 +112,22 @@
+             self.set_toolhead_label()
+         grid.attach(extra_button, 2, 0, 1, 1)
+ 
++        if not self._screen.vertical_mode:
++            # 2026-07-31 Move-panel bottom-clipping fix, main lever. This grid
++            # is row_homogeneous, so EVERY jog row is forced to the height of
++            # the tallest button in any row. Exactly one button here wraps to
++            # two lines -- "Disable Motors" (70px) -- and it was dragging the
++            # second row (X-/Y-/X+/Z-, all single-line, 53px is enough) up to
++            # 70px too, wasting 17px for nothing. Measured live: that alone was
++            # more than the panel's height deficit, which was pushing the
++            # distance selector off the bottom of the 320x240 screen. Natural
++            # row heights keep every label at full size (nothing ellipsized or
++            # shrunk) and simply stop paying for a second tall row that has no
++            # tall content. Portrait/vertical branch deliberately untouched --
++            # it lays these buttons out differently (adjust lives inside this
++            # grid there) and does not have the landscape height problem.
++            grid.set_row_homogeneous(False)
++
+         distgrid = Gtk.Grid()
+         for j, i in enumerate(self.distances):
+             self.labels[i] = self._gtk.Button(label=i)
+@@ -138,15 +154,53 @@
+         bottomgrid.attach(self.labels["pos_x"], 0, 0, 1, 1)
+         bottomgrid.attach(self.labels["pos_y"], 1, 0, 1, 1)
+         bottomgrid.attach(self.labels["pos_z"], 2, 0, 1, 1)
+-        bottomgrid.attach(self.labels["move_dist"], 0, 1, 3, 1)
+-        if not self._screen.vertical_mode:
+-            bottomgrid.attach(adjust, 3, 0, 1, 2)
+-
+-        self.labels["move_menu"] = Gtk.Grid(row_homogeneous=True, column_homogeneous=True)
++        if self._screen.vertical_mode:
++            bottomgrid.attach(self.labels["move_dist"], 0, 1, 3, 1)
++        else:
++            # 2026-07-31 Move-panel bottom-clipping fix (320x240 landscape
++            # kiosk): bottomgrid used to need TWO internal rows here (X/Y/Z on
++            # row 0, the "Move Distance (mm)" caption spanning 3 cols on row 1,
++            # the gear spanning both rows at col 3), while move_menu below is
++            # row_homogeneous and gave it only ONE row's worth of height out of
++            # 5 -- that overflow pushed distgrid (the 1/5/10/25/50 selector)
++            # off the bottom edge of the screen, so the distance values were
++            # unreadable. Collapsed to a single row: X, Y, Z and the gear side
++            # by side, caption dropped. Dropping it is safe on this screen --
++            # the distance selector sits immediately below and is self-evident,
++            # the panel is already titled "Move", and vertical space is the
++            # scarcest resource here. The vertical/portrait branch above is
++            # unchanged and keeps the caption.
++            bottomgrid.attach(adjust, 3, 0, 1, 1)
++
++        # row_homogeneous=False (was True): forcing all 5 rows to the tallest
++        # row's height wasted vertical space on the two short rows (bottomgrid,
++        # distgrid) and was the other half of the bottom-clipping bug above --
++        # same class of fix as column_homogeneous=False on the dashboard grid.
++        self.labels["move_menu"] = Gtk.Grid(row_homogeneous=False, column_homogeneous=True)
+         self.labels["move_menu"].attach(grid, 0, 0, 1, 3)
+         self.labels["move_menu"].attach(bottomgrid, 0, 3, 1, 1)
+         self.labels["move_menu"].attach(distgrid, 0, 4, 1, 1)
+ 
++        # 2026-07-31 Move-panel bottom-clipping fix, final margin of safety.
++        # Measured live (temporary get_preferred_height() dump, since removed):
++        # this panel's minimum height was 226px against a 212px content area
++        # (240px screen minus the 28px title bar) -- a hard 14px deficit, which
++        # GTK resolved by squeezing distgrid (the 1/5/10/25/50 selector) from
++        # its 44px minimum down to 35px and pushing it to y=219, i.e. partly
++        # off the bottom edge. That is exactly the reported clipping. The two
++        # row-homogeneity fixes above do the heavy lifting (jog grid 144->123,
++        # which by itself closes the deficit); this class only trims base.css's
++        # per-button margin .2em + padding .25em chrome, worth a further ~2px
++        # per jog button and ~4px per position readout. Small, but it buys the
++        # panel ~7px of real headroom instead of landing exactly on the limit,
++        # and it costs nothing visually. Deliberately NOT achieved by
++        # ellipsizing or shrinking any label -- every caption here, including
++        # the two-line "Disable Motors", stays at full size.
++        for _w in grid.get_children():
++            _w.get_style_context().add_class("move_compact")
++        for p in ("pos_x", "pos_y", "pos_z"):
++            self.labels[p].get_style_context().add_class("move_compact")
++
+         self.content.add(self.labels["move_menu"])
+ 
+         printer_cfg = self._printer.get_config_section("printer")
+--- a/styles/base.css
++++ b/styles/base.css
+@@ -352,6 +352,20 @@
+     min-height: 0;
+ }
+ 
++/* 2026-07-31 Move-panel bottom-clipping fix (see panels/move.py for the full
++ * measurement). The panel needed 226px of a 212px content area on this
++ * 320x240 kiosk, so GTK pushed the distance selector partly off the bottom
++ * edge. The row-homogeneity fixes in move.py close that deficit on their own;
++ * this rule just trims base.css's per-button margin .2em + padding .25em
++ * chrome for that panel to buy a little real headroom rather than landing
++ * exactly on the limit. Worth ~2px per jog button and ~4px per position
++ * readout -- small, but free. Scoped to an explicit class so no other panel's
++ * button metrics change, and chosen over ellipsizing or shrinking text so
++ * every label (notably the two-line "Disable Motors") stays full-size. */
++.move_compact {
++    margin: .05em;
++    padding: .05em;
++}
+ 
+ .horizontal_togglebuttons:first-child {
+     border-top-left-radius: .75em;
