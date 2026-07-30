@@ -1,0 +1,183 @@
+--- a/screen.py
++++ b/screen.py
+@@ -151,6 +151,11 @@
+         self.vertical_mode = self.aspect_ratio < 1.0
+         logging.info(f"Screen resolution: {self.width}x{self.height}")
+         self.theme = self._config.get_main_config().get("theme")
++        # 2026-07-31 day/night theme switching: when [main] auto_dark_theme is
++        # on, the theme comes from the sun's altitude rather than from the
++        # config. Done BEFORE the change_theme() call below so that a restart
++        # after dark does not flash the light theme first.
++        self._daynight_init()
+         self.show_cursor = self._config.get_main_config().getboolean("show_cursor", fallback=False)
+         self.setup_gtk_settings()
+         self.style_provider = Gtk.CssProvider()
+@@ -684,6 +689,138 @@
+             screen, self.style_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+         )
+ 
++    # ----------------------------------------------------------------------
++    # Automatic light/dark theme switching by sunrise/sunset.
++    # Math lives in ks_includes/daynight_sun.py (pure stdlib, no network).
++    # ----------------------------------------------------------------------
++    DAYNIGHT_POLL_SECONDS = 300
++
++    def _daynight_init(self):
++        """Set up sun-driven theme switching. Called from __init__.
++
++        Optional [main] options in KlipperScreen.conf:
++            auto_dark_theme    bool,  default False (feature off)
++            light_theme        str,   default "big-font-light"
++            dark_theme         str,   default "big-font"
++            latitude/longitude float, default Moscow (see daynight_sun.py)
++
++        Off by default on purpose: pulling this code must not silently change
++        behaviour for anyone who did not ask for the feature.
++        """
++        conf = self._config.get_main_config()
++        self._daynight_sun = None
++        self._daynight_timer_id = None
++        self._daynight_enabled = conf.getboolean("auto_dark_theme", fallback=False)
++        self._daynight_light = conf.get("light_theme", fallback="big-font-light")
++        self._daynight_dark = conf.get("dark_theme", fallback="big-font")
++        if not self._daynight_enabled:
++            return
++        try:
++            # Lazy import inside try/except on purpose: daynight_sun.py lives
++            # INSIDE this KlipperScreen checkout and a KlipperScreen update will
++            # delete it. A missing module must mean "feature off", not a kiosk
++            # that refuses to start.
++            from ks_includes import daynight_sun
++        except Exception as e:
++            logging.error(f"daynight: daynight_sun not importable ({e}), theme switching off")
++            self._daynight_enabled = False
++            return
++        self._daynight_sun = daynight_sun
++        try:
++            self._daynight_lat = conf.getfloat("latitude", fallback=daynight_sun.DEFAULT_LATITUDE)
++            self._daynight_lon = conf.getfloat("longitude", fallback=daynight_sun.DEFAULT_LONGITUDE)
++        except ValueError:
++            self._daynight_lat = daynight_sun.DEFAULT_LATITUDE
++            self._daynight_lon = daynight_sun.DEFAULT_LONGITUDE
++            logging.warning("daynight: latitude/longitude not numeric, using defaults")
++        try:
++            self.theme = self._daynight_wanted_theme()
++        except Exception:
++            logging.exception("daynight: could not pick a theme, keeping the configured one")
++            return
++        self._daynight_log_schedule()
++        # NOTE: _daynight_tick returns True. The one-shot _clear_focus_on_timeout
++        # below returns False; copying that here would give a timer that fires
++        # exactly once and then silently never again.
++        self._daynight_timer_id = GLib.timeout_add_seconds(
++            self.DAYNIGHT_POLL_SECONDS, self._daynight_tick
++        )
++        logging.info(
++            f"daynight: enabled at {self._daynight_lat}/{self._daynight_lon}, "
++            f"theme now {self.theme}, checking every {self.DAYNIGHT_POLL_SECONDS}s"
++        )
++
++    def _daynight_wanted_theme(self):
++        """Name of the theme that should be active right now."""
++        day = self._daynight_sun.is_daytime(
++            latitude=self._daynight_lat, longitude=self._daynight_lon
++        )
++        return self._daynight_light if day else self._daynight_dark
++
++    def _daynight_tick(self):
++        """Periodic check, every 5 minutes.
++
++        Polling rather than one exact GLib timer on next_transition(): a poll
++        self-heals after a system clock jump (this Orange Pi has no RTC battery,
++        so NTP corrects the clock by a large step on every boot) and after
++        suspend, and it costs 59 us per call. Worst-case reaction lag is 5
++        minutes, which is nothing for a sunset.
++
++        Returns True so the GLib source stays alive.
++        """
++        try:
++            wanted = self._daynight_wanted_theme()
++            if wanted != self.theme:
++                logging.info(f"daynight: switching theme {self.theme} -> {wanted}")
++                self.theme = wanted
++                self.change_theme(wanted)
++                self._daynight_reload_visible_panel()
++                self._daynight_log_schedule()
++        except Exception:
++            logging.exception("daynight: periodic check failed")
++        return True
++
++    def _daynight_reload_visible_panel(self):
++        """Make the swap visible on the panel that is already on screen.
++
++        change_theme() swaps the CSS immediately but NOT the icons of the
++        content panel: its reload_icon_theme() only marks panels in
++        panels_reinit, and a panel is rebuilt on the next show_panel(). A kiosk
++        sits on the dashboard for days with no show_panel() at all, so without
++        this we would get dark icons on a dark background. reload_panels()
++        rebuilds the visible panel right away.
++
++        Verified live 2026-07-31: WITHOUT this rebuild the dashboard does not
++        merely keep the wrong icons, it renders BROKEN -- only the temperature
++        graph survives on an otherwise empty background, because every button
++        still holds a pixbuf loaded from the other theme's images/ directory.
++        So the rebuild is mandatory, not cosmetic.
++
++        reload_panels() resets the navigation stack to the root panel. The one
++        case where that is worse than a broken repaint is an open on-screen
++        keyboard (it would throw away what is being typed), so that is the only
++        thing guarded against -- a theme flip happens twice a day.
++        """
++        if self.keyboard is not None or not self._cur_panels:
++            logging.info("daynight: keyboard open or no panel yet, rebuild deferred")
++            return
++        logging.info("daynight: rebuilding panels so the new theme's icons take effect")
++        self.reload_panels()
++
++    def _daynight_log_schedule(self):
++        """One log line: today's sunrise/sunset and when the theme flips next."""
++        try:
++            times = self._daynight_sun.sun_times(
++                latitude=self._daynight_lat, longitude=self._daynight_lon
++            )
++            nxt = self._daynight_sun.next_transition(
++                latitude=self._daynight_lat, longitude=self._daynight_lon
++            )
++            when = nxt.isoformat(timespec="seconds") if nxt else "not within 190 days"
++            logging.info(f"daynight: {times.describe()}; next theme switch {when}")
++        except Exception:
++            logging.exception("daynight: could not compute the schedule")
++
+     def change_theme(self, theme_name=None):
+         if not theme_name:
+             theme_name = self._config.get_main_config().get("theme")
+--- a/ks_includes/config.py
++++ b/ks_includes/config.py
+@@ -202,6 +202,9 @@
+                     "auto_open_extrude",
+                     "start_locked",
+                     "keyboard_navigation",
++                    # day/night theme switching, see
++                    # orangepi-display/klipperscreen-patches/README.md
++                    "auto_dark_theme",
+                 )
+                 strs = (
+                     "default_printer",
+@@ -217,6 +220,8 @@
+                     "print_view",
+                     "lock_password",
+                     "side_shortcut_target",
++                    "light_theme",
++                    "dark_theme",
+                 )
+                 numbers = (
+                     "job_complete_timeout",
+@@ -228,6 +233,8 @@
+                     "height",
+                     "autolock_timeout",
+                     "screensaver_wake_delay",
++                    "latitude",
++                    "longitude",
+                 )
+             elif section.startswith("printer "):
+                 bools = (
