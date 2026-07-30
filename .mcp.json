@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fusion360": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "C:\\Users\\HP Probook 430 G8\\Documents\\ultra-3d-printer\\tools\\fusion-bridge\\run-shim.cmd"
+      ]
+    }
+  }
+}

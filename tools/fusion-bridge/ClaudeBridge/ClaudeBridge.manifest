@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "addin",
+    "id": "b0f4a1c2-7d3e-4a58-9c61-claudebridge01",
+    "author": "ultra-3d-printer",
+    "description": {
+        "": "Private local HTTP bridge that lets Claude Code read the current selection and run scripts inside a running Fusion 360."
+    },
+    "version": "1.0.0",
+    "runOnStartup": false,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}
