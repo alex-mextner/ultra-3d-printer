@@ -1,0 +1,59 @@
+--- a/screen.py
++++ b/screen.py
+@@ -163,6 +163,12 @@
+         self.base_panel = BasePanel(self)
+         self.change_theme(self.theme)
+         self.overlay = Gtk.Overlay()
++        # 2026-07-31 black-background fix: self.overlay has no CSS rule of its
++        # own and (per live GtkStyleContext introspection) resolves
++        # background-color to transparent black -- give it an explicit class so
++        # base.css can paint @bg on it as a safety net. See main_grid below for
++        # the actual root-cause widget.
++        self.overlay.get_style_context().add_class("main_overlay")
+         self.add(self.overlay)
+         self.overlay.add_overlay(self.base_panel.main_grid)
+         self.show_all()
+--- a/panels/base_panel.py
++++ b/panels/base_panel.py
+@@ -130,6 +130,16 @@
+ 
+         # Main layout
+         self.main_grid = Gtk.Grid()
++        # 2026-07-31 black-background fix: main_grid is the sole overlay child
++        # of screen.py's Gtk.Overlay and (confirmed live via
++        # GtkStyleContext.get_property(background-color)) gets its own separate
++        # GdkWindow that starts fully transparent (rgba 0,0,0,0), unlike the
++        # toplevel window which correctly resolves @bg. With no compositor
++        # running (raw X11/DRM), that transparent surface renders as solid
++        # black instead of showing the toplevel window bg through it -- this is
++        # the actual black-background-behind-buttons bug. Explicit class so
++        # base.css can paint @bg on it directly.
++        self.main_grid.get_style_context().add_class("main_grid")
+         self._build_main_grid()
+ 
+         self.update_time()
+--- a/styles/base.css
++++ b/styles/base.css
+@@ -25,6 +25,22 @@
+     opacity: .5;
+ }
+ 
++/* 2026-07-31 black-background fix: screen.py's root Gtk.Overlay (class
++ * main_overlay) and its sole overlay child, base_panel's Gtk.Grid (class
++ * main_grid), each resolve background-color to transparent by default --
++ * confirmed live via GtkStyleContext introspection: the toplevel 'window'
++ * node correctly resolves @bg, but main_grid gets its own separate
++ * GdkWindow that starts fully transparent (rgba 0,0,0,0) and, with no
++ * compositor running (raw X11/DRM, no window manager), that renders as
++ * solid black instead of showing the window bg through it -- visible as a
++ * black background behind every button/plaque on every panel. Targeted
++ * classes rather than a blanket 'grid'/'overlay' type selector: plain
++ * Gtk.Grid is used ~70 other places in the codebase (some nested inside
++ * intentionally differently-colored ancestors) and job_status.py has its
++ * own Gtk.Overlay for a progress indicator over a thumbnail image, where
++ * painting an opaque @bg would visibly break that overlay. */
++.main_overlay,
++.main_grid,
+ list row,
+ treeview.view,
+ window {
