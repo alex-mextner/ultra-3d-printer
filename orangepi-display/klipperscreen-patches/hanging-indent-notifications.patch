@@ -1,0 +1,65 @@
+diff --git a/panels/notifications.py b/panels/notifications.py
+index 282c959..932eea3 100644
+--- a/panels/notifications.py
++++ b/panels/notifications.py
+@@ -23,12 +23,21 @@ class Panel(ScreenPanel):
+         super().__init__(screen, title)
+         self.empty = _("Notification log empty")
+         self.tb = Gtk.TextBuffer(text=self.empty)
+-        tv = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Pango.WrapMode.WORD_CHAR)
+-        tv.set_buffer(self.tb)
+-        tv.connect("size-allocate", self._autoscroll)
++        # Hanging indent so a wrapped continuation line lands under the
++        # message text (after "HH:MM:SS ") instead of back at the far-left
++        # margin, where it reads as a stray/unrelated entry (GitHub #6).
++        # GTK3 CSS has no text-indent equivalent -- this is the Gtk.TextTag
++        # indent property, applied to every inserted entry in
++        # add_notification(). Width is (re)computed in _update_indent()
++        # against the panel's actual font, so it tracks theme/font changes
++        # instead of a hardcoded guess.
++        self.indent_tag = self.tb.create_tag("hanging_indent")
++        self.tv = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Pango.WrapMode.WORD_CHAR)
++        self.tv.set_buffer(self.tb)
++        self.tv.connect("size-allocate", self._autoscroll)
+ 
+         scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+-        scroll.add(tv)
++        scroll.add(self.tv)
+ 
+         clear_button = self._gtk.Button(
+             "refresh", _("Clear") + " ", None, self.bts, Gtk.PositionType.RIGHT, 1
+@@ -43,8 +52,15 @@ class Panel(ScreenPanel):
+         self.content.add(content_box)
+ 
+     def activate(self):
++        self._update_indent()
+         self.refresh()
+ 
++    def _update_indent(self):
++        # "00:00:00 " matches the literal "HH:MM:SS " prefix every entry
++        # starts with (see log_notification() in screen.py).
++        width = self.tv.create_pango_layout("00:00:00 ").get_pixel_size()[0]
++        self.indent_tag.set_property("indent", -width)
++
+     def add_notification(self, log):
+         if log["level"] == 0:
+             if "error" in log["message"].lower() or "cannot" in log["message"].lower():
+@@ -57,12 +73,18 @@ class Panel(ScreenPanel):
+             color = COLORS["warning"]
+         else:
+             color = COLORS["error"]
++        start_offset = self.tb.get_end_iter().get_offset()
+         self.tb.insert_markup(
+             self.tb.get_end_iter(),
+             f'\n<span color="{COLORS["time"]}">{log["time"]}</span> '
+             f'<span color="{color}"><b>{remove_newlines(log["message"])}</b></span>',
+             -1,
+         )
++        self.tb.apply_tag(
++            self.indent_tag,
++            self.tb.get_iter_at_offset(start_offset),
++            self.tb.get_end_iter(),
++        )
+ 
+     def clear(self, widget):
+         self.tb.set_text("")
