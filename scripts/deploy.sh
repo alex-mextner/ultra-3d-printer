@@ -25,7 +25,7 @@ for f in "${FILES[@]}"; do
     if [ ! -f "$LOCAL_DIR/$f" ]; then
         continue
     fi
-    remote_content="$(ssh -o ConnectTimeout=8 "$HOST" "cat $REMOTE_DIR/$f 2>/dev/null" || true)"
+    remote_content="$(ssh -n -o ConnectTimeout=8 "$HOST" "cat $REMOTE_DIR/$f 2>/dev/null" || true)"
     if [ "$remote_content" != "$(cat "$LOCAL_DIR/$f")" ]; then
         echo "--- $f отличается ---"
         diff <(echo "$remote_content") "$LOCAL_DIR/$f" || true

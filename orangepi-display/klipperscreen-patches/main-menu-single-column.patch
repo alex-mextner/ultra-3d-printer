@@ -1,0 +1,31 @@
+diff --git a/panels/main_menu.py b/panels/main_menu.py
+index f702390..2348d0e 100644
+--- a/panels/main_menu.py
++++ b/panels/main_menu.py
+@@ -37,7 +37,25 @@ class Panel(MenuPanel):
+             self.main_menu.attach(self.menu_scroll, 0, 3, 1, 2)
+         else:
+             self.main_menu.attach(self.create_left_panel(), 0, 0, 1, 1)
+-            self.labels["menu"] = self.arrangeMenuItems(items, 2, True)
++            # max_columns=1, not 2: the button pane here is only ~half the
++            # 320px screen wide (the other half is create_left_panel's
++            # heater graph). At the big-font theme's 14px, a 2-column
++            # AutoGrid forces both (homogeneous) columns as wide as the
++            # widest single-column label -- "Temperature" -- which alone
++            # needs more than half of that pane. The whole 2-column grid
++            # then overflows its ~160px viewport with no horizontal
++            # scrollbar to reach the overflow (scroll policy is NEVER on
++            # that axis), clipping the right column (Temperature/More,
++            # invisible off the right edge) and the last row (Print, which
++            # spans both columns via expand_last) right at the screen edge
++            # -- confirmed via AutoGrid diagnostic logging showing
++            # col=0,row=2 for Print with a colspan of 2, i.e. it gets the
++            # full oversized width, same as the column that's clipped.
++            # A single column lets every button take the full ~160px pane
++            # width instead of splitting it, so nothing needs to be wider
++            # than what's actually available; menu_scroll already scrolls
++            # vertically (Gtk.PolicyType.AUTOMATIC) to reach the extra rows.
++            self.labels["menu"] = self.arrangeMenuItems(items, 1, True)
+             self.menu_scroll.add(self.labels["menu"])
+             self.main_menu.attach(self.menu_scroll, 1, 0, 1, 1)
+         self.content.add(self.main_menu)

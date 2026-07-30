@@ -130,3 +130,50 @@ button:focus,
 button:active {
     background-color: @active;
 }
+
+/* Fix 2026-07-30: ".buttons_slim" toolbar buttons (Notifications' "Clear"
+ * button, plus gcodes.py/console.py/gcode_macros.py/spoolman.py toolbar
+ * buttons sharing the same class) have NO visual chrome at all: base.css's
+ * generic `button {}` rule sets `background-color: @bg` -- literally the
+ * same color as the window/panel background -- plus `border: 0`, and
+ * `.buttons_slim` (base.css) then zeroes vertical padding/margin on top of
+ * that. Net result: a floating icon+label with no visible boundary.
+ * Fixed by adding a border (NOT a background-color change -- this theme's
+ * `button:focus,button:active { background-color: @active }` rule above
+ * already uses @active as the focus/press highlight; reusing it as the
+ * resting-state background here would make that highlight invisible).
+ *
+ * NOT fixed by this rule (not CSS-fixable): the Clear button's icon itself
+ * renders small regardless of this theme's 14px font bump.
+ * KlippyGtk.Button() bakes the icon into a fixed-pixel GdkPixbuf at
+ * construction time (`width = height = self.img_scale * scale`, where
+ * img_scale = self._gtk.font_size * 2 and scale = self._gtk.bsidescale,
+ * a 0.55-1.0 Python constant) -- i.e. off the ~8px Python font_size
+ * baseline this theme's CSS-only override never reaches (same caveat as
+ * the icon/titlebar/action-bar sizing documented at the top of this
+ * file). CSS can only add padding around an already-rasterized pixbuf,
+ * not enlarge it without blurring -- a real fix needs a Python change in
+ * KlippyGtk.py/notifications.py, not CSS.
+ */
+.buttons_slim {
+    border: .1em solid @lines;
+    padding-left: .3em;
+    padding-right: .3em;
+}
+
+/* Fix 2026-07-30: disabled sidebar (.action_bar: back/home/printer_select/
+ * shortcut/estop/shutdown, added in base_panel.py) icons dim to
+ * near-invisible. base.css actually has two competing disabled-opacity
+ * rules -- generic `button:disabled { opacity: .5 }` (specificity 0,1,1)
+ * and the more specific `.action_bar :disabled { opacity: .6 }`
+ * (specificity 0,2,0 -- 2 classes/pseudo-classes beats 1 class + 1 type),
+ * so .6 is what actually renders, but that's still too dim for these
+ * icons against the dark @bg background. z-bolt/style.css has no
+ * competing :disabled rule to fight. Redeclaring the identical selector
+ * here relies on cascade order (this theme's style.css loads after
+ * base.css, per screen.py:change_theme(), documented at the top of this
+ * file) to win at equal specificity.
+ */
+.action_bar :disabled {
+    opacity: .85;
+}

@@ -1,0 +1,10 @@
+--- a/screen.py
++++ b/screen.py
+@@ -1428,7 +1428,7 @@
+         keyval_name = Gdk.keyval_name(event.keyval)
+         if keyval_name == "Escape":
+             self._menu_go_back(home=True)
+-        elif keyval_name == "BackSpace" and len(self._cur_panels) > 1 and self.keyboard is None:
++        elif keyval_name == "BackSpace" and self.keyboard is None:
+             self.base_panel.back()
+         self._reset_focus_clear_timeout()
