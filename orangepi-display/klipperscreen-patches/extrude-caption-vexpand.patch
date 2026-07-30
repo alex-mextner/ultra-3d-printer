@@ -1,0 +1,35 @@
+--- a/panels/extrude.py
++++ b/panels/extrude.py
+@@ -138,14 +138,26 @@
+                 ctx.add_class("horizontal_togglebuttons_active")
+             speedgrid.attach(self.labels[f"speed{i}"], j, 0, 1, 1)
+
+-        distbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        # 2026-07-31 gap-tightening: distbox/speedbox are VERTICAL Boxes with
++        # only two children each (a caption Label + the value-button Grid).
++        # Both were packed with expand=True (pack_start's 2nd arg / the
++        # implicit default used by Box.add()), so any extra vertical space
++        # this grid row is handed by the parent gets split between the
++        # caption label and the button grid -- and since a GtkLabel's own
++        # valign defaults to fill, that extra space renders as blank
++        # padding above/below the "Distance (mm)"/"Speed (mm/s)" text and
++        # around the button row, not anything visually useful. expand=False
++        # on both children, plus vexpand=False on the Box itself, makes each
++        # Box (and this grid row, since nothing else in it still asks for
++        # vexpand) size to its actual natural content height instead.
++        distbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=False)
+         self.labels["extrude_dist"] = Gtk.Label(_("Distance (mm)"))
+-        distbox.pack_start(self.labels["extrude_dist"], True, True, 0)
+-        distbox.add(distgrid)
+-        speedbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        distbox.pack_start(self.labels["extrude_dist"], False, False, 0)
++        distbox.pack_start(distgrid, False, False, 0)
++        speedbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=False)
+         self.labels["extrude_speed"] = Gtk.Label(_("Speed (mm/s)"))
+-        speedbox.pack_start(self.labels["extrude_speed"], True, True, 0)
+-        speedbox.add(speedgrid)
++        speedbox.pack_start(self.labels["extrude_speed"], False, False, 0)
++        speedbox.pack_start(speedgrid, False, False, 0)
+
+         filament_sensors = self._printer.get_filament_sensors()
+         sensors = Gtk.Grid(valign=Gtk.Align.CENTER, row_spacing=5, column_spacing=5)

@@ -1,0 +1,57 @@
+--- a/panels/base_panel.py
++++ b/panels/base_panel.py
+@@ -76,14 +76,48 @@
+             self.control[item].connect("clicked", self._screen.remove_keyboard)
+
+         # Action bar
++        # 2026-07-31 gap-tightening: in the landscape/non-vertical layout,
++        # _build_main_grid() makes this Box VERTICAL with vexpand=True,
++        # spanning the full ~212px content height -- and every one of the
++        # (usually 4 of 6, since printer_select/estop are hidden by default)
++        # VISIBLE icons was being handed an equal, large share of that
++        # height and centering its ~30px icon inside it. That's what
++        # produced the huge blank gaps between back/home/notification-bell/
++        # power in the sidebar (confirmed live via screenshot: icons ended
++        # up evenly spaced ~62px apart on a 212px-tall column with only 4
++        # visible -- (211-27)/3 = 61.3, i.e. plain equal-space distribution,
++        # not content-driven sizing).
++        #
++        # First attempt -- switching Gtk.Box.add() (expand=True, fill=True,
++        # GTK3's default child packing) to pack_start(child, False, False,
++        # 0) -- measured LIVE as having ZERO effect (identical icon Y
++        # positions before/after, confirmed via a pixel-column luminance
++        # scan of both screenshots). Root cause: GtkBox's real per-child
++        # expand decision is `pack_expand OR
++        # gtk_widget_compute_expand(child)` -- it ORs the pack-time flag
++        # with the CHILD WIDGET's own computed vexpand, not just the
++        # pack-time flag alone. self._gtk.Button() sets `vexpand=True`
++        # unconditionally in its Gtk.Button(...) constructor call
++        # (ks_includes/KlippyGtk.py), so every one of these six buttons
++        # still reported vexpand=True regardless of the pack_start argument,
++        # and Box kept expanding them. Fixed by explicitly forcing
++        # set_vexpand(False) on each control button here -- that's what
++        # actually stops gtk_widget_compute_expand() from returning True,
++        # so pack_start's False finally has an effect and each button
++        # claims only its natural size. The `spacing=5` constructor arg
++        # above is then what actually separates them (a small, real, fixed
++        # gap) -- leftover height goes unused at the bottom of the bar
++        # instead of being smeared between icons.
++        for _ctrl_name in ("back", "home", "printer_select", "shortcut", "estop", "shutdown"):
++            self.control[_ctrl_name].set_vexpand(False)
+         self.action_bar = Gtk.Box(spacing=5)
+         self.action_bar.get_style_context().add_class("action_bar")
+-        self.action_bar.add(self.control["back"])
+-        self.action_bar.add(self.control["home"])
+-        self.action_bar.add(self.control["printer_select"])
+-        self.action_bar.add(self.control["shortcut"])
+-        self.action_bar.add(self.control["estop"])
+-        self.action_bar.add(self.control["shutdown"])
++        self.action_bar.pack_start(self.control["back"], False, False, 0)
++        self.action_bar.pack_start(self.control["home"], False, False, 0)
++        self.action_bar.pack_start(self.control["printer_select"], False, False, 0)
++        self.action_bar.pack_start(self.control["shortcut"], False, False, 0)
++        self.action_bar.pack_start(self.control["estop"], False, False, 0)
++        self.action_bar.pack_start(self.control["shutdown"], False, False, 0)
+         self.show_printer_select(len(self._config.get_printers()) > 1)
+
+         # Titlebar
