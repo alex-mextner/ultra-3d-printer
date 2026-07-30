@@ -53,6 +53,26 @@ systemctl restart systemd-journald
 sleep 1
 journalctl --flush
 
+echo "== 4. Проверка: персистентный файл действительно ONLINE (пишется) =="
+# journalctl --header без --file недостаточен как проверка: он показывает
+# заголовок ОДНОГО файла на выбор самого journalctl, и после restart+flush
+# может показать как /run, так и /var в зависимости от порядка обхода -
+# см. обсуждение в issue #11. Проверяем конкретно персистентный файл.
+PERSIST_FILE="$(ls -t /var/log.hdd/journal/*/system.journal 2>/dev/null | head -1)"
+if [ -z "$PERSIST_FILE" ]; then
+    echo "  ⚠ Не нашёл /var/log.hdd/journal/*/system.journal - persistent-хранилище" >&2
+    echo "    не создалось, проверять руками." >&2
+    exit 1
+fi
+if journalctl --file="$PERSIST_FILE" --header 2>&1 | grep -q '^State: ONLINE'; then
+    echo "  OK: $PERSIST_FILE — State: ONLINE (пишется прямо сейчас)."
+else
+    echo "  ⚠ $PERSIST_FILE — НЕ ONLINE. Storage=persistent не подхватился с первого" >&2
+    echo "    раза (см. issue #11 - точный триггер отката на volatile не до конца" >&2
+    echo "    восстановлен). Проверить руками:" >&2
+    echo "    journalctl --file=$PERSIST_FILE --header" >&2
+    exit 1
+fi
+
 echo
-echo "Готово. Проверить: journalctl --header | grep 'File path'"
-echo "(ожидается путь под /var/log/journal/..., а не /run/log/journal/...)"
+echo "Готово."
