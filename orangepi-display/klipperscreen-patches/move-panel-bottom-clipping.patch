@@ -23,7 +23,7 @@
          distgrid = Gtk.Grid()
          for j, i in enumerate(self.distances):
              self.labels[i] = self._gtk.Button(label=i)
-@@ -138,15 +154,53 @@
+@@ -138,15 +154,57 @@
          bottomgrid.attach(self.labels["pos_x"], 0, 0, 1, 1)
          bottomgrid.attach(self.labels["pos_y"], 1, 0, 1, 1)
          bottomgrid.attach(self.labels["pos_z"], 2, 0, 1, 1)
@@ -59,21 +59,25 @@
          self.labels["move_menu"].attach(bottomgrid, 0, 3, 1, 1)
          self.labels["move_menu"].attach(distgrid, 0, 4, 1, 1)
  
-+        # 2026-07-31 Move-panel bottom-clipping fix, final margin of safety.
-+        # Measured live (temporary get_preferred_height() dump, since removed):
-+        # this panel's minimum height was 226px against a 212px content area
-+        # (240px screen minus the 28px title bar) -- a hard 14px deficit, which
-+        # GTK resolved by squeezing distgrid (the 1/5/10/25/50 selector) from
-+        # its 44px minimum down to 35px and pushing it to y=219, i.e. partly
-+        # off the bottom edge. That is exactly the reported clipping. The two
-+        # row-homogeneity fixes above do the heavy lifting (jog grid 144->123,
-+        # which by itself closes the deficit); this class only trims base.css's
-+        # per-button margin .2em + padding .25em chrome, worth a further ~2px
-+        # per jog button and ~4px per position readout. Small, but it buys the
-+        # panel ~7px of real headroom instead of landing exactly on the limit,
-+        # and it costs nothing visually. Deliberately NOT achieved by
-+        # ellipsizing or shrinking any label -- every caption here, including
-+        # the two-line "Disable Motors", stays at full size.
++        # 2026-07-31 Move-panel bottom-clipping fix, final trim. The two
++        # row-homogeneity fixes above do the heavy lifting; this class only
++        # shaves base.css's per-button margin .2em + padding .25em chrome,
++        # worth ~2px per jog button and ~4px per position readout. Small, but
++        # free, and it keeps every label full-size -- notably the two-line
++        # "Disable Motors" -- instead of ellipsizing or shrinking text to fit.
++        #
++        # CAUTION for whoever measures this panel next: get_preferred_height()
++        # is width-agnostic and reports distgrid's minimum as 44px, which looks
++        # like starvation because distgrid is only ever allocated ~33-36px.
++        # That figure is NOT what GTK uses here -- this is a height-for-width
++        # layout, and get_preferred_height_for_width() at distgrid's real
++        # 282px width returns 33px, which is exactly what it receives. Measured
++        # after the fix: content needs 194px height-for-width against the 212px
++        # available (240px screen minus the 28px title bar), i.e. ~18px of
++        # genuine slack, with every row getting at least its real request.
++        # Unlike the row-homogeneity changes above, this class is applied
++        # unconditionally, so it takes effect in portrait too (harmless there --
++        # it only makes an already-tighter layout slightly more compact).
 +        for _w in grid.get_children():
 +            _w.get_style_context().add_class("move_compact")
 +        for p in ("pos_x", "pos_y", "pos_z"):
@@ -84,20 +88,18 @@
          printer_cfg = self._printer.get_config_section("printer")
 --- a/styles/base.css
 +++ b/styles/base.css
-@@ -352,6 +352,20 @@
+@@ -352,6 +352,18 @@
      min-height: 0;
  }
  
-+/* 2026-07-31 Move-panel bottom-clipping fix (see panels/move.py for the full
-+ * measurement). The panel needed 226px of a 212px content area on this
-+ * 320x240 kiosk, so GTK pushed the distance selector partly off the bottom
-+ * edge. The row-homogeneity fixes in move.py close that deficit on their own;
-+ * this rule just trims base.css's per-button margin .2em + padding .25em
-+ * chrome for that panel to buy a little real headroom rather than landing
-+ * exactly on the limit. Worth ~2px per jog button and ~4px per position
-+ * readout -- small, but free. Scoped to an explicit class so no other panel's
-+ * button metrics change, and chosen over ellipsizing or shrinking text so
-+ * every label (notably the two-line "Disable Motors") stays full-size. */
++/* 2026-07-31 Move-panel bottom-clipping fix (full measurement and the
++ * height-for-width caveat are in panels/move.py). The row-homogeneity fixes
++ * there close the height deficit on their own; this rule only shaves
++ * base.css's per-button margin .2em + padding .25em chrome for that panel,
++ * worth ~2px per jog button and ~4px per position readout. Scoped to an
++ * explicit class so no other panel's button metrics change, and chosen over
++ * ellipsizing or shrinking text so every label (notably the two-line
++ * "Disable Motors") stays full-size. */
 +.move_compact {
 +    margin: .05em;
 +    padding: .05em;
