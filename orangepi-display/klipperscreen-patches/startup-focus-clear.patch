@@ -1,0 +1,44 @@
+--- a/screen.py
++++ b/screen.py
+@@ -166,6 +166,41 @@
+         self.add(self.overlay)
+         self.overlay.add_overlay(self.base_panel.main_grid)
+         self.show_all()
++        # Clear default GTK startup focus (2026-07-30, stray-highlight fix):
++        # GTK3 auto-assigns keyboard focus to the first focusable+sensitive
++        # widget in the window the moment show_all() maps everything --
++        # confirmed live (temporary logging.info right after show_all()) to
++        # land on base_panel.control["shortcut"] (the sidebar notification
++        # bell), since it's the first can-focus=True widget in the action
++        # bar that isn't set_no_show_all-hidden at startup (back/home start
++        # insensitive via set_control_sensitive(False, ...) in
++        # BasePanel.__init__, but insensitive still isn't the same as
++        # unfocusable to GTK's initial focus walk -- shortcut is the first
++        # one that's both sensitive AND visible). Confirmed via repeated
++        # fresh-restart screenshots (systemctl restart -> screenshot with
++        # zero key/mouse input): the bell renders with a persistent
++        # focus-highlight box from the FIRST frame after boot, all the way
++        # through "Initializing Klipper Connection" and into the fully
++        # loaded main_menu dashboard, indefinitely -- because
++        # _reset_focus_clear_timeout()'s 10s auto-clear (see
++        # _key_press_event below) only ever arms on a key PRESS; a screen
++        # where the user hasn't touched a button yet never starts that
++        # timer at all, so this default focus persists with no time bound.
++        # This is likely the actual mechanism behind reports of an
++        # unexplained highlight appearing "at rest" with no real
++        # interaction -- not a bug in the per-widget button_active/graph_label
++        # CSS toggling in main_menu.py (add_device/show_numpad/hide_numpad
++        # were re-checked and correctly pair add_class/remove_class 1:1, no
++        # discrepancy found there), and not GTK :hover/prelight (confirmed
++        # separately live: moving the mouse away from a device row does not
++        # change that row's rendered state, and a synthetic xdotool click
++        # cleanly clears once its own numpad closes) -- purely unrequested
++        # initial keyboard focus with no matching real user action behind
++        # it. set_focus(None) here matches exactly what
++        # _clear_focus_on_timeout() already does at idle, just moved earlier
++        # so nothing is ever implicitly focused before the user's first
++        # real key press.
++        self.set_focus(None)
+         self.update_cursor(self.show_cursor)
+         min_ver = (3, 8)
+         if sys.version_info < min_ver:
