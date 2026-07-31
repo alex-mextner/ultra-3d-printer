@@ -1,0 +1,203 @@
+Dashboard temperature-row geometry + narrow scrollbars (2026-07-31)
+==================================================================
+
+Problem (user, repeated): on the 320x240 main dashboard the temperature rows
+wasted horizontal space -- a ~36px dead gap between each row's icon and its
+value, another ~28px between the values and the graph, leaving the graph only
+160px of a 320px screen.
+
+Root cause (measured on-device with a temporary get_preferred_width() /
+get_allocation() dump, not guessed): the device list lives in a
+CustomScrolledWindow whose scrollbar was non-overlay, so GTK3 added the
+scrollbar's 35px minimum width to the scrolled window's own minimum EVEN WHILE
+THE BAR WAS HIDDEN. The left panel is pinned to that minimum
+(set_hexpand(False)), so the 33 surplus px could not go anywhere useful -- and
+because KlippyGtk.Button() builds both the icon button and the value button
+with hexpand=True, Gtk.Grid handed the surplus out as extra COLUMN width
+(+18px to the icon column, +16px to the value column). That is why a scrollbar
+reserve sitting at the panel's RIGHT edge was responsible for BOTH visible
+gaps, including the one between the icon and its value.
+
+Measured, before -> after:
+  scroll / left_panel min width ....... 108px -> 75px
+  icon column (col 0) allocation ....... 47px -> 30px  (needs 29px)
+  value column (col 1) allocation ...... 56px -> 40px  (needs 37px)
+  gap icon -> value text ............... ~36px -> ~10px
+  gap value text -> graph .............. ~28px -> ~20px (14px of which is
+                                          main_menu's own column_spacing)
+  graph_panel ...................... x158 w160 -> x125 w193  (+33px, +21%)
+
+The device-wide half of the fix is PENDING-scroll-overlay-default.patch
+(overlay_scrolling default False -> True in ks_includes/widgets/scroll.py).
+This patch adds:
+  * an explicit set_overlay_scrolling(True) on the dashboard's own scroll, so
+    the dashboard cannot silently regress if that global default is reverted;
+  * base.css: scrollbar slider 2.5em -> .5em (and the .heater-list override
+    1.5em -> .5em, which would otherwise have become the WIDEST bar on the
+    device instead of the narrowest);
+  * base.css: undershoot.top/.bottom restored from upstream's
+    `background-image: none` to a thin 2px accent line. Overlay scrollbars
+    fade out ~1s after scrolling stops and GTK3 does that with
+    gtk_widget_set_opacity()/gtk_widget_hide() on the scrollbar widget, which
+    CSS cannot override -- so undershoot is the only persistent "there is more
+    content below" cue left on a touchless D-pad device. Note undershoot draws
+    per edge, only while the view is scrolled away from that edge: at the top
+    of an overflowing list GTK3 draws undershoot.bottom (so "more below" is
+    covered from the very first frame), and a list that fits draws nothing at
+    all, which is the correct behaviour -- it is an overflow cue, not a
+    scrollbar substitute. Verified live on the KlipperScreen Settings panel:
+    narrow bar visible while scrolling, bar gone at rest, accent lines present
+    at both edges at rest.
+
+Theme coverage: every change is in base.css, which both themes load. Verified
+statically that neither styles/big-font/style.css nor styles/big-font-light/
+style.css contains any `scrollbar`, `undershoot` or (for big-font) any
+`@define-color` rule at all -- the dark theme resolves entirely through
+base.css's palette, where @active #404E57 contrasts cleanly against @bg
+#13181C. So day and night are identical by construction; no theme file needed
+editing and none was edited.
+
+base.css has no standalone mirror under printer-configs/; this patch file is
+its repo record.
+
+CHAIN NOTE: the undershoot hunk below draws the line in @active at 2px. That
+was superseded the same day -- in the light theme @active (#8FB6D1) on @bg
+(#EDEFF2) turned out to be effectively invisible, which is why agent-D still
+saw gcode_macros.py "look complete at rest" after this landed. The colour and
+weight are re-tuned to alpha(@text, .45) at 3px in
+button-padding-trim-and-undershoot-contrast.patch. Apply that one AFTER this
+one; the two together match what is on the device.
+
+diff --git a/panels/main_menu.py b/panels/main_menu.py
+--- a/panels/main_menu.py
++++ b/panels/main_menu.py
+@@ -452,6 +452,30 @@
+ 
+         scroll = self._gtk.ScrolledWindow(steppers=False)
+         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
++        # Overlay scrolling (2026-07-31): the dashboard row-geometry ROOT CAUSE.
++        # A non-overlay GTK3 scrollbar adds its own minimum width to the
++        # ScrolledWindow's minimum width even while the bar is not shown, and
++        # this left panel is pinned to its minimum (set_hexpand(False) in the
++        # landscape branch of __init__), so that reserve was pure waste.
++        # Live DBG_WIDTH dumps, before -> after flipping it:
++        #   scroll/left_panel min .. 108px -> 75px   (vscrollbar min = 35px)
++        #   icon column (col 0) ..... 47px -> 30px   (needs 29px: 22px glyph
++        #                                             + .4em graph_label bar)
++        #   value column (col 1) .... 56px -> 40px   (needs 37px for "888.8";
++        #                                             floor set by the "°C"
++        #                                             header's size_request)
++        #   graph_panel ......... x158 w160 -> x125 w193  (+33px, +21%)
++        # Note WHY the reserve widened the COLUMNS and not just the panel's
++        # right edge: KlippyGtk.Button() builds both the icon button and the
++        # value button with hexpand=True, so Gtk.Grid distributed the 33
++        # surplus px into the two columns (+18 / +16). That is why a scrollbar
++        # sitting at the panel's RIGHT edge was nevertheless responsible for
++        # the ~36px dead gap between each row's icon and its value, as well as
++        # the gap between the values and the graph -- both gaps, one cause.
++        # ks_includes/widgets/scroll.py now defaults overlay_scrolling to True
++        # device-wide; this call is deliberately redundant with that so the
++        # dashboard cannot silently regress if that default is ever reverted.
++        scroll.set_overlay_scrolling(True)
+         scroll.get_style_context().add_class("heater-list")
+         scroll.add(self.labels["devices"])
+ 
+diff --git a/styles/base.css b/styles/base.css
+--- a/styles/base.css
++++ b/styles/base.css
+@@ -294,8 +294,46 @@
+     min-height: 1em;
+ }
+ 
++/* Narrow scrollbars (2026-07-31, agent-B scrollbar pass) -- MEASURED, not
++ * guessed. A non-overlay GTK3 scrollbar adds its own minimum width to the
++ * ScrolledWindow's minimum width even while the bar is invisible. Live
++ * DBG_WIDTH dump on the main dashboard: vscrollbar min = 35px (this 2.5em at
++ * the big-font themes' 14px font), which inflated the device-list panel's
++ * minimum from 75px to 108px. Because KlippyGtk.Button() creates BOTH the
++ * row's icon button and its value button with hexpand=True, Gtk.Grid then
++ * handed those 33 surplus px out as extra COLUMN width -- +18px to the icon
++ * column (47px allocated for a 29px need) and +16px to the value column (56px
++ * for a 37px need) -- so the reserve produced BOTH dead gaps on every
++ * temperature row (icon->value AND value->graph), not just the right-hand
++ * one. ks_includes/widgets/scroll.py now defaults to overlay scrolling, which
++ * removes the reserve entirely; .5em (7px) additionally keeps the bar itself
++ * thin wherever a scrolled window still ends up in non-overlay mode, which is
++ * also what the user asked for directly ("сильно уже"). */
+ scrollbar slider {
+-    min-width: 2.5em;
++    min-width: .5em;
++    border-radius: .7em;
++    background-color: @active;
++}
++
++/* Overlay scrollbars are drawn on top of the content (no layout width) but
++ * GTK3 fades them out ~1s after scrolling stops, so at rest there would be no
++ * hint that a list continues. GTK3 puts a resting overlay bar in the
++ * `.overlay-indicator` state and adds `.hovering`/`.dragging` when active;
++ * this keeps the resting indicator opaque and gives it a usable (but still
++ * thin) slider instead of Adwaita's 3px hairline. NOTE: GTK3 also calls
++ * gtk_widget_set_opacity()/gtk_widget_hide() on the scrollbar itself during
++ * the fade, which CSS cannot override -- so this rule only improves the bar
++ * WHILE it is shown; the persistent at-rest cue is the undershoot rule
++ * further down. */
++scrollbar.overlay-indicator:not(.dragging):not(.hovering) {
++    opacity: 1;
++    background-color: transparent;
++}
++
++scrollbar.overlay-indicator:not(.dragging):not(.hovering) slider {
++    min-width: .5em;
++    margin: 0;
++    border: none;
+     border-radius: .7em;
+     background-color: @active;
+ }
+@@ -313,9 +351,28 @@
+     -gtk-icon-source: -gtk-icontheme("pan-up-symbolic");
+ }
+ 
+-undershoot.top,
++/* undershoot.* is GTK3's "there is more content past this edge" shading. It
++ * is drawn only while the view is actually scrolled away from that edge, it
++ * costs zero layout width, and it does NOT fade out -- which makes it the
++ * only persistent affordance left now that scrollbars are overlay-mode and
++ * auto-hide (see the .overlay-indicator note above). Upstream KlipperScreen
++ * blanks it (background-image: none); restored here as a thin 2px accent
++ * line, drawn with a 2-stop same-colour gradient + background-size (the same
++ * mechanism Adwaita itself uses for its dashed default, so it is guaranteed
++ * supported by GTK3's CSS engine) rather than Adwaita's dashes, which are
++ * too faint to read on a 320x240 panel. */
++undershoot.top {
++    background-image: linear-gradient(to bottom, @active, @active);
++    background-size: 100% 2px;
++    background-repeat: no-repeat;
++    background-position: center top;
++}
++
+ undershoot.bottom {
+-    background-image: none;
++    background-image: linear-gradient(to top, @active, @active);
++    background-size: 100% 2px;
++    background-repeat: no-repeat;
++    background-position: center bottom;
+ }
+ 
+ spinner {
+@@ -475,8 +532,15 @@
+     min-height: 350px;
+ }
+ 
++/* 2026-07-31 (agent-B scrollbar pass): was 1.5em. That was upstream's
++ * "narrower than the global 2.5em" special case for the temperature list;
++ * now that the global slider is .5em this override would make the dashboard's
++ * bar the WIDEST on the device instead of the narrowest, so it is brought
++ * down to match. Kept as an explicit rule (rather than deleted) because it is
++ * an upstream selector -- a future KlipperScreen update re-adding it would
++ * otherwise silently re-inflate this one list. */
+ .heater-list scrollbar slider{
+-    min-width: 1.5em;
++    min-width: .5em;
+ }
+ 
+ .heater-grid {

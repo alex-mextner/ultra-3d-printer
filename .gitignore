@@ -9,3 +9,6 @@
 
 # Логи сервера предпросмотра (docs/serve-ramps.sh)
 *.log
+
+# Локальные настройки Claude Code (пер-машинные разрешения, не общие)
+.claude/settings.local.json

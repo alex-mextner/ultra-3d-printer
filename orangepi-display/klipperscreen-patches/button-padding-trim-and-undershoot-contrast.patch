@@ -1,0 +1,187 @@
+Global horizontal button-padding trim + undershoot contrast fix (2026-07-31)
+===========================================================================
+
+Two base.css changes, in chain order AFTER dashboard-row-geometry.patch
+(which introduced the undershoot rule this patch then re-tunes).
+
+--- 1. Horizontal button-padding trim ---------------------------------------
+
+Standing user request, made several times ("напоминаю я уже нескольк ораз
+просил их максимально сократить!"): cut padding as aggressively as possible
+across the whole UI -- on a 320x240 panel padding is the biggest consumer of
+the width labels need. Concrete bug it fixes: the More menu clipped
+"Z Calibrate" to "Z Calibr...".
+
+Which rule actually governed the clip (easy to get wrong): menu-grid buttons
+carry menu.py's color1..color4 classes, and `button.color1..4
+{ padding: 0.33em }` -- NOT the generic `button { padding: 0.25em }` -- is what
+applied to them. 0.33em = 4.62px per side at the themes' 14px font.
+
+  More grid: 4 columns over the ~282px content area = ~70.5px/cell. Per cell
+  2 x .2em margin (5.6px) + 2 x .33em padding (9.2px) of chrome left ~55-63px
+  of text width; the label wraps (WORD_CHAR, 2 lines) to "Z" / "Calibrate" and
+  that second line needs ~66px, so it ellipsized. Three pixels short.
+
+Change: horizontal padding .25em -> .1em on `button`, .33em -> .1em on
+`button.color1..4`. Vertical padding untouched in both (it keeps a button's
+icon off its own label, and vertical space is not the scarce dimension); the
+coloured rule keeps its .1em bottom, tuned to sit above the border-bottom
+accent. Returns 6.4px per coloured button / 4.2px per plain one BY CSS
+ARITHMETIC -- that figure is derived, not measured; what was verified is the
+rendering.
+
+Why .1em and not 0: `button { margin: .2em }` already puts 5.6px between two
+adjacent buttons; .1em per side widens the gap between their TEXT to 8.4px. At
+0 the labels of side-by-side buttons would sit 5.6px apart and start to read
+as one run of text -- button backgrounds here are the same colour as the
+panel, so the gap and the coloured accent bar are the only separators.
+
+Swept live after the change (all five surfaces the coordinator named):
+  * More grid ....... "Z Calibrate" renders in full. FIXED. All 12 items
+                      render un-truncated in the after frame.
+  * Main dashboard .. unchanged (graph still x125 w193) -- the themes'
+                      `.heater-grid button { padding: 0 .15em }` outspecifies
+                      `button`, so this trim structurally cannot reach it.
+  * Settings ........ unchanged (rows are labels + switches, not buttons).
+  * Temperature ..... unchanged, INCLUDING its still-ellipsized "Heater B..."
+                      / "OrangePi ...". Same `.heater-grid` specificity as the
+                      dashboard -- a deliberate non-fix, not an unswept
+                      surface. Reaching it would mean editing the themes'
+                      heater-grid rule that panels/temperature.py depends on.
+  * Move ............ unchanged; .1/.5/1/5/10/25/50 selector still fits.
+
+Known cosmetic side effect, NOT fixable from base.css: "KlipperScreen" is a
+single word with no break opportunity, so Pango char-wraps it wherever the
+width runs out. The extra 6.4px moved the break from "Klipper-"/"Screen" to
+"KlipperS-"/"creen" -- legible, not truncated, but uglier. Any width change
+moves that break point. The real fix is one word in config/main_menu.conf
+([menu __main more settings] name: KlipperScreen -> Settings).
+
+--- 2. undershoot contrast follow-up ----------------------------------------
+
+dashboard-row-geometry.patch restored undershoot as a 2px @active line. That
+was WRONG in the light theme: @active is #8FB6D1 against @bg #EDEFF2, a pale
+blue line on pale lavender, effectively invisible at 2px on a bottom row
+already busy with content sliced mid-row.
+
+This was not theoretical. agent-D reported gcode_macros.py "looks complete at
+rest" AFTER the undershoot rule had already landed (agent-D's device window
+06:44-06:59 UTC; the undershoot rule landed 06:12 UTC). Investigating showed
+the line WAS drawing there all along -- it simply could not be seen. Since
+this line is now the ONLY at-rest signal that a list continues (overlay
+scrollbars fade, and GTK3 fades them via gtk_widget_set_opacity() +
+gtk_widget_hide() on the scrollbar widget, which CSS cannot override),
+"consistent with the scrollbar colour" is worth far less than "unmissable".
+
+Change: alpha(@text, .45) instead of @active, and 2px -> 3px. @text is #1A1D21
+in the light theme and white in the dark one, so the cue is a dark line on a
+light background and a light line on a dark one -- guaranteed contrast in both
+themes by construction rather than by an accent colour that happens to sit
+close to the background in one of them.
+
+Verified live at rest, scrolled to the top, mouse parked away from the list:
+  * Macros (gcode_macros) .. line invisible before, clearly visible after.
+                             Same frame, same scroll position -- the only
+                             change is the colour/weight.
+  * Settings ............... clearly visible at the bottom edge.
+  * Console ................ plain Gtk.ScrolledWindow (not
+                             CustomScrolledWindow); `undershoot` is a bare
+                             element selector so it applies there too. Console
+                             auto-scrolls, so it sits at the BOTTOM (no
+                             undershoot.bottom by definition) and keeps its
+                             scrollbar visible anyway -- it has a cue, but
+                             undershoot.top was not clearly discernible in the
+                             capture because that edge sits directly under the
+                             button row. Flagging rather than claiming.
+
+No !important anywhere; no GTK CSS warnings in the journal after restart.
+
+diff --git a/styles/base.css b/styles/base.css
+--- a/styles/base.css
++++ b/styles/base.css
+@@ -118,11 +118,22 @@
+     -gtk-icon-source: url("./styles/complete.svg");
+ }
+ 
++/* Horizontal padding .25em -> .1em (2026-07-31, agent-B horizontal padding
++ * trim). Standing user request, made several times, to cut padding as hard as
++ * possible across the whole UI on this 320x240 panel. VERTICAL padding is
++ * deliberately left at .25em -- it is what keeps a button's icon off its own
++ * label, and vertical space is not the scarce dimension here.
++ * Why .1em (1.4px at the themes' 14px font) rather than 0: `margin: .2em`
++ * above already puts 5.6px of gap between two adjacent buttons; .1em of
++ * padding on each side widens the gap between their TEXT to 8.4px, which is
++ * what actually keeps "where does one button end" readable at this size.
++ * Going to 0 would leave the labels of side-by-side buttons 5.6px apart and
++ * start to read as one run of text. */
+ button {
+     background-image: none;
+     background-color: @bg;
+     margin: .2em;
+-    padding: 0.25em;
++    padding: 0.25em 0.1em;
+     border-radius: 0;
+     border: 0;
+     -gtk-icon-shadow: none;
+@@ -152,12 +163,24 @@
+     color: grey;
+ }
+ 
++/* Same trim as `button` above, and THE fix for the clipped "Z Calibr..." in
++ * the More menu (2026-07-31, agent-B horizontal padding trim). These four
++ * classes are what menu.py puts on every menu-grid button, and this rule --
++ * not the generic `button` rule -- is the one that governs them: .33em is
++ * 4.62px per side at 14px. The More grid is 4 columns over the ~282px content
++ * area = ~70.5px per cell; after 2x .2em margin and 2x .33em padding only
++ * ~55-63px of text width was left, and the wrapped second line "Calibrate"
++ * needs ~66px, so it ellipsized to "Calibr...". Dropping the horizontal
++ * padding to .1em returns 6.4px per button -- that figure is CSS ARITHMETIC
++ * (.33em - .1em = 3.22px per side at 14px), not a measurement; what was
++ * actually verified is the rendering, which now shows "Z Calibrate" in full.
++ * Vertical padding (.33em top / .1em bottom, the latter tuned to sit above
++ * the coloured border-bottom accent) is untouched. */
+ button.color1,
+ button.color2,
+ button.color3,
+ button.color4 {
+-    padding: 0.33em;
+-    padding-bottom: 0.1em;
++    padding: 0.33em 0.1em 0.1em 0.1em;
+ }
+ 
+ button.color1 {
+@@ -361,16 +384,30 @@
+  * mechanism Adwaita itself uses for its dashed default, so it is guaranteed
+  * supported by GTK3's CSS engine) rather than Adwaita's dashes, which are
+  * too faint to read on a 320x240 panel. */
++/* Colour/weight contrast follow-up (2026-07-31): the first version of this
++ * rule drew the line in @active. That is the scrollbar slider's colour, which
++ * looked consistent -- but in the LIGHT theme @active is #8FB6D1 against @bg
++ * #EDEFF2, i.e. a pale blue line on a pale lavender background, which at 2px
++ * is genuinely hard to see on a panel whose bottom row is already busy with
++ * content sliced mid-row. Since this line is now the ONLY at-rest signal that
++ * a list continues (overlay scrollbars fade out, and GTK3 does that by
++ * hiding the scrollbar widget, which CSS cannot override), "consistent with
++ * the scrollbar" is worth less than "unmissable".
++ * alpha(@text, .45) instead: @text is #1A1D21 in the light theme and white in
++ * the dark one, so the cue is a dark line on a light background and a light
++ * line on a dark one -- guaranteed contrast in BOTH themes by construction,
++ * rather than depending on an accent colour that happens to be close to the
++ * background in one of them. Raised 2px -> 3px for the same reason. */
+ undershoot.top {
+-    background-image: linear-gradient(to bottom, @active, @active);
+-    background-size: 100% 2px;
++    background-image: linear-gradient(to bottom, alpha(@text, .45), alpha(@text, .45));
++    background-size: 100% 3px;
+     background-repeat: no-repeat;
+     background-position: center top;
+ }
+ 
+ undershoot.bottom {
+-    background-image: linear-gradient(to top, @active, @active);
+-    background-size: 100% 2px;
++    background-image: linear-gradient(to top, alpha(@text, .45), alpha(@text, .45));
++    background-size: 100% 3px;
+     background-repeat: no-repeat;
+     background-position: center bottom;
+ }
