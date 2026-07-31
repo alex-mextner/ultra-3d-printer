@@ -100,9 +100,31 @@ json_field() {
 echo "== Проверяю связь с принтером =="
 INFO="$(curl -s -m 5 "$API/printer/info" || true)"
 KLIPPY_STATE="$(json_field "$INFO" state)"
-if [ -z "$KLIPPY_STATE" ]; then
+
+# Три разных исхода, их важно не смешивать:
+#   пустое тело           -> молчит сам Moonraker (или сеть) => отказ;
+#   тело есть, state есть -> нормальный ответ;
+#   тело есть, state нет  -> Moonraker жив, но klippy к нему не подключён
+#                            (служба klipper упала/остановлена — тогда Moonraker
+#                            отдаёт 503 и {"error":{...}} без поля state).
+#                            Печатать в этом состоянии нечем, прерывать нечего,
+#                            а деплой как раз и нужен — обрабатываем как «не ready».
+# Тело, не похожее на ответ Moonraker вообще (ни result, ни error — например
+# HTML от чужого сервера на этом порту), считаем неизвестным состоянием => отказ.
+if [ -z "$INFO" ]; then
     die "Принтер не отвечает на $API/printer/info — прерываю.
 Проверь руками: curl $API/printer/info  и  ssh $HOST"
+fi
+if [ -z "$KLIPPY_STATE" ]; then
+    case "$INFO" in
+        *'"result"'*|*'"error"'*)
+            KLIPPY_STATE="klippy-не-подключён"
+            ;;
+        *)
+            die "На $API/printer/info пришёл ответ, не похожий на Moonraker — состояние неизвестно, отказываюсь деплоить.
+Проверь руками: curl $API/printer/info"
+            ;;
+    esac
 fi
 echo "Klipper: $KLIPPY_STATE"
 
@@ -112,6 +134,11 @@ if [ "$KLIPPY_STATE" != "ready" ]; then
     echo "прерывать нечего, поэтому проверки печати/gcode/нагрева пропускаю."
     echo "Обычно это как раз тот случай, когда деплой и нужен: залить"
     echo "исправленный конфиг и перезапуститься."
+    if [ "$KLIPPY_STATE" = "klippy-не-подключён" ]; then
+        echo "(Moonraker отвечает, но klippy к нему не подключён — вероятно упала или"
+        echo " остановлена служба klipper. Если после деплоя рестарт не поднимет её:"
+        echo " ssh $HOST 'sudo systemctl restart klipper')"
+    fi
 else
     echo
     echo "== Проверяю, что принтер ничем не занят =="
@@ -137,20 +164,27 @@ else
 движение посреди хода. Дождись окончания."
     fi
 
-    # Нагрев — только предупреждение: рестарт его погасит, это не опасно.
+    # Нагрев — ТОЛЬКО предупреждение, никогда не блокировка: рестарт его всё равно
+    # погасит, это не опасно, просто придётся греть заново. Поэтому и неразобранный
+    # target здесь тоже не отказ, а предупреждение — в отличие от проверок 1-2 выше,
+    # где неизвестное состояние блокирует. Разница осознанная: там от ответа зависит,
+    # не оборвём ли мы работу, здесь — только удобство.
     HEATING=()
     for h in extruder heater_bed; do
         h_json="$(api_query "$h")"
         h_target="$(json_field "$h_json" target)"
-        [ -n "$h_target" ] || die "Не удалось прочитать target у $h — состояние нагрева неизвестно, отказываюсь деплоить.
-Проверь руками: curl '$API/printer/objects/query?$h'"
-        if awk -v t="$h_target" 'BEGIN { exit !(t + 0 > 0) }'; then
+        if [ -z "$h_target" ]; then
+            HEATING+=("$h -> target не прочитался")
+        elif awk -v t="$h_target" 'BEGIN { exit !(t + 0 > 0) }'; then
             HEATING+=("$h -> ${h_target}")
         fi
     done
     if [ ${#HEATING[@]} -gt 0 ]; then
-        echo "  ПРЕДУПРЕЖДЕНИЕ: идёт прогрев (${HEATING[*]}). Рестарт Klipper его собьёт"
-        echo "  (нагреватели погаснут). Не опасно, но греть придётся заново."
+        echo "  ПРЕДУПРЕЖДЕНИЕ: рестарт Klipper погасит нагреватели. Не опасно, но"
+        echo "  греть придётся заново. Сейчас:"
+        for x in "${HEATING[@]}"; do
+            echo "    $x"
+        done
     else
         echo "  нагреватели       = выключены (target 0)"
     fi
@@ -233,6 +267,11 @@ done
 if [ "$ok" -eq 1 ]; then
     echo "OK: printer/info вернул ready."
 else
-    echo "ВНИМАНИЕ: ready не дождались за 30с — проверь klippy.log и Mainsail руками, не оставляй стол без присмотра." >&2
+    echo "ВНИМАНИЕ: ready не дождались за 30с. Файлы УЖЕ залиты, Klipper не поднялся —
+скорее всего ошибка в конфиге. Смотри klippy.log и Mainsail:
+  ssh $HOST 'tail -40 printer_data/logs/klippy.log'
+Откатиться можно бэкапами $REMOTE_DIR/*.bak.$TS, сделанными выше.
+Нагреватели при этом выключены: они гаснут при рестарте и не включатся, пока
+Klipper не запустится." >&2
     exit 1
 fi
