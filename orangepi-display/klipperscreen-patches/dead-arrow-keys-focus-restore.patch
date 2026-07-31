@@ -8,7 +8,7 @@
          self.connect("key-press-event", self._key_press_event)
          self.connect("set-focus", self._on_set_focus)
          self.connect("configure_event", self.update_size)
-@@ -898,6 +899,26 @@
+@@ -898,6 +899,35 @@
      def _menu_go_back(self, widget=None, home=False):
          logging.info(f"#### Menu go {'home' if home else 'back'}")
          self.remove_keyboard()
@@ -29,13 +29,22 @@
 +            # from 2026-07-30: this only ever runs on a real key press, and
 +            # _reset_focus_clear_timeout() still clears the highlight
 +            # afterwards like any other press.
++            # One thing the old fall-through DID do that must be kept:
++            # attach_panel() is where a pending panels_reinit entry gets
++            # flushed (it calls reload_panels()). reload_icon_theme() can
++            # queue one without any show_panel() following -- the day/night
++            # theme switch does exactly that -- so at depth 1 a Back press
++            # was a way that rebuild actually happened. Keep that path.
++            if self._cur_panels and self._cur_panels[-1] in self.panels_reinit:
++                self.attach_panel(self._cur_panels[-1])
++                return
 +            self.set_focus(None)  # reset GTK's focus chain to the start
 +            self._focus_into_current_panel()
 +            return
          while len(self._cur_panels) > 1:
              self._remove_current_panel()
              del self._cur_panels[-1]
-@@ -1632,6 +1653,21 @@
+@@ -1632,6 +1662,21 @@
      def _key_press_event(self, widget, event):
          keyval_name = Gdk.keyval_name(event.keyval)
          handled = False
@@ -57,7 +66,7 @@
          if self.screensaver.is_showing:
              # Wake-on-any-key (2026-07-31): this machine is a 5-button D-pad
              # with no touchscreen, so the screensaver's only built-in
-@@ -1653,8 +1689,10 @@
+@@ -1653,8 +1698,10 @@
              self._reset_focus_clear_timeout()
              return True
          if keyval_name == "Escape":
@@ -68,7 +77,7 @@
              self.base_panel.back()
          elif keyval_name in ("Up", "Down", "Left", "Right"):
              if self.get_focus() is None:
-@@ -1673,14 +1711,53 @@
+@@ -1673,14 +1720,53 @@
                  # move in the pressed direction -- that would risk a double
                  # step once focus tracking below also updates). Subsequent
                  # presses within the window behave exactly as before.
@@ -130,7 +139,7 @@
              if not handled and keyval_name in ("Up", "Down"):
                  # D-pad list scrolling (2026-07-31, user: "их невозможно
                  # листать"). Panels taller than this 320x240 screen had no
-@@ -1699,8 +1776,103 @@
+@@ -1699,8 +1785,103 @@
                  # movement there is untouched.
                  handled = self._dpad_scroll(keyval_name == "Down")
          self._reset_focus_clear_timeout()
@@ -234,7 +243,7 @@
      def _dpad_scrollables(self, widget, found, depth=0):
          # Collect the currently-mapped Gtk.ScrolledWindows of the visible
          # panel body. Mapped-only matters because KlipperScreen keeps
-@@ -1771,10 +1943,12 @@
+@@ -1771,10 +1952,12 @@
                      target = sw  # prefer the list the user is already in
                      break
              if target is None:
@@ -247,7 +256,7 @@
                  return True
              # Either the list has no focusable children at all, or focus is
              # already on the last/first one -- move the viewport itself so
-@@ -1785,7 +1959,14 @@
+@@ -1785,7 +1968,14 @@
              value = adj.get_value() + (step if down else -step)
              value = min(max(value, adj.get_lower()), bottom)
              if abs(value - adj.get_value()) < 1:
@@ -262,7 +271,7 @@
              adj.set_value(value)
              return True
          except Exception:
-@@ -1815,6 +1996,11 @@
+@@ -1815,6 +2005,11 @@
          self._focus_clear_timeout_id = GLib.timeout_add_seconds(10, self._clear_focus_on_timeout)
  
      def _clear_focus_on_timeout(self):
