@@ -1,0 +1,276 @@
+--- a/screen.py
++++ b/screen.py
+@@ -103,6 +103,7 @@
+ 
+         self._focus_clear_timeout_id = None
+         self._last_focus_widget = None
++        self._key_trace_branch = "gtk-default"
+         self.connect("key-press-event", self._key_press_event)
+         self.connect("set-focus", self._on_set_focus)
+         self.connect("configure_event", self.update_size)
+@@ -898,6 +899,26 @@
+     def _menu_go_back(self, widget=None, home=False):
+         logging.info(f"#### Menu go {'home' if home else 'back'}")
+         self.remove_keyboard()
++        if len(self._cur_panels) <= 1:
++            # Root-level back (2026-08-01). There is no panel to pop here,
++            # and the old code fell through to attach_panel() on the panel
++            # already on screen -- re-running add_content() on a widget
++            # that still has its parent, plus activate() and a full
++            # show_all(), for zero visible effect. The user long-presses
++            # Left on the main menu and gets no response at all.
++            #
++            # Give the press a real meaning instead of a louder no-op: put
++            # focus back at the top of the current panel. That is visible
++            # (the highlight appears), it is genuinely useful on a 5-button
++            # pad -- "back" becomes "return me to a known starting point"
++            # when the user feels lost -- and it is the one thing a root
++            # back CAN do. It does not fight the 10s idle highlight rule
++            # from 2026-07-30: this only ever runs on a real key press, and
++            # _reset_focus_clear_timeout() still clears the highlight
++            # afterwards like any other press.
++            self.set_focus(None)  # reset GTK's focus chain to the start
++            self._focus_into_current_panel()
++            return
+         while len(self._cur_panels) > 1:
+             self._remove_current_panel()
+             del self._cur_panels[-1]
+@@ -1632,6 +1653,21 @@
+     def _key_press_event(self, widget, event):
+         keyval_name = Gdk.keyval_name(event.keyval)
+         handled = False
++        # Key tracing (2026-08-01). Until now only the screensaver branch
++        # below logged anything, so from the log alone "the key never
++        # arrived" and "the key arrived but there was nothing to act on"
++        # were indistinguishable -- and every "I pressed a button and
++        # nothing happened" report cost a live archaeology session on the
++        # device. One unconditional line per press: keyval, focus before
++        # and after, WHICH branch consumed it, and the current panel.
++        # The branch attribution is the load-bearing part: several of the
++        # branches below return handled=True, and a swallowed key looks
++        # exactly like a key that never arrived. _describe_focus() spells
++        # out mapped/sensitive/can-focus/detached, because a focus target
++        # that is still present but not focusable is precisely the failure
++        # mode that silently ate arrow keys here (see the resume branch).
++        self._key_trace_branch = "gtk-default"
++        focus_before = self._describe_focus(self.get_focus())
+         if self.screensaver.is_showing:
+             # Wake-on-any-key (2026-07-31): this machine is a 5-button D-pad
+             # with no touchscreen, so the screensaver's only built-in
+@@ -1653,8 +1689,10 @@
+             self._reset_focus_clear_timeout()
+             return True
+         if keyval_name == "Escape":
++            self._key_trace_branch = "escape/go-home"
+             self._menu_go_back(home=True)
+         elif keyval_name == "BackSpace" and self.keyboard is None:
++            self._key_trace_branch = "backspace/panel-back"
+             self.base_panel.back()
+         elif keyval_name in ("Up", "Down", "Left", "Right"):
+             if self.get_focus() is None:
+@@ -1673,14 +1711,53 @@
+                 # move in the pressed direction -- that would risk a double
+                 # step once focus tracking below also updates). Subsequent
+                 # presses within the window behave exactly as before.
+-                if self._last_focus_widget is not None:
+-                    try:
+-                        mapped = self._last_focus_widget.get_mapped()
+-                    except Exception:
+-                        mapped = False
+-                    if mapped:
+-                        self.set_focus(self._last_focus_widget)
+-                        handled = True
++                # Dead-arrow-keys fix (2026-08-01, user: "вышел экранной
++                # кнопкой назад -- перестают кнопки работать"). The restore
++                # above used to check only get_mapped() and then claim the
++                # key unconditionally. Both halves were wrong, and together
++                # they wedged the D-pad permanently:
++                #
++                #   1. Gtk.Window.set_focus() delegates to
++                #      gtk_widget_grab_focus(), which returns silently and
++                #      does NOTHING if the target is insensitive, not
++                #      can-focus, or detached from this window. get_mapped()
++                #      rules out none of those.
++                #   2. handled=True was set whether or not focus actually
++                #      moved, so the key was swallowed and GTK's own
++                #      directional navigation never got to run.
++                #
++                # The trigger is the on-screen Back button. With no
++                # touchscreen, pressing it means focusing it and hitting
++                # Enter -- and its own handler pops the panel, so
++                # attach_panel() -> add_content() -> update_action_bar()
++                # makes control["back"] insensitive again at depth 1. GTK
++                # then drops window focus to None, while the button stays
++                # mapped and parented, so the old guard kept passing and
++                # kept eating every arrow, forever. Escape/BackSpace still
++                # worked (explicit branches above), which is exactly what
++                # the user saw. Measured on this device's GTK 3.24.49:
++                # after set_sensitive(False) on the focused button,
++                # get_focus() is None while get_mapped() is still True, and
++                # a further set_focus() on it leaves focus at None.
++                #
++                # So: validate the target against everything grab_focus()
++                # itself requires, drop it if it can no longer take focus,
++                # and claim the key only if focus really landed.
++                widget = self._last_focus_widget
++                self._key_trace_branch = f"resume-from-idle(last={self._describe_focus(widget)})"
++                if widget is not None and not self._can_take_focus(widget):
++                    self._last_focus_widget = widget = None
++                if widget is not None:
++                    self.set_focus(widget)
++                    handled = self.get_focus() is not None
++                if not handled:
++                    # Nothing valid to restore. Rather than hand the press
++                    # to GTK's from-nothing fallback (asymmetric: Down goes
++                    # to the sidebar bell, see the 2026-07-30 note above),
++                    # aim at the panel the user is actually looking at.
++                    handled = self._focus_into_current_panel(keyval_name)
++                    if handled:
++                        self._key_trace_branch += " -> focus-into-panel"
+             if not handled and keyval_name in ("Up", "Down"):
+                 # D-pad list scrolling (2026-07-31, user: "их невозможно
+                 # листать"). Panels taller than this 320x240 screen had no
+@@ -1699,8 +1776,103 @@
+                 # movement there is untouched.
+                 handled = self._dpad_scroll(keyval_name == "Down")
+         self._reset_focus_clear_timeout()
++        logging.info(
++            f"Key {keyval_name}: focus {focus_before} -> "
++            f"{self._describe_focus(self.get_focus())} | handled={handled}"
++            f" via {self._key_trace_branch} | panel="
++            f"{self._cur_panels[-1] if self._cur_panels else None}"
++        )
+         return handled
+ 
++    def _can_take_focus(self, widget):
++        # True only if Gtk.Window.set_focus(widget) would really move focus
++        # there. Mirrors gtk_widget_grab_focus()'s own preconditions: it is
++        # a SILENT no-op on an insensitive or non-focusable widget, and on
++        # one whose toplevel is no longer this window (unparented with a
++        # Python reference still holding it alive). Checking these up front
++        # is what lets the caller avoid claiming a key it did not use.
++        if widget is None:
++            return False
++        try:
++            return bool(
++                widget.get_mapped()
++                and widget.is_sensitive()
++                and widget.get_can_focus()
++                and widget.get_toplevel() is self
++            )
++        except Exception:
++            return False
++
++    def _focus_into_current_panel(self, keyval_name="Down"):
++        # Put focus somewhere sensible inside the visible panel body, and
++        # report whether it landed. Used when there is no focus and nothing
++        # valid to restore -- most importantly right after the on-screen
++        # Back button was activated, which makes that very button
++        # insensitive and so leaves focus at None with the user staring at
++        # a fresh panel. Aiming explicitly at base_panel.content keeps the
++        # press inside the panel actually on screen, instead of GTK's
++        # from-nothing fallback which sends Down to the sidebar bell.
++        content = getattr(self.base_panel, "content", None)
++        if content is None:
++            return False
++        pressed = {
++            "Up": Gtk.DirectionType.UP,
++            "Down": Gtk.DirectionType.DOWN,
++            "Left": Gtk.DirectionType.LEFT,
++            "Right": Gtk.DirectionType.RIGHT,
++        }.get(keyval_name, Gtk.DirectionType.DOWN)
++        # TAB_FORWARD as the fallback: a purely directional child_focus()
++        # can decline to enter a container at all depending on geometry,
++        # whereas tab order always has a first focusable element if one
++        # exists anywhere in the panel.
++        for direction in (pressed, Gtk.DirectionType.TAB_FORWARD):
++            try:
++                if content.child_focus(direction) and self.get_focus() is not None:
++                    return True
++            except Exception:
++                logging.exception("Focusing into the current panel failed")
++                return False
++        return False
++
++    def _describe_focus(self, widget):
++        # Short, log-safe identity of a focus target: type, its label, and
++        # the four properties that decide whether it can actually TAKE
++        # focus. mapped/sensitive/can-focus matter because
++        # gtk_widget_grab_focus() is a silent no-op when any of them is
++        # false -- so a set_focus() call can appear to succeed while focus
++        # stays exactly where it was. "detached" (toplevel is not this
++        # window) catches a widget that has been unparented out of the
++        # tree. Never raises: this only ever runs to build a log line, and
++        # a broken log line must not break input handling.
++        if widget is None:
++            return "None"
++        try:
++            name = type(widget).__name__
++            label = ""
++            if isinstance(widget, Gtk.Button):
++                label = widget.get_label() or ""
++            if not label:
++                try:
++                    label = widget.get_tooltip_text() or ""
++                except Exception:
++                    label = ""
++            label = str(label).strip().replace("\n", " ")[:24]
++            flags = ""
++            try:
++                if not widget.get_mapped():
++                    flags += " UNMAPPED"
++                if not widget.is_sensitive():
++                    flags += " INSENSITIVE"
++                if not widget.get_can_focus():
++                    flags += " NO-CAN-FOCUS"
++                if widget.get_toplevel() is not self:
++                    flags += " DETACHED"
++            except Exception:
++                pass
++            return f"{name}{'(' + label + ')' if label else ''}{flags}"
++        except Exception as exc:
++            return f"<undescribable {exc}>"
++
+     def _dpad_scrollables(self, widget, found, depth=0):
+         # Collect the currently-mapped Gtk.ScrolledWindows of the visible
+         # panel body. Mapped-only matters because KlipperScreen keeps
+@@ -1771,10 +1943,12 @@
+                     target = sw  # prefer the list the user is already in
+                     break
+             if target is None:
++                self._key_trace_branch = "gtk-default(no overflowing scrollable)"
+                 return False
+             direction = Gtk.DirectionType.DOWN if down else Gtk.DirectionType.UP
+             if target.child_focus(direction):
+                 self._dpad_reveal_focus(target)
++                self._key_trace_branch = "dpad-scroll/child_focus"
+                 return True
+             # Either the list has no focusable children at all, or focus is
+             # already on the last/first one -- move the viewport itself so
+@@ -1785,7 +1959,14 @@
+             value = adj.get_value() + (step if down else -step)
+             value = min(max(value, adj.get_lower()), bottom)
+             if abs(value - adj.get_value()) < 1:
++                self._key_trace_branch = (
++                    f"gtk-default(scrollable already at {'bottom' if down else 'top'}, "
++                    f"value={adj.get_value():.0f}/{bottom:.0f})"
++                )
+                 return False  # already at that end, let GTK have the key
++            self._key_trace_branch = (
++                f"dpad-scroll/adjustment {adj.get_value():.0f}->{value:.0f} of {bottom:.0f}"
++            )
+             adj.set_value(value)
+             return True
+         except Exception:
+@@ -1815,6 +1996,11 @@
+         self._focus_clear_timeout_id = GLib.timeout_add_seconds(10, self._clear_focus_on_timeout)
+ 
+     def _clear_focus_on_timeout(self):
++        # Traced too (2026-08-01): this is what turns the NEXT arrow press
++        # into a restore-only press (see the resume branch in
++        # _key_press_event), which from the user's side is a key that did
++        # nothing visible -- so the log has to say when it fired.
++        logging.info(f"Focus cleared after idle: was {self._describe_focus(self.get_focus())}")
+         self.set_focus(None)
+         self._focus_clear_timeout_id = None
+         return False
