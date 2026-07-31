@@ -112,8 +112,28 @@
 /* Guarantee the name column ("Extruder" / "Heater Bed" / "OrangePi CPU")
  * enough width to render in full instead of getting ellipsized down to
  * "..." by GTK's 50/50 leftover-space split with the temp-value column. */
+/* 2026-07-31 (agent-I): 6.5em (91px) was NOT enough -- "Heater Bed" and
+ * "OrangePi CPU" still ellipsized to "Heater B…" / "OrangePi…" on the
+ * Temperature panel. Measured live (get_preferred_width()/get_allocation()
+ * dump, since removed): that name button's natural width for "OrangePi CPU"
+ * is 120px == 97px label + 10px icon + 4px padding + 6px .graph_label
+ * left border + 1px margin. Natural is irrelevant there, though --
+ * panels/temperature.py's left_panel is hexpand=False while the right
+ * column's `cooldown` is hexpand=True, so the device list is allocated
+ * exactly its MINIMUM and this min-width IS the column width. 7.9em ==
+ * 110px of content box == 121px of button, 1px past natural.
+ *
+ * Paid for on the same panel by shortening its "Temp (°C)" column header to
+ * "°C": that header, not the numbers, was pinning the value column at 69px
+ * when the value buttons only need 37px. Net effect the right-hand preheat
+ * column got WIDER (112px -> 124px, vs the 86px the 2x2 preset grid needs),
+ * so PLA/ABS/PETG/FLEX are not squeezed.
+ *
+ * Scope: this reaches ONLY panels/temperature.py. The main dashboard's name
+ * buttons additionally carry .name_icon_only, and that 4-selector rule just
+ * below sets min-width: 0, which wins regardless of source order. */
 .heater-grid button.graph_label {
-    min-width: 6.5em;
+    min-width: 7.9em;
 }
 
 /* Icon-only dashboard rows (2026-07-30, main_menu.py add_device): name

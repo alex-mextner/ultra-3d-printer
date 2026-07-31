@@ -1,0 +1,61 @@
+# Temperature panel: device names truncated ("Heater B…" / "OrangePi…")
+# 2026-07-31. Documentation only -- do NOT apply (see README.md); the live
+# state is carried by ALL-local-changes.patch.
+#
+# This is HALF the fix. The other half is CSS and already lives in git:
+#   printer-configs/KlipperScreen-themes/{big-font,big-font-light}/style.css
+#     .heater-grid button.graph_label { min-width: 6.5em -> 7.9em }
+# Neither half does anything alone: the device list is hexpand=False and is
+# therefore allocated exactly its MINIMUM, so freeing pixels on the left just
+# hands them to the (expanding) right column unless the name button's own
+# min-width is raised to claim them.
+#
+# Measured live, before -> after (get_preferred_width()/get_allocation()):
+#   name column        102px -> 122px   ("OrangePi CPU" needs 120px natural)
+#   name label alloc    79px ->  97px   (== natural; ellipsis gone)
+#   value column        69px ->  37px   (was pinned by the "Temp (°C)" header,
+#                                        not by the numbers -- buttons need 37)
+#   device list total  172px -> 160px
+#   right column       112px -> 124px   (2x2 preheat grid needs 86px -- so the
+#                                        presets got MORE room, not less)
+--- a/panels/temperature.py
++++ b/panels/temperature.py
+@@ -637,7 +637,37 @@
+         self.labels["devices"].get_style_context().add_class("heater-grid")
+ 
+         name = Gtk.Label()
+-        temp = Gtk.Label(_("Temp (°C)"))
++        # 2026-07-31 device-name truncation fix, part 1 of 2 -- the other
++        # half is `.heater-grid button.graph_label {min-width}` in BOTH
++        # big-font themes; either edit alone is a no-op on screen, see below.
++        # Symptom: the device list rendered "Heater B…" and "OrangePi…".
++        #
++        # Measured live (a temporary get_preferred_width()/get_allocation()
++        # dump, since removed): the top-level grid is allocated 284px (320px
++        # screen minus the 34px sidebar). left_panel is hexpand=False while
++        # the right column's `cooldown` button sets hexpand=True, so EVERY
++        # spare pixel goes right and this device list is allocated exactly
++        # its own MINIMUM (172px) -- its natural width (190px) is never
++        # honoured. That is why freeing space on the left cannot widen
++        # anything by itself, and why the CSS min-width IS the column width.
++        #
++        # Inside those 172px: column 0 (names) was pinned at 102px by the CSS
++        # min-width, column 1 at 69px -- and the 69px came from THIS header
++        # label, not from the numbers. The value buttons' own minimum is just
++        # 37px ("20.5" plus padding). "OrangePi CPU" needs a 120px button
++        # (97px label + 10px icon + 4px padding + 6px .graph_label border +
++        # 1px margin), i.e. 18px more than the 102px it had.
++        #
++        # Dropping "Temp (" and ")" hands 32px back (column 1: 69 -> 37, the
++        # value buttons' floor), which covers that 18px deficit twice over --
++        # so the right-hand column ends up WIDER than before (124px vs 112px,
++        # against the 86px the 2x2 preheat grid needs), not narrower. The
++        # unit is the half worth keeping: update_temp() only appends "°" for
++        # devices NOT in self.devices, so these rows show a bare "20.5" with
++        # no unit anywhere else on the panel. It is also exactly the header
++        # the dashboard's own device list already uses (main_menu.py), so the
++        # two lists now read consistently.
++        temp = Gtk.Label("°C")
+ 
+         self.labels["devices"].attach(name, 0, 0, 1, 1)
+         self.labels["devices"].attach(temp, 1, 0, 1, 1)
