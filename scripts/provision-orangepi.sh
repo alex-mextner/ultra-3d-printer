@@ -48,13 +48,16 @@ echo "== 1b. udev: FTDI latency_timer = 1 =="
 # Разовая запись живёт до переподключения кабеля/перезагрузки; правило делает её
 # постоянной. Klipper при 16 мс работает штатно, так что это профилактика для
 # следующей прошивки, а не исправление текущей поломки.
-# ATTRS{} (а не ATTR{}) - потому что idVendor лежит на РОДИТЕЛЬСКОМ usb-устройстве,
-# а latency_timer - на самом ttyUSB; на одном уровне их не сматчить.
+# Правило сверено с реальным устройством (`udevadm info -a -p
+# /sys/bus/usb-serial/devices/ttyUSB0` на этой машине): SUBSYSTEM=="usb-serial",
+# DRIVER=="ftdi_sio" и ATTR{latency_timer} лежат на ОДНОМ уровне - на самом
+# ttyUSB0, - поэтому все три ключа матчатся одним правилом без ATTRS{}/родителей.
+# Namespace у latency_timer один на всю подсистему usb-serial, отдельного
+# фильтра по idVendor не нужно: ftdi_sio по определению обслуживает только FTDI.
 cat > /etc/udev/rules.d/99-ftdi-latency.rules <<'EOF'
 # FTDI USB-serial: снизить latency_timer с дефолтных 16мс до 1мс.
-# 0403 = FTDI. Покрывает FT232R (мост на плате Freaduino/RAMPS) и родню.
+# Покрывает FT232R - мост, встроенный в саму плату Freaduino/RAMPS.
 ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTR{device/latency_timer}="1"
 EOF
 udevadm control --reload-rules
 # Применить к уже воткнутому устройству, не дожидаясь передёргивания кабеля.
