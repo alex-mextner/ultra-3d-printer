@@ -1,0 +1,367 @@
+--- a/screen.py
++++ b/screen.py
+@@ -104,6 +104,12 @@
+         self._focus_clear_timeout_id = None
+         self._last_focus_widget = None
+         self._key_trace_branch = "gtk-default"
++        # Slider keyboard capture (2026-08-01, see _capture_range below).
++        # _captured_range is the Gtk.Range currently being edited with the
++        # D-pad; _captured_range_entry_value is the value it held when
++        # capture started, so BackSpace/Escape can put it back.
++        self._captured_range = None
++        self._captured_range_entry_value = None
+         self.connect("key-press-event", self._key_press_event)
+         self.connect("set-focus", self._on_set_focus)
+         self.connect("configure_event", self.update_size)
+@@ -1697,7 +1703,51 @@
+             self.screensaver.close()
+             self._reset_focus_clear_timeout()
+             return True
+-        if keyval_name == "Escape":
++        if self._captured_range is not None and not self._can_take_focus(self._captured_range):
++            # The captured slider went away under us -- panel torn down, or
++            # the widget tree rebuilt by an update. Exactly the failure
++            # shape the dead-arrow bug had (state pointing at a detached
++            # widget), so drop the stale reference instead of acting on it.
++            logging.info("Slider capture dropped: widget can no longer take focus")
++            self._forget_range_capture()
++        if keyval_name in ("Return", "KP_Enter") and self._captured_range is not None:
++            # Enter while editing = apply. This is the ONLY path that sends
++            # a slider value to Klipper from the keyboard, and it sends
++            # exactly one command per editing session no matter how many
++            # arrow presses (or autorepeats) went into it.
++            self._key_trace_branch = "range-capture/commit"
++            self._release_range(commit=True)
++            handled = True
++        elif keyval_name in ("Return", "KP_Enter") and isinstance(self.get_focus(), Gtk.Scale):
++            # Enter on a focused slider = start editing it. Enter was a dead
++            # key here before: Gtk.Range binds no activate action, and
++            # nothing in KlipperScreen looked at Return, so claiming it
++            # changes no existing behaviour anywhere. Gtk.Scale, not the
++            # wider Gtk.Range that _escape_range_focus tests: Gtk.Scrollbar
++            # is also a Gtk.Range, and "edit the scrollbar" is not a mode
++            # anyone wants to enter by accident.
++            self._key_trace_branch = "range-capture/enter"
++            self._capture_range(self.get_focus())
++            handled = True
++        elif self._captured_range is not None and keyval_name in ("BackSpace", "Escape"):
++            # Back while editing = cancel, and the slider visibly snaps back
++            # to the value it had on entry. Deliberately NOT "apply": Back
++            # is this machine's universal "get me out", and a command must
++            # never be the side effect of leaving. The snap-back is what
++            # makes the cancel visible rather than silent. A second Back
++            # then leaves the panel as usual (the branch below).
++            self._key_trace_branch = f"range-capture/cancel({keyval_name})"
++            self._release_range(commit=False)
++            handled = True
++        elif self._captured_range is not None and keyval_name in ("Up", "Down", "Left", "Right"):
++            # All four arrows adjust while captured, on purpose: the LEFT
++            # button is the one key on this device that can never
++            # autorepeat (nav-buttons-remap.py emits it as a tap on
++            # release, since a long hold is BackSpace), so a scheme where
++            # "decrease" lived only on Left would have no held-decrease at
++            # all. Down decreases too, and Down does autorepeat.
++            handled = self._adjust_captured_range(keyval_name)
++        elif keyval_name == "Escape":
+             # 2026-08-01, queue item 13: "Escape does not close the on-screen
+             # numpad". Escape went straight to _menu_go_back(home=True),
+             # which never asks the current panel whether it has something of
+@@ -1963,16 +2013,20 @@
+         there is nothing above or below to move to, and _dpad_scroll just
+         nudged the viewport by 29px instead.
+ 
+-        Nothing is lost by taking these keys away from the slider, because
+-        keyboard slider changes were never transmitted in the first place:
+-        EVERY Gtk.Scale in this codebase (fan, limits, led, pins,
+-        retraction, pressure_advance, input_shaper) commits its value on
+-        "button-release-event" only -- a mouse event no physical button
+-        here can produce. So arrowing a slider merely moved the handle and
+-        silently dropped the change. Until that half is fixed (queued
+-        separately in printer-status.md) sliders are read-only indicators,
+-        and the useful thing Left/Right can do is reach the buttons next to
+-        them.
++        Nothing is lost by taking these keys away from the slider here,
++        because an UNCAPTURED slider is not meant to be edited: editing is
++        an explicit mode entered with Enter (see _capture_range below), and
++        while captured these keys never reach this function at all --
++        _key_press_event consumes them first. So Left/Right on a slider you
++        are merely passing through does the only useful thing it can:
++        reach the buttons beside it.
++
++        2026-08-01, second pass: this docstring used to claim sliders were
++        permanently read-only indicators because every Gtk.Scale in the
++        codebase commits on "button-release-event" only. That was measured
++        and true at the time, and is no longer -- _release_range() now
++        raises exactly that event from the keyboard. The commit path is
++        unchanged for mouse/touch.
+ 
+         Falls through (returns False) when there is nothing to move to, so
+         on a panel where the slider really is the only control the old
+@@ -1997,6 +2051,174 @@
+             logging.exception("Escaping slider focus failed")
+         return False
+ 
++    def _capture_range(self, widget):
++        """Enter D-pad editing mode on a focused slider.
++
++        2026-08-01. Until now a Gtk.Scale on this machine was decoration: a
++        five-button D-pad could neither change its value nor transmit one.
++        Both halves were measured live on panels/fan.py, and BOTH were
++        broken -- the second one is the half the queue item did not know
++        about:
++
++          Key Right: focus Scale -> Button(Max) | via escape-range-focus
++          Key Up:    focus Scale -> Scale | via gtk-default(scrollable
++                     already at top, value=0/29)
++          Key Down:  focus Scale -> Scale | via dpad-scroll/adjustment
++                     0->29 of 29
++
++        Right/Left never reach the slider (they are how focus escapes it,
++        and they must stay that way -- Stop and Max sit either side of the
++        fan slider and are otherwise unreachable). Up DOES reach the
++        slider, but GTK maps STEP_UP on a range to *decrease*, so from 0 it
++        just clamped. Down was eaten by _dpad_scroll before the slider saw
++        it. Net result: the fan slider could not be raised by even one step,
++        so "commit the value on a keyboard event" alone would have fixed
++        nothing.
++
++        The fix is an explicit editing mode rather than a global re-mapping
++        of the arrows, for two reasons. It keeps every panel's navigation
++        exactly as the 2026-08-01 panel sweep verified it (re-purposing
++        Up/Down for all ranges would have changed navigation on Limits and
++        Pressure Advance, the panels that sweep certified), and it gives
++        the commit a natural moment: one command when the user applies,
++        instead of one per arrow press. Enter was free -- Gtk.Range binds
++        no activate action and nothing else here looked at Return.
++
++        Contract: Enter captures, arrows adjust, Enter applies, Back/Escape
++        cancels and restores the entry value. The slider turns amber
++        (.slider_captured in base.css) for as long as it is captured.
++        """
++        self._captured_range = widget
++        self._captured_range_entry_value = widget.get_value()
++        try:
++            widget.get_style_context().add_class("slider_captured")
++        except Exception:
++            logging.exception("Could not mark slider as captured")
++        logging.info(
++            f"Slider captured at {self._captured_range_entry_value:g}, "
++            f"d-pad step {self._range_step(widget):g}"
++        )
++
++    def _forget_range_capture(self):
++        # Drop the capture state without sending or restoring anything.
++        widget = self._captured_range
++        self._captured_range = None
++        self._captured_range_entry_value = None
++        if widget is not None:
++            try:
++                widget.get_style_context().remove_class("slider_captured")
++            except Exception:
++                pass
++        return widget
++
++    def _release_range(self, commit):
++        widget = self._captured_range
++        entry_value = self._captured_range_entry_value
++        self._forget_range_capture()
++        if widget is None:
++            return
++        try:
++            value = widget.get_value()
++        except Exception:
++            logging.exception("Releasing slider capture failed")
++            return
++        if not commit:
++            if value != entry_value:
++                widget.set_value(entry_value)
++            logging.info(f"Slider capture cancelled: {value:g} restored to {entry_value:g}")
++            return
++        if value == entry_value:
++            # Nothing to say. Enter-then-Enter with no arrows in between is
++            # a no-op, not a redundant gcode_script.
++            logging.info(f"Slider capture applied unchanged ({value:g}); nothing sent")
++            return
++        logging.info(f"Slider capture applied: {entry_value:g} -> {value:g}")
++        self._commit_range(widget)
++
++    def _commit_range(self, widget):
++        """Send a captured slider's value the way a mouse release would.
++
++        Every Gtk.Scale in this codebase -- fan, limits, led, pins,
++        retraction, pressure_advance, input_shaper, plus the generic
++        "scale" setting row in ks_includes/screen_panel.py -- wires its
++        transmit handler to "button-release-event" and to nothing else.
++        Rather than add a second signal at all eight construction sites
++        (and keep them in sync forever), raise the event those handlers
++        already listen for. One place, and mouse/touch behaviour is
++        untouched by construction.
++
++        Verified in isolation on this device's GTK 3.24.49 before wiring it
++        up, because a synthetic event with no GdkWindow is the obvious way
++        for this to explode: emitting "button-release-event" with
++        Gdk.Event.new(BUTTON_RELEASE) on a Gtk.Scale calls the connected
++        handler, hands it a real EventButton, and returns False. It is safe
++        here specifically because GTK 3.24's GtkRange has no
++        button_release_event class handler (it uses gesture controllers,
++        which a direct g_signal_emit does not run), and because none of the
++        eight handlers reads the event argument -- all of them take it and
++        immediately call widget.get_value() or read their adjustment.
++        """
++        try:
++            event = Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE)
++            widget.emit("button-release-event", event)
++        except Exception:
++            logging.exception("Slider commit failed")
++
++    def _range_step(self, widget):
++        """How far one arrow press moves a captured slider.
++
++        The adjustment's own step_increment is unusable on a D-pad: it is 1
++        on Limits, where max_accel's range is ~1..4500, i.e. 4500 presses
++        end to end. Measured X autorepeat on this device is 25/s after a
++        660ms delay (xset q), so a step sized to ~100 presses per full
++        range means a held button crosses the whole slider in ~4.6s while a
++        single tap is still a fine-grained nudge. Snapped to a whole number
++        of step_increments so the displayed value keeps the panel's own
++        granularity (0.05 on Pressure Advance, 1 on Fan/Limits), and never
++        smaller than step_increment -- on short ranges (Pressure Advance
++        0..1) the panel's own increment is already the coarser of the two.
++        """
++        adj = widget.get_adjustment()
++        step = adj.get_step_increment() or 1
++        coarse = (adj.get_upper() - adj.get_lower()) / 100.0
++        if coarse > step:
++            step = max(1, round(coarse / step)) * step
++        return step
++
++    def _adjust_captured_range(self, keyval_name):
++        widget = self._captured_range
++        adj = widget.get_adjustment()
++        step = self._range_step(widget)
++        delta = step if keyval_name in ("Up", "Right") else -step
++        before = adj.get_value()
++        value = min(max(before + delta, adj.get_lower()), adj.get_upper())
++        # Round to the precision the panel actually displays, so the value
++        # committed is the value on screen. Measured live on Pressure
++        # Advance 2026-08-01: arrowing back down to the bottom of the range
++        # showed "0.00" but transmitted
++        # "SET_PRESSURE_ADVANCE EXTRUDER=extruder ADVANCE=1.3877787807814457e-17",
++        # because repeated float addition of a 0.05 step does not land on
++        # zero. Harmless there, but "what is sent is not what is shown" is
++        # the exact shape of bug this whole slider fix exists to remove.
++        # Gtk.Scale.get_digits() is the panel's own declared granularity (0
++        # on Fan and Limits, 2 on Pressure Advance, 3 on Smooth time), so
++        # this can never round a slider coarser than it renders. set_value()
++        # re-clamps to the adjustment afterwards, so rounding outward at a
++        # non-round upper bound cannot escape the range.
++        digits = widget.get_digits()
++        if digits >= 0:
++            value = round(value, digits)
++        if value != before:
++            widget.set_value(value)
++        self._key_trace_branch = (
++            f"range-capture/adjust {before:g}->{widget.get_value():g} step={step:g}"
++        )
++        # Always claim the key, including at the ends of the range: while a
++        # slider is captured the arrows belong to it and must not leak to
++        # _escape_range_focus or _dpad_scroll, or hitting the maximum would
++        # silently throw the user out of the edit.
++        return True
++
+     def _scrollable_ancestor(self, widget, candidates):
+         # Which of the collected scrolled windows actually contains this
+         # widget, so a reveal scrolls the viewport the widget is really in.
+@@ -2136,6 +2358,15 @@
+         # otherwise overwrite _last_focus_widget with a widget that gets
+         # unparented again on wake -- leaving the resume-from-idle restore
+         # pointing at a dead widget after every blank/wake cycle.
++        if self._captured_range is not None and widget is not self._captured_range:
++            # Focus left a captured slider without going through Enter or
++            # Back: panel teardown, the screensaver grabbing focus, a
++            # rebuilt widget tree. Abandon the edit and send NOTHING -- a
++            # gcode command must never be a side effect of a panel going
++            # away. Cannot be reached from ordinary D-pad use, because
++            # every key that could move focus is consumed while captured.
++            logging.info("Slider capture abandoned: focus moved off the slider")
++            self._forget_range_capture()
+         if widget is not None and not self.screensaver.is_showing:
+             self._last_focus_widget = widget
+ 
+@@ -2150,6 +2381,16 @@
+         self._focus_clear_timeout_id = GLib.timeout_add_seconds(10, self._clear_focus_on_timeout)
+ 
+     def _clear_focus_on_timeout(self):
++        if self._captured_range is not None:
++            # A slider is being edited with the D-pad. Dropping focus here
++            # would take the highlight away mid-edit and, through
++            # _on_set_focus, throw the edit away -- for a user who simply
++            # paused to think. Editing is an explicit, visibly-marked mode
++            # with its own exits (Enter applies, Back cancels), so hold the
++            # highlight and re-arm instead.
++            self._focus_clear_timeout_id = None
++            self._reset_focus_clear_timeout()
++            return False
+         # Traced too (2026-08-01): this is what turns the NEXT arrow press
+         # into a restore-only press (see the resume branch in
+         # _key_press_event), which from the user's side is a key that did
+--- a/panels/limits.py
++++ b/panels/limits.py
+@@ -151,7 +151,17 @@
+         adj = Gtk.Adjustment(option["value"], 1, max_value, 1, 5, 0)
+         scale = Gtk.Scale(adjustment=adj, digits=0, hexpand=True, has_origin=True)
+         scale.get_style_context().add_class("option_slider")
+-        scale.connect("button-release-event", self.set_opt_value, option)
++        # Upstream bug, latent until the keyboard could commit a slider
++        # (2026-08-01). set_opt_value(widget, event, opt) does
++        # self.limits[opt], so opt has to be the option NAME -- and that is
++        # what update_option() reconnects with on line ~134. This initial
++        # connect passed the whole option dict instead, which is not
++        # hashable: the very first commit on a freshly built panel raises
++        # TypeError inside the handler. It stayed invisible because
++        # update_option() runs on the first toolhead notify and silently
++        # replaces the connection with the correct one, and because on this
++        # machine nothing could fire a button release on a slider at all.
++        scale.connect("button-release-event", self.set_opt_value, option["option"])
+         self.values[option["option"]] = option["value"]
+ 
+         # 2026-07-31 overflow fix (user report, live screenshot): the row's
+--- a/styles/base.css
++++ b/styles/base.css
+@@ -825,6 +825,36 @@
+     background-color: @error;
+ }
+ 
++/* 2026-08-01: a slider being edited with the D-pad (Enter captures it, the
++ * arrows then move the value, Enter applies, Back cancels -- see
++ * _capture_range() in screen.py). Without a visible mark the two states are
++ * indistinguishable on a machine with no pointer, and the same four arrows
++ * mean different things in each, which is exactly how a mode becomes a
++ * trap. Colour only, no border/size: this layout has been fought px by px
++ * and a captured slider must not resize. @warning is defined identically in
++ * both bundled themes, so one rule in base.css covers dark and light -- the
++ * same reason black-background-fix.patch and the .heatergraph fix live here
++ * rather than in the theme files. Placed AFTER the .option_slider_max rule
++ * above deliberately: on Limits a slider past its configured maximum is
++ * already painted @error, and capture has to win over that while it lasts. */
++.slider_captured trough highlight,
++.slider_captured trough progress {
++    background-color: @warning;
++}
++
++/* The filled part alone is not enough, and this was caught by a live frame
++ * rather than by reasoning: a slider captured at its minimum has no filled
++ * part at all, so a captured fan slider at 0 -- the single most likely
++ * starting point on this machine -- looked pixel-identical to an
++ * uncaptured one. The handle is present at every value, so colour that
++ * too. background-image must be cleared explicitly: the stock theme paints
++ * the handle with a gradient image, and an image beats a background-color
++ * underneath it. */
++.slider_captured trough slider {
++    background-image: none;
++    background-color: @warning;
++}
++
+ .filament_sensor {
+     border-radius: 3em;
+ }

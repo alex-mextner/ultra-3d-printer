@@ -1,0 +1,59 @@
+--- a/ks_includes/KlippyGtk.py
++++ b/ks_includes/KlippyGtk.py
+@@ -284,6 +284,46 @@
+     def dialog_content_decouple(self, widget, event, dialog):
+         self.remove_dialog(dialog)
+ 
++    def dialog_key_press(self, dialog, event):
++        """Let BackSpace dismiss a dialog, the way it leaves every panel.
++
++        2026-08-01, measured on the "Save configuration?" confirm. A
++        KlippyGtk.Dialog() is a separate modal toplevel, so its key events
++        never reach screen.py's _key_press_event: pressing BackSpace on the
++        open dialog produced no trace line at all (and screen.py traces
++        every key unconditionally), and the dialog stayed. Arrows do move
++        focus -- GTK's own focus chain handles that inside the dialog
++        window, also without a trace -- and Enter does activate, so the
++        dialog was escapable only by arrowing onto Cancel and pressing
++        Enter. Escape is bound natively by GtkDialog but is unreachable on
++        this machine: nav-buttons-remap.py cannot emit KEY_ESC at all.
++
++        Two things made this worth fixing rather than just documenting.
++        The confirm dialog opens with focus on the DESTRUCTIVE button
++        (Save, which writes printer.cfg on the printer and reboots Klipper,
++        bypassing the repo-is-source-of-truth workflow), so the universal
++        "get me out" key doing nothing is precisely the wrong default. And
++        a Dialog() built with no buttons at all closes only on "click
++        anywhere" -- a mouse event this machine cannot produce -- so for
++        that shape there was no five-button exit whatsoever.
++
++        CANCEL rather than remove_dialog(): every response callback in this
++        codebase either acts only on Gtk.ResponseType.OK, or tests CANCEL
++        explicitly (gcodes.py, job_status.py, network.py), so CANCEL is the
++        one value that is safe everywhere AND still runs each caller's own
++        teardown instead of pulling the dialog out from under it. One
++        deliberate exception: base_panel.py's in-progress update dialog
++        ignores any non-OK response, so BackSpace leaves it open -- correct,
++        an update in flight must not be dismissable.
++
++        Returns False for every other key so arrows and Enter keep working.
++        """
++        if Gdk.keyval_name(event.keyval) != "BackSpace":
++            return False
++        logging.info("Dialog dismissed with BackSpace")
++        dialog.response(Gtk.ResponseType.CANCEL)
++        return True
++
+     def Dialog(self, title, buttons, content, callback=None, *args):
+         dialog = Gtk.Dialog(
+             title=title,
+@@ -322,6 +362,9 @@
+         dialog.connect("response", self.screen.screensaver.reset_timeout)
+         dialog.connect("response", self.screen.lock_screen.reset_timeout)
+         dialog.connect("response", callback, *args)
++        # 2026-08-01: five-button exit from any dialog -- see
++        # dialog_key_press() for the measurement and why CANCEL.
++        dialog.connect("key-press-event", self.dialog_key_press)
+         dialog.get_style_context().add_class("dialog")
+         # 2026-07-31 black-background fix, dialog follow-up, part 1 of 2: see
+         # the matching content_area.add_class() below for the full writeup.
