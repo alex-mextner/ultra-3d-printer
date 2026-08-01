@@ -360,10 +360,10 @@ index cbcdaa4..9f9da7a 100644
  
          close_btn = self._gtk.Button("cancel", scale=0.66)
 diff --git a/ks_includes/widgets/scroll.py b/ks_includes/widgets/scroll.py
-index e9accaa..f698f79 100644
+index e9accaa..4c00f38 100644
 --- a/ks_includes/widgets/scroll.py
 +++ b/ks_includes/widgets/scroll.py
-@@ -6,7 +6,7 @@ from gi.repository import Gdk, Gtk
+@@ -6,9 +6,32 @@ from gi.repository import Gdk, Gtk
  
  class CustomScrolledWindow(Gtk.ScrolledWindow):
      def __init__(self, steppers=False, **kwargs):
@@ -371,7 +371,32 @@ index e9accaa..f698f79 100644
 +        args = {"hexpand": True, "vexpand": True, "overlay_scrolling": True}
          args.update(kwargs)
          super().__init__(**args)
++        # 2026-08-01 panel sweep: a scrolled window must never be a focus
++        # stop on this machine. GtkScrolledWindow sets can-focus TRUE on
++        # itself and installs its own bindings for all four arrows
++        # ("scroll-child"), so as soon as focus lands on the container
++        # rather than on something inside it, every arrow is consumed by
++        # the container and the focus highlight freezes. Measured on the
++        # Network panel, six presses in a row that changed nothing:
++        #
++        #   Key Down:  focus CustomScrolledWindow -> CustomScrolledWindow
++        #   Key Right: focus CustomScrolledWindow -> CustomScrolledWindow
++        #   Key Up:    focus CustomScrolledWindow -> CustomScrolledWindow
++        #   Key Left:  focus CustomScrolledWindow -> CustomScrolledWindow
++        #
++        # Same shape as the console focus trap
++        # (console-focus-trap-and-escape-overlay.patch), and the same
++        # answer: with no touchscreen and no mouse there is nothing a user
++        # can do while the scroll container itself holds focus, and
++        # screen.py's _dpad_scroll() moves the vadjustment directly without
++        # needing focus to be in here at all. One line in the factory
++        # covers all ~25 panels, exactly like the overlay_scrolling default
++        # above. Rows and buttons INSIDE the scroll are unaffected -- they
++        # keep their own can-focus and stay reachable.
++        self.set_can_focus(False)
          self.add_events(
+             Gdk.EventMask.BUTTON_PRESS_MASK
+             | Gdk.EventMask.TOUCH_MASK
 diff --git a/panels/base_panel.py b/panels/base_panel.py
 index 0f43fde..f66b7c4 100644
 --- a/panels/base_panel.py
@@ -2344,10 +2369,10 @@ index c020c76..0655b12 100644
          self.deactivate()
          del self.network_rows
 diff --git a/panels/notifications.py b/panels/notifications.py
-index 282c959..98b795e 100644
+index 282c959..e8f0c7a 100644
 --- a/panels/notifications.py
 +++ b/panels/notifications.py
-@@ -23,12 +23,33 @@ class Panel(ScreenPanel):
+@@ -23,12 +23,62 @@ class Panel(ScreenPanel):
          super().__init__(screen, title)
          self.empty = _("Notification log empty")
          self.tb = Gtk.TextBuffer(text=self.empty)
@@ -2365,6 +2390,24 @@ index 282c959..98b795e 100644
 +        self.indent_tag = self.tb.create_tag("hanging_indent")
 +        self.tv = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Pango.WrapMode.WORD_CHAR)
 +        self.tv.set_buffer(self.tb)
++        # 2026-08-01 panel sweep: same read-only-TextView focus trap that
++        # killed navigation on the console, found here by walking every
++        # panel with the D-pad. Trace, focus frozen from the moment it
++        # entered the log:
++        #
++        #   Key Down: focus Button(Clear) -> Button(Clear) | via gtk-default
++        #   Key Up:   focus TextView -> TextView | via gtk-default
++        #   Key Left: focus TextView -> TextView | via gtk-default
++        #
++        # GtkTextView binds all four arrows to moving its insertion caret
++        # and always consumes them -- and the caret here is both invisible
++        # (cursor_visible=False) and meaningless (editable=False), so the
++        # keys visibly do nothing while focus can never leave. There is
++        # nothing to do inside a read-only log, so it is not a focus stop
++        # any more; the Clear button above it stays reachable, and the list
++        # still scrolls through screen.py's _dpad_scroll(), which moves the
++        # adjustment without needing focus in here.
++        self.tv.set_can_focus(False)
 +        self.tv.connect("size-allocate", self._autoscroll)
  
 +        # 2026-07-31 overflow fix (live screenshot, 4x zoom): same defect and
@@ -2380,12 +2423,23 @@ index 282c959..98b795e 100644
          scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
 -        scroll.add(tv)
 +        scroll.set_overlay_scrolling(False)
++        # Same reason as the TextView above, and as console.py: a scroll
++        # container is not something a 5-button user can act on, and
++        # GtkScrolledWindow's own arrow bindings turn it into a focus trap
++        # the moment its content overflows. This is a plain
++        # Gtk.ScrolledWindow, so the can-focus default flipped in
++        # ks_includes/widgets/scroll.py does not reach it -- it has to be
++        # set here. Today the notification list is short enough that focus
++        # could still escape by luck (the bindings only consume an arrow
++        # when there is somewhere to scroll); this makes it safe once the
++        # list gets long, which is exactly when the panel matters.
++        scroll.set_can_focus(False)
 +        self.tv.set_right_margin(4)
 +        scroll.add(self.tv)
  
          clear_button = self._gtk.Button(
              "refresh", _("Clear") + " ", None, self.bts, Gtk.PositionType.RIGHT, 1
-@@ -43,8 +64,15 @@ class Panel(ScreenPanel):
+@@ -43,8 +93,15 @@ class Panel(ScreenPanel):
          self.content.add(content_box)
  
      def activate(self):
@@ -2401,7 +2455,7 @@ index 282c959..98b795e 100644
      def add_notification(self, log):
          if log["level"] == 0:
              if "error" in log["message"].lower() or "cannot" in log["message"].lower():
-@@ -57,12 +85,18 @@ class Panel(ScreenPanel):
+@@ -57,12 +114,18 @@ class Panel(ScreenPanel):
              color = COLORS["warning"]
          else:
              color = COLORS["error"]
@@ -3240,7 +3294,7 @@ index 573180a..68e3517 100644
          self.content.add(grid)
  
 diff --git a/screen.py b/screen.py
-index 4efa3ac..1149b33 100755
+index 4efa3ac..36714a4 100755
 --- a/screen.py
 +++ b/screen.py
 @@ -101,7 +101,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
@@ -3518,7 +3572,7 @@ index 4efa3ac..1149b33 100755
          while len(self._cur_panels) > 1:
              self._remove_current_panel()
              del self._cur_panels[-1]
-@@ -1425,10 +1661,447 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -1425,10 +1661,503 @@ class KlipperScreen(Gtk.ApplicationWindow):
  
      def _key_press_event(self, widget, event):
          keyval_name = Gdk.keyval_name(event.keyval)
@@ -3672,6 +3726,8 @@ index 4efa3ac..1149b33 100755
 +                    handled = self._focus_into_current_panel(keyval_name)
 +                    if handled:
 +                        self._key_trace_branch += " -> focus-into-panel"
++            if not handled and keyval_name in ("Left", "Right"):
++                handled = self._escape_range_focus(keyval_name)
 +            if not handled and keyval_name in ("Up", "Down"):
 +                # D-pad list scrolling (2026-07-31, user: "их невозможно
 +                # листать"). Panels taller than this 320x240 screen had no
@@ -3803,6 +3859,60 @@ index 4efa3ac..1149b33 100755
 +        if isinstance(widget, Gtk.Container):
 +            for child in widget.get_children():
 +                self._dpad_scrollables(child, found, depth + 1)
++
++    def _escape_range_focus(self, keyval_name):
++        """Let Left/Right leave a focused slider. True = key consumed.
++
++        2026-08-01 panel sweep. Gtk.Scale (a Gtk.Range) binds Left/Right to
++        "change the value", and always consumes them -- so once focus is on
++        a slider it can never move sideways, and every control sitting
++        beside the slider becomes unreachable on a 5-button pad. Measured
++        on panels/fan.py, where the row is literally
++        Box[stop_btn, scale, max_btn]: focus enters the scale and the trace
++        shows six presses in a row that never move it --
++
++            Key Right: focus Scale -> Scale | handled=False via gtk-default
++            Key Left:  focus Scale -> Scale | handled=False via gtk-default
++
++        -- so Stop and Max, the only two widgets on that panel that
++        actually DO anything, could not be reached at all. Up/Down do not
++        rescue it either: both buttons are in the same horizontal box, so
++        there is nothing above or below to move to, and _dpad_scroll just
++        nudged the viewport by 29px instead.
++
++        Nothing is lost by taking these keys away from the slider, because
++        keyboard slider changes were never transmitted in the first place:
++        EVERY Gtk.Scale in this codebase (fan, limits, led, pins,
++        retraction, pressure_advance, input_shaper) commits its value on
++        "button-release-event" only -- a mouse event no physical button
++        here can produce. So arrowing a slider merely moved the handle and
++        silently dropped the change. Until that half is fixed (queued
++        separately in printer-status.md) sliders are read-only indicators,
++        and the useful thing Left/Right can do is reach the buttons next to
++        them.
++
++        Falls through (returns False) when there is nothing to move to, so
++        on a panel where the slider really is the only control the old
++        behaviour is unchanged.
++        """
++        focus = self.get_focus()
++        if not isinstance(focus, Gtk.Range):
++            return False
++        content = getattr(self.base_panel, "content", None)
++        if content is None:
++            return False
++        direction = (
++            Gtk.DirectionType.LEFT if keyval_name == "Left" else Gtk.DirectionType.RIGHT
++        )
++        try:
++            if content.child_focus(direction):
++                moved = self.get_focus()
++                if moved is not None and moved is not focus:
++                    self._key_trace_branch = "escape-range-focus"
++                    return True
++        except Exception:
++            logging.exception("Escaping slider focus failed")
++        return False
 +
 +    def _scrollable_ancestor(self, widget, candidates):
 +        # Which of the collected scrolled windows actually contains this

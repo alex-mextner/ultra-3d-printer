@@ -53,10 +53,73 @@
          elif keyval_name == "BackSpace" and self.keyboard is None:
              self._key_trace_branch = "backspace/panel-back"
              self.base_panel.back()
-@@ -1899,6 +1941,21 @@
+@@ -1767,6 +1809,8 @@
+                     handled = self._focus_into_current_panel(keyval_name)
+                     if handled:
+                         self._key_trace_branch += " -> focus-into-panel"
++            if not handled and keyval_name in ("Left", "Right"):
++                handled = self._escape_range_focus(keyval_name)
+             if not handled and keyval_name in ("Up", "Down"):
+                 # D-pad list scrolling (2026-07-31, user: "их невозможно
+                 # листать"). Panels taller than this 320x240 screen had no
+@@ -1899,6 +1943,75 @@
              for child in widget.get_children():
                  self._dpad_scrollables(child, found, depth + 1)
  
++    def _escape_range_focus(self, keyval_name):
++        """Let Left/Right leave a focused slider. True = key consumed.
++
++        2026-08-01 panel sweep. Gtk.Scale (a Gtk.Range) binds Left/Right to
++        "change the value", and always consumes them -- so once focus is on
++        a slider it can never move sideways, and every control sitting
++        beside the slider becomes unreachable on a 5-button pad. Measured
++        on panels/fan.py, where the row is literally
++        Box[stop_btn, scale, max_btn]: focus enters the scale and the trace
++        shows six presses in a row that never move it --
++
++            Key Right: focus Scale -> Scale | handled=False via gtk-default
++            Key Left:  focus Scale -> Scale | handled=False via gtk-default
++
++        -- so Stop and Max, the only two widgets on that panel that
++        actually DO anything, could not be reached at all. Up/Down do not
++        rescue it either: both buttons are in the same horizontal box, so
++        there is nothing above or below to move to, and _dpad_scroll just
++        nudged the viewport by 29px instead.
++
++        Nothing is lost by taking these keys away from the slider, because
++        keyboard slider changes were never transmitted in the first place:
++        EVERY Gtk.Scale in this codebase (fan, limits, led, pins,
++        retraction, pressure_advance, input_shaper) commits its value on
++        "button-release-event" only -- a mouse event no physical button
++        here can produce. So arrowing a slider merely moved the handle and
++        silently dropped the change. Until that half is fixed (queued
++        separately in printer-status.md) sliders are read-only indicators,
++        and the useful thing Left/Right can do is reach the buttons next to
++        them.
++
++        Falls through (returns False) when there is nothing to move to, so
++        on a panel where the slider really is the only control the old
++        behaviour is unchanged.
++        """
++        focus = self.get_focus()
++        if not isinstance(focus, Gtk.Range):
++            return False
++        content = getattr(self.base_panel, "content", None)
++        if content is None:
++            return False
++        direction = (
++            Gtk.DirectionType.LEFT if keyval_name == "Left" else Gtk.DirectionType.RIGHT
++        )
++        try:
++            if content.child_focus(direction):
++                moved = self.get_focus()
++                if moved is not None and moved is not focus:
++                    self._key_trace_branch = "escape-range-focus"
++                    return True
++        except Exception:
++            logging.exception("Escaping slider focus failed")
++        return False
++
 +    def _scrollable_ancestor(self, widget, candidates):
 +        # Which of the collected scrolled windows actually contains this
 +        # widget, so a reveal scrolls the viewport the widget is really in.
@@ -75,7 +138,7 @@
      def _dpad_reveal_focus(self, sw):
          # Keep the newly focused row on screen. GTK3's own scroll-to-focus
          # is not dependable across the container nestings the panels use
-@@ -1955,12 +2012,44 @@
+@@ -1955,12 +2068,44 @@
                  self._key_trace_branch = "gtk-default(no overflowing scrollable)"
                  return False
              direction = Gtk.DirectionType.DOWN if down else Gtk.DirectionType.UP

@@ -963,6 +963,125 @@ scp orangepi-display/klipperscreen-patches/console-focus-trap-and-escape-overlay
 `ALL-local-changes.patch`, отдельно применять его при восстановлении с нуля
 не надо.
 
+## ✅ panel-sweep-focus-traps.patch — ПРИМЕНЁН И ПРОВЕРЕН ЖИВЬЁМ (2026-08-01)
+
+Результат **сплошного обхода D-pad'ом всех панелей**, доступных с главного
+меню, — проверка «не осталось ли ещё панелей-кирпичей» после консоли и камеры.
+Найдено ещё **три** панели с мёртвой навигацией, все три — один и тот же класс
+(«виджет с собственными арроу-биндингами получает фокус и больше его не
+отдаёт»), и все три починены. Таблица обхода целиком — в
+`docs/printer-status.md`.
+
+⚠️ Файлов в этом патче два (`ks_includes/widgets/scroll.py`,
+`panels/notifications.py`), но третий фикс обхода — `_escape_range_focus()` —
+живёт в `screen.py` и поэтому лежит в
+`console-focus-trap-and-escape-overlay.patch`. Практического значения это
+разделение не имеет: восстанавливать всё равно только через
+`ALL-local-changes.patch`.
+
+### 1. Fan — фокус намертво прилипал к слайдеру, кнопки были недостижимы
+
+Самая тяжёлая находка обхода. Трассировка, шесть нажатий подряд без единого
+движения фокуса:
+
+```
+Key Right: focus Scale -> Scale | handled=False via gtk-default | panel=fan
+Key Left:  focus Scale -> Scale | handled=False via gtk-default | panel=fan
+Key Down:  focus Scale -> Scale | handled=True via dpad-scroll/adjustment 0->29 of 29
+```
+
+`Gtk.Scale` (это `Gtk.Range`) вешает `Left`/`Right` на «изменить значение» и
+**всегда** их съедает. А ряд в `panels/fan.py` — это буквально
+`Box[stop_btn, scale, max_btn]`, то есть обе кнопки стоят СЛЕВА и СПРАВА от
+слайдера. Вверх/вниз тоже некуда (один вентилятор, всё в одной строке), и
+`_dpad_scroll` вместо движения фокуса просто дёргал вьюпорт на 29px.
+
+Итог: `Stop` и `Max` — **единственные два виджета этой панели, которые
+вообще что-то делают** — были недостижимы с пяти кнопок. Панель выглядела
+живой и не делала ничего.
+
+**И это ещё не всё.** Сам слайдер тоже ничего не давал: **каждый** `Gtk.Scale`
+в кодовой базе (`fan`, `limits`, `led`, `pins`, `retraction`,
+`pressure_advance`, `input_shaper`) отправляет значение только по
+`button-release-event` — мышиному событию, которого на этой машине физически
+не бывает. То есть стрелка двигала ручку слайдера, а изменение молча
+терялось. Поэтому забрать `Left`/`Right` у слайдера — не потеря: терять
+нечего.
+
+**Фикс — `_escape_range_focus()` в `screen.py`** (одно место на все семь
+панелей, лежит в `console-focus-trap-and-escape-overlay.patch`): если фокус на
+`Gtk.Range` и нажата `Left`/`Right` — двигаем фокус по
+`base_panel.content.child_focus()` вместо того, чтобы отдавать клавишу
+слайдеру. Если двигаться некуда — возвращаем False и всё остаётся как было,
+так что на панели, где слайдер действительно единственный контрол, поведение
+не меняется.
+
+Проверено живьём: `Right: focus Scale -> Button(Max) | handled=True via
+escape-range-focus`, дальше `Left` возвращает на слайдер, ещё `Left` —
+на кнопку Stop. Все три виджета достижимы, `Enter` на Stop/Max работает
+(они на `clicked`).
+
+### 2. Limits — то же самое, кнопки сброса были недостижимы
+
+Та же причина, другая раскладка (`Grid`: строка = имя + слайдер + кнопка
+`reset`). Вертикально фокус ходил между строками и раньше, а вот кнопка
+сброса рядом со слайдером не бралась никак — `Right` съедал слайдер.
+После фикса: `Right: focus Scale -> Button | via escape-range-focus`, `Down`
+переходит на следующую строку, `Left` возвращает на слайдер.
+
+### 3. Network — фокус залипал на самом `CustomScrolledWindow`
+
+```
+Key Down:  focus CustomScrolledWindow -> CustomScrolledWindow | panel=network
+Key Right: focus CustomScrolledWindow -> CustomScrolledWindow | panel=network
+Key Up:    focus CustomScrolledWindow -> CustomScrolledWindow | panel=network
+Key Left:  focus CustomScrolledWindow -> CustomScrolledWindow | panel=network
+```
+
+Ровно тот же рисунок, что у консоли, только контейнером вместо `TextView`.
+`GtkScrolledWindow` сам ставит себе `can-focus=True` и вешает собственные
+биндинги на все четыре стрелки (`scroll-child`).
+
+**Фикс — одна строка в фабрике** `ks_includes/widgets/scroll.py`:
+`self.set_can_focus(False)`. Тот же приём одного места на все ~25 панелей,
+которым в этой же папке уже переключали `overlay_scrolling`. Скроллить это не
+мешает: `_dpad_scroll()` в `screen.py` двигает `vadjustment` напрямую и не
+требует, чтобы фокус был внутри. Строки и кнопки ВНУТРИ скролла свой
+`can-focus` сохраняют и остаются достижимыми.
+
+Проверено живьём: два скриншота подряд показывают, как подсветка переходит с
+кнопки «назад» на колокольчик, — до фикса не двигалось вообще ничего.
+Попутно это убрало залипание фокуса на `CustomScrolledWindow`, которое обход
+видел и на панели `Print`/gcodes.
+
+### 4. Notifications — read-only `TextView`, точная копия бага консоли
+
+```
+Key Up:   focus TextView -> TextView | via gtk-default | panel=notifications
+Key Left: focus TextView -> TextView | via gtk-default | panel=notifications
+```
+
+Единственный, кроме консоли, `Gtk.TextView` во всей кодовой базе (проверено
+грепом — их ровно два). Фикс тот же: `self.tv.set_can_focus(False)`, плюс
+`scroll.set_can_focus(False)` на его `Gtk.ScrolledWindow` — этот создаётся
+напрямую, а не через `CustomScrolledWindow`, поэтому дефолт из фабрики его не
+достаёт. На сегодняшней короткой истории уведомлений фокус ещё мог уйти
+случайно (биндинг съедает стрелку только когда есть куда скроллить) — правка
+делает панель безопасной ровно тогда, когда список вырастет, то есть когда
+она и понадобится.
+
+Проверено живьём: `Clear` → `ScrolledWindow` → `Clear` → следующая кнопка,
+фокус ходит; выход `BackSpace` работает.
+
+### Применить на принтере
+
+```
+scp orangepi-display/klipperscreen-patches/panel-sweep-focus-traps.patch root@192.168.11.160:/tmp/ && ssh root@192.168.11.160 'cd /home/ultra/KlipperScreen && git apply /tmp/panel-sweep-focus-traps.patch && python3 -m py_compile ks_includes/widgets/scroll.py panels/notifications.py && systemctl restart KlipperScreen && echo APPLIED_OK'
+```
+
+Бэкапы на приборе: `ks_includes/widgets/scroll.py.bak-before-canfocus`,
+`panels/notifications.py.bak-before-canfocus`.
+
 ## ✅ camera-panel-mpv-deadlock.patch — ПРИМЕНЁН И ПРОВЕРЕН ЖИВЬЁМ (2026-08-01)
 
 **Симптом (пользователь застревал дважды за час):** из панели «Камера»

@@ -1,0 +1,77 @@
+--- a/ks_includes/widgets/scroll.py
++++ b/ks_includes/widgets/scroll.py
+@@ -9,6 +9,29 @@
+         args = {"hexpand": True, "vexpand": True, "overlay_scrolling": True}
+         args.update(kwargs)
+         super().__init__(**args)
++        # 2026-08-01 panel sweep: a scrolled window must never be a focus
++        # stop on this machine. GtkScrolledWindow sets can-focus TRUE on
++        # itself and installs its own bindings for all four arrows
++        # ("scroll-child"), so as soon as focus lands on the container
++        # rather than on something inside it, every arrow is consumed by
++        # the container and the focus highlight freezes. Measured on the
++        # Network panel, six presses in a row that changed nothing:
++        #
++        #   Key Down:  focus CustomScrolledWindow -> CustomScrolledWindow
++        #   Key Right: focus CustomScrolledWindow -> CustomScrolledWindow
++        #   Key Up:    focus CustomScrolledWindow -> CustomScrolledWindow
++        #   Key Left:  focus CustomScrolledWindow -> CustomScrolledWindow
++        #
++        # Same shape as the console focus trap
++        # (console-focus-trap-and-escape-overlay.patch), and the same
++        # answer: with no touchscreen and no mouse there is nothing a user
++        # can do while the scroll container itself holds focus, and
++        # screen.py's _dpad_scroll() moves the vadjustment directly without
++        # needing focus to be in here at all. One line in the factory
++        # covers all ~25 panels, exactly like the overlay_scrolling default
++        # above. Rows and buttons INSIDE the scroll are unaffected -- they
++        # keep their own can-focus and stay reachable.
++        self.set_can_focus(False)
+         self.add_events(
+             Gdk.EventMask.BUTTON_PRESS_MASK
+             | Gdk.EventMask.TOUCH_MASK
+--- a/panels/notifications.py
++++ b/panels/notifications.py
+@@ -34,6 +34,24 @@
+         self.indent_tag = self.tb.create_tag("hanging_indent")
+         self.tv = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Pango.WrapMode.WORD_CHAR)
+         self.tv.set_buffer(self.tb)
++        # 2026-08-01 panel sweep: same read-only-TextView focus trap that
++        # killed navigation on the console, found here by walking every
++        # panel with the D-pad. Trace, focus frozen from the moment it
++        # entered the log:
++        #
++        #   Key Down: focus Button(Clear) -> Button(Clear) | via gtk-default
++        #   Key Up:   focus TextView -> TextView | via gtk-default
++        #   Key Left: focus TextView -> TextView | via gtk-default
++        #
++        # GtkTextView binds all four arrows to moving its insertion caret
++        # and always consumes them -- and the caret here is both invisible
++        # (cursor_visible=False) and meaningless (editable=False), so the
++        # keys visibly do nothing while focus can never leave. There is
++        # nothing to do inside a read-only log, so it is not a focus stop
++        # any more; the Clear button above it stays reachable, and the list
++        # still scrolls through screen.py's _dpad_scroll(), which moves the
++        # adjustment without needing focus in here.
++        self.tv.set_can_focus(False)
+         self.tv.connect("size-allocate", self._autoscroll)
+ 
+         # 2026-07-31 overflow fix (live screenshot, 4x zoom): same defect and
+@@ -48,6 +66,17 @@
+         # ~249px wrap width so entries reflow fully inside the visible area.
+         scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+         scroll.set_overlay_scrolling(False)
++        # Same reason as the TextView above, and as console.py: a scroll
++        # container is not something a 5-button user can act on, and
++        # GtkScrolledWindow's own arrow bindings turn it into a focus trap
++        # the moment its content overflows. This is a plain
++        # Gtk.ScrolledWindow, so the can-focus default flipped in
++        # ks_includes/widgets/scroll.py does not reach it -- it has to be
++        # set here. Today the notification list is short enough that focus
++        # could still escape by luck (the bindings only consume an arrow
++        # when there is somewhere to scroll); this makes it safe once the
++        # list gets long, which is exactly when the panel matters.
++        scroll.set_can_focus(False)
+         self.tv.set_right_margin(4)
+         scroll.add(self.tv)
+ 
