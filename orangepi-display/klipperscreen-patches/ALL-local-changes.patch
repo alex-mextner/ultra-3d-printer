@@ -531,6 +531,448 @@ index 44f7349..a7bd6ef 100644
          }
          buttons["save"].connect("clicked", self.send_save_mesh, profile)
          buttons["delete"].connect("clicked", self.send_remove_mesh, profile)
+diff --git a/panels/camera.py b/panels/camera.py
+index 186b542..2a6fa6c 100644
+--- a/panels/camera.py
++++ b/panels/camera.py
+@@ -1,27 +1,246 @@
+ import logging
++import threading
++import time
++import urllib.request
++from contextlib import suppress
+ 
+ import gi
+-import mpv
+ 
+ gi.require_version("Gtk", "3.0")
+-from contextlib import suppress
++gi.require_version("GdkPixbuf", "2.0")
+ 
+-from gi.repository import Gtk
++from gi.repository import GdkPixbuf, GLib, Gtk
+ 
+ from ks_includes.screen_panel import ScreenPanel
+ 
++# Why this panel no longer uses mpv (2026-08-01)
++# -----------------------------------------------------------------------------
++# Upstream camera.py handed the stream to libmpv and then called
++# `self.mpv.wait_for_playback()`. That call blocks the calling thread until
++# playback ENDS -- and it ran on the GTK main thread, because play() is reached
++# either from a "clicked" handler or from activate(), which screen.py invokes
++# inside attach_panel(). So entering the camera panel parked the main loop for
++# as long as the stream lived, i.e. forever for a live camera. Nothing was
++# dispatched any more: no key presses, no redraws, no Moonraker updates.
++# Measured on this device: after "VO: [gpu] 640x480 yuvj422p" the KlipperScreen
++# log went completely silent for 2m08s, until the user restarted the service.
++# Injected `xdotool key BackSpace Down Left Left` produced not one line, even
++# though _key_press_event() traces every single press unconditionally.
++#
++# That alone bricks the panel, and a second, independent defect made it
++# unrecoverable: mpv opened its own fullscreen X window over KlipperScreen, and
++# the only exit binding upstream registers is
++#     @self.mpv.on_key_press("MBTN_LEFT" or "MBTN_LEFT_DBL")
++# -- a Python bug (`or` between two non-empty strings yields the first) that in
++# any case binds a LEFT MOUSE CLICK. This machine has five GPIO buttons, no
++# touchscreen and no mouse. There was literally no input that could close it;
++# `systemctl restart KlipperScreen` was the only way out, and the user got
++# trapped twice.
++#
++# Both defects come from the same assumption -- a touchscreen and a GPU -- so
++# the fix is not to patch mpv's options but to drop the second window and the
++# blocking call entirely. This panel now polls the MJPEG snapshot endpoint on a
++# worker thread and paints frames into an ordinary Gtk.Image inside the normal
++# KlipperScreen window. The main loop is never blocked, no foreign window ever
++# takes the input focus, and BackSpace/Escape therefore always leave the panel
++# -- including when the camera is unplugged, crowsnest is stopped, or the URL
++# is wrong. On a device whose only UI is five buttons, "you can always get out"
++# is worth more than smooth video.
++#
++# Cost measured on this Orange Pi One (H3, 512MB), 640x480 MJPEG from ustreamer
++# over loopback, 20 samples: 46KB per frame, 112ms fetch, 20ms decode+scale to
++# 283x212 (median). Both of those run on the worker thread; the main loop only
++# swaps the finished pixbuf into the Gtk.Image. Resident cost is a couple of
++# hundred KB of pixbuf, against ~176MB RSS for the mpv/software-GL path that
++# used to push this 484MB box to 8MB free.
++
++# The ILI9341 is a 320x240 panel on SPI -- it cannot usefully show more than a
++# few frames per second, and one fetch+decode round trip already costs ~130ms
++# here, so this ceiling is barely ever reached. It exists to stop a fast local
++# camera from spinning the worker at 100% CPU.
++TARGET_FPS = 5
++HTTP_TIMEOUT = 5
++# Retry pause after a failed fetch. Long enough that a missing camera does not
++# hammer the CPU, short enough that plugging it back in recovers by itself.
++RECONNECT_DELAY = 3.0
++IDLE_POLL = 1.0
++
++# Moonraker stores rotation as degrees clockwise; GdkPixbuf names its enum by
++# direction, so 90 clockwise is PixbufRotation.CLOCKWISE (270 in the enum).
++# Mapping them by name rather than by number avoids that off-by-a-quarter-turn.
++ROTATIONS = {
++    90: GdkPixbuf.PixbufRotation.CLOCKWISE,
++    180: GdkPixbuf.PixbufRotation.UPSIDEDOWN,
++    270: GdkPixbuf.PixbufRotation.COUNTERCLOCKWISE,
++}
++
++
++class SnapshotStream:
++    """Polls an MJPEG snapshot endpoint on a worker thread.
++
++    Everything expensive -- the HTTP round trip and the JPEG decode/scale --
++    happens off the GTK main loop. The main loop only ever swaps an
++    already-decoded GdkPixbuf into a Gtk.Image, so the UI keeps responding no
++    matter what the camera does.
++    """
++
++    def __init__(self, url, max_size, on_frame, on_status, gate=None,
++                 fps=TARGET_FPS, flip_h=False, flip_v=False, rotation=0):
++        self.url = url
++        self._max_w, self._max_h = max_size
++        self._on_frame = on_frame
++        self._on_status = on_status
++        self._gate = gate
++        self._period = 1.0 / max(1, fps)
++        self._flip_h = flip_h
++        self._flip_v = flip_v
++        self._rotation = ROTATIONS.get(rotation)
++        if rotation and self._rotation is None:
++            logging.info(f"camera: ignoring unsupported rotation {rotation}")
++        # A quarter turn swaps the axes, so decode into the transposed box to
++        # end up filling the real one.
++        if rotation in (90, 270):
++            self._max_w, self._max_h = self._max_h, self._max_w
++        self._stop = threading.Event()
++        self._lock = threading.Lock()
++        self._pending = None
++        self._idle_queued = False
++        self._thread = None
++
++    def start(self):
++        if self._thread is not None:
++            return
++        self._thread = threading.Thread(target=self._run, daemon=True, name="camera-stream")
++        self._thread.start()
++
++    def stop(self):
++        # Deliberately no join(): this is called from the GTK main loop and the
++        # worker may be sitting in a socket read. Blocking here would recreate
++        # the very bug this panel exists to fix. The thread is a daemon, checks
++        # _stop after every step, and both delivery paths drop everything once
++        # _stop is set, so a straggler frame can never reach a dead panel.
++        self._stop.set()
++        with self._lock:
++            self._pending = None
++
++    def _run(self):
++        announced = False
++        while not self._stop.is_set():
++            if self._gate is not None and not self._gate():
++                # Screen is blanked or the panel is no longer on top -- do not
++                # burn CPU decoding frames nobody can see.
++                self._stop.wait(IDLE_POLL)
++                continue
++            started = time.monotonic()
++            try:
++                with urllib.request.urlopen(self.url, timeout=HTTP_TIMEOUT) as response:
++                    data = response.read()
++                pixbuf = self._decode(data)
++            except Exception as exception:  # noqa: BLE001 - any failure must degrade, not raise
++                if self._stop.is_set():
++                    return
++                logging.info(f"camera: snapshot fetch failed: {exception}")
++                self._status(_("Camera not available"))
++                announced = False
++                self._stop.wait(RECONNECT_DELAY)
++                continue
++            if pixbuf is None:
++                logging.info("camera: could not decode snapshot")
++                self._status(_("Camera not available"))
++                announced = False
++                self._stop.wait(RECONNECT_DELAY)
++                continue
++            if not announced:
++                self._status(None)
++                announced = True
++            self._publish(pixbuf)
++            elapsed = time.monotonic() - started
++            if elapsed < self._period:
++                self._stop.wait(self._period - elapsed)
++
++    def _decode(self, data):
++        loader = GdkPixbuf.PixbufLoader.new_with_type("jpeg")
++        loader.connect("size-prepared", self._on_size_prepared)
++        try:
++            loader.write(data)
++        finally:
++            # close() raises on a truncated JPEG; the partial pixbuf (or None)
++            # is all we need and a dropped frame is not worth an exception.
++            with suppress(GLib.GError):
++                loader.close()
++        pixbuf = loader.get_pixbuf()
++        if pixbuf is None:
++            return None
++        if self._rotation is not None:
++            pixbuf = pixbuf.rotate_simple(self._rotation) or pixbuf
++        if self._flip_h:
++            pixbuf = pixbuf.flip(True) or pixbuf
++        if self._flip_v:
++            pixbuf = pixbuf.flip(False) or pixbuf
++        return pixbuf
++
++    def _on_size_prepared(self, loader, src_width, src_height):
++        # Scale during decode rather than after: GdkPixbuf then never
++        # materialises the full-size image, which is both faster and smaller.
++        # Derived from the real frame dimensions, not from the camera's
++        # declared aspect_ratio, so a misconfigured ratio cannot squash it.
++        if src_width <= 0 or src_height <= 0:
++            return
++        scale = min(self._max_w / src_width, self._max_h / src_height)
++        loader.set_size(max(1, int(src_width * scale)), max(1, int(src_height * scale)))
++
++    def _publish(self, pixbuf):
++        with self._lock:
++            # Single-slot handoff: a new frame overwrites an undelivered one
++            # instead of queueing behind it. On an SPI display the main loop
++            # can fall behind the worker, and one idle callback per frame would
++            # pile up pixbufs and show stale video. Overwriting gives free
++            # frame-skipping instead.
++            self._pending = pixbuf
++            if self._idle_queued:
++                return
++            self._idle_queued = True
++        GLib.idle_add(self._deliver)
++
++    def _deliver(self):
++        with self._lock:
++            pixbuf, self._pending, self._idle_queued = self._pending, None, False
++        if pixbuf is not None and not self._stop.is_set():
++            self._on_frame(pixbuf)
++        return False
++
++    def _status(self, message):
++        if self._stop.is_set():
++            return
++        GLib.idle_add(self._emit_status, message)
++
++    def _emit_status(self, message):
++        if not self._stop.is_set():
++            self._on_status(message)
++        return False
++
+ 
+ class Panel(ScreenPanel):
+     def __init__(self, screen, title):
+         title = title or _("Camera")
+         super().__init__(screen, title)
+-        self.mpv = None
+-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+-        for i, cam in enumerate(self._printer.cameras):
+-            if not cam["enabled"]:
+-                continue
++        self.stream = None
++        self.cameras = [cam for cam in self._printer.cameras if cam["enabled"]]
++
++        self.image = Gtk.Image()
++        self.image.set_hexpand(True)
++        self.image.set_vexpand(True)
++        self.status = Gtk.Label(label=_("Loading..."))
++        self.status.set_line_wrap(True)
++        self.status.set_hexpand(True)
++        self.viewer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        self.viewer.add(self.status)
++        self.viewer.add(self.image)
++
++        buttons = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
++        for i, cam in enumerate(self.cameras):
+             logging.info(cam)
+-            cam[cam["name"]] = self._gtk.Button(
++            button = self._gtk.Button(
+                 image_name="camera",
+                 label=cam["name"],
+                 style=f"color{i % 4 + 1}",
+@@ -29,97 +248,104 @@ class Panel(ScreenPanel):
+                 position=Gtk.PositionType.LEFT,
+                 lines=1,
+             )
+-            cam[cam["name"]].set_hexpand(True)
+-            cam[cam["name"]].set_vexpand(True)
+-            cam[cam["name"]].connect("clicked", self.play, cam)
+-            box.add(cam[cam["name"]])
+-
+-        self.scroll = self._gtk.ScrolledWindow()
+-        self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+-        self.scroll.add(box)
+-        self.content.add(self.scroll)
++            button.set_hexpand(True)
++            button.set_vexpand(True)
++            button.connect("clicked", self.play, cam)
++            buttons.add(button)
++        self.selector = self._gtk.ScrolledWindow()
++        self.selector.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
++        self.selector.add(buttons)
++
++        self.content.add(self.selector)
++        self.content.add(self.viewer)
+         self.content.show_all()
++        # Both views are built once and toggled; activate()/play() decide which
++        # one the user gets. set_no_show_all() keeps a later show_all() from the
++        # framework (screen_panel re-attaches call it) from revealing both at
++        # once -- their children are already realised by the show_all() above.
++        self.selector.set_no_show_all(True)
++        self.viewer.set_no_show_all(True)
++        self.viewer.hide()
+ 
+     def activate(self):
+-        # if only 1 cam start playing fullscreen
+-        if len(self._printer.cameras) == 1:
+-            cam = next(iter(self._printer.cameras))
+-            if cam["enabled"]:
+-                self.play(None, cam)
++        if len(self.cameras) == 1:
++            # Single camera: no point making the user pick from a list of one.
++            self.play(None, self.cameras[0])
++        elif self.cameras:
++            self.stop_stream()
++            self.viewer.hide()
++            self.selector.show()
++        else:
++            self.stop_stream()
++            self.selector.hide()
++            self.viewer.show()
++            self.image.clear()
++            self.set_status(_("Camera not available"))
+ 
+     def deactivate(self):
+-        if self.mpv:
+-            self.mpv.terminate()
+-            self.mpv = None
++        self.stop_stream()
+ 
+     def process_update(self, action, data):
+         if action != "notify_webcams_changed":
+             return
+         self._screen.panels_reinit.append("camera")
+ 
++    def stop_stream(self):
++        if self.stream is not None:
++            self.stream.stop()
++            self.stream = None
++
+     def play(self, widget, cam):
+-        url = cam["stream_url"]
++        self.stop_stream()
++        url = self.snapshot_url(cam)
++        self.selector.hide()
++        self.viewer.show()
++        self.image.clear()
++        if url is None:
++            self.set_status(_("Camera not available"))
++            return
++        self.set_status(_("Loading..."))
++        logging.info(f"camera: polling {url}")
++        self.stream = SnapshotStream(
++            url,
++            self.frame_size(),
++            self.on_frame,
++            self.set_status,
++            gate=self.visible,
++            flip_h=cam.get("flip_horizontal", False),
++            flip_v=cam.get("flip_vertical", False),
++            rotation=int(cam.get("rotation", 0) or 0) % 360,
++        )
++        self.stream.start()
++
++    def snapshot_url(self, cam):
++        url = cam.get("snapshot_url") or ""
++        if not url:
++            # Fall back to the stream URL; every MJPEG backend Moonraker knows
++            # about serves a still frame from the same handler.
++            url = (cam.get("stream_url") or "").replace("action=stream", "action=snapshot")
++        if not url:
++            return None
+         if url.startswith("/"):
+-            logging.info("camera URL is relative")
+             endpoint = self._screen.restApi.endpoint.split(":")
+             url = f"{endpoint[0]}:{endpoint[1]}{url}"
+-        if "/webrtc" in url:
+-            self._screen.show_popup_message(
+-                _("WebRTC is not supported by the backend trying Stream")
+-            )
+-            url = url.replace("/webrtc", "/stream")
+-        vf_list = []
+-        if cam["flip_horizontal"]:
+-            vf_list.append("hflip")
+-        if cam["flip_vertical"]:
+-            vf_list.append("vflip")
+-        if cam["rotation"] != 0:
+-            vf_list.append(f"rotate:{cam['rotation'] * 3.14159 / 180}")
+-        logging.info(f"video filters: {vf_list}")
+-
+-        if self.mpv:
+-            self.mpv.terminate()
+-        self.mpv = mpv.MPV(fullscreen=True, log_handler=self.log, vo="gpu,wlshm,xv,x11")
+-
+-        self.mpv.vf = ",".join(vf_list)
+-
+-        with suppress(Exception):
+-            self.mpv.profile = "sw-fast"
+-
+-        # LOW LATENCY PLAYBACK
+-        with suppress(Exception):
+-            self.mpv.profile = "low-latency"
+-        self.mpv.untimed = True
+-        self.mpv.audio = "no"
+-
+-        @self.mpv.on_key_press("MBTN_LEFT" or "MBTN_LEFT_DBL")
+-        def clicked():
+-            self.mpv.quit(0)
+-
+-        logging.debug(f"Camera URL: {url}")
+-        self.mpv.play(url)
++        return url
+ 
+-        try:
+-            self.mpv.wait_for_playback()
+-        except mpv.ShutdownError:
+-            logging.info("Exiting Fullscreen")
+-        except Exception as e:
+-            logging.exception(e)
+-        self.mpv.terminate()
+-        self.mpv = None
+-        if len(self._printer.cameras) == 1:
+-            self._screen._menu_go_back()
+-
+-    def log(self, loglevel, component, message):
+-        if (
+-            "unable to decode" in message  # skip proprietary app fields errors
+-            or "No Xvideo support found" in message  # will fall back to other vo automatically
+-            or "GBM" in message  # will fall back to other vo automatically
+-            or "open TTY for VT control" in message  # not important to notify in the UI
+-            or "youtube-dl" in message  # needed for some streams, not relevant for our case
+-            or "yt-dlp" in message  # needed for some streams, not relevant for our case
+-        ):
++    def frame_size(self):
++        return max(64, self._gtk.content_width), max(64, self._gtk.content_height)
++
++    def visible(self):
++        # Called from the worker thread; only reads plain attributes.
++        return not self._screen.screensaver.is_showing
++
++    def on_frame(self, pixbuf):
++        self.image.set_from_pixbuf(pixbuf)
++        if self.status.get_visible():
++            self.status.hide()
++
++    def set_status(self, message):
++        if message is None:
++            self.status.hide()
+             return
+-        if loglevel == "error":
+-            self._screen.show_popup_message(f"{message}")
+-        logging.debug(f"[{loglevel}] {component}: {message}")
++        self.status.set_label(message)
++        self.status.show()
 diff --git a/panels/console.py b/panels/console.py
 index 7101a53..d3c542e 100644
 --- a/panels/console.py
@@ -2729,21 +3171,22 @@ index 573180a..68e3517 100644
          self.content.add(grid)
  
 diff --git a/screen.py b/screen.py
-index 4efa3ac..2e74e90 100755
+index 4efa3ac..aa2c9c0 100755
 --- a/screen.py
 +++ b/screen.py
-@@ -101,7 +101,10 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -101,7 +101,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.env = Environment(extensions=["jinja2.ext.i18n"], autoescape=True)
          self.env.install_gettext_translations(self._config.get_lang())
  
 +        self._focus_clear_timeout_id = None
 +        self._last_focus_widget = None
++        self._key_trace_branch = "gtk-default"
          self.connect("key-press-event", self._key_press_event)
 +        self.connect("set-focus", self._on_set_focus)
          self.connect("configure_event", self.update_size)
          display = Gdk.Display.get_default()
          self.display_number = os.environ.get("DISPLAY") or ":0"
-@@ -148,6 +151,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -148,6 +152,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.vertical_mode = self.aspect_ratio < 1.0
          logging.info(f"Screen resolution: {self.width}x{self.height}")
          self.theme = self._config.get_main_config().get("theme")
@@ -2755,7 +3198,7 @@ index 4efa3ac..2e74e90 100755
          self.show_cursor = self._config.get_main_config().getboolean("show_cursor", fallback=False)
          self.setup_gtk_settings()
          self.style_provider = Gtk.CssProvider()
-@@ -160,9 +168,50 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -160,9 +169,50 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.base_panel = BasePanel(self)
          self.change_theme(self.theme)
          self.overlay = Gtk.Overlay()
@@ -2806,7 +3249,7 @@ index 4efa3ac..2e74e90 100755
          self.update_cursor(self.show_cursor)
          min_ver = (3, 8)
          if sys.version_info < min_ver:
-@@ -640,6 +689,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -640,6 +690,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
              screen, self.style_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
          )
  
@@ -2970,11 +3413,62 @@ index 4efa3ac..2e74e90 100755
      def change_theme(self, theme_name=None):
          if not theme_name:
              theme_name = self._config.get_main_config().get("theme")
-@@ -1425,10 +1631,193 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -692,6 +899,35 @@ class KlipperScreen(Gtk.ApplicationWindow):
+     def _menu_go_back(self, widget=None, home=False):
+         logging.info(f"#### Menu go {'home' if home else 'back'}")
+         self.remove_keyboard()
++        if len(self._cur_panels) <= 1:
++            # Root-level back (2026-08-01). There is no panel to pop here,
++            # and the old code fell through to attach_panel() on the panel
++            # already on screen -- re-running add_content() on a widget
++            # that still has its parent, plus activate() and a full
++            # show_all(), for zero visible effect. The user long-presses
++            # Left on the main menu and gets no response at all.
++            #
++            # Give the press a real meaning instead of a louder no-op: put
++            # focus back at the top of the current panel. That is visible
++            # (the highlight appears), it is genuinely useful on a 5-button
++            # pad -- "back" becomes "return me to a known starting point"
++            # when the user feels lost -- and it is the one thing a root
++            # back CAN do. It does not fight the 10s idle highlight rule
++            # from 2026-07-30: this only ever runs on a real key press, and
++            # _reset_focus_clear_timeout() still clears the highlight
++            # afterwards like any other press.
++            # One thing the old fall-through DID do that must be kept:
++            # attach_panel() is where a pending panels_reinit entry gets
++            # flushed (it calls reload_panels()). reload_icon_theme() can
++            # queue one without any show_panel() following -- the day/night
++            # theme switch does exactly that -- so at depth 1 a Back press
++            # was a way that rebuild actually happened. Keep that path.
++            if self._cur_panels and self._cur_panels[-1] in self.panels_reinit:
++                self.attach_panel(self._cur_panels[-1])
++                return
++            self.set_focus(None)  # reset GTK's focus chain to the start
++            self._focus_into_current_panel()
++            return
+         while len(self._cur_panels) > 1:
+             self._remove_current_panel()
+             del self._cur_panels[-1]
+@@ -1425,10 +1661,358 @@ class KlipperScreen(Gtk.ApplicationWindow):
  
      def _key_press_event(self, widget, event):
          keyval_name = Gdk.keyval_name(event.keyval)
 +        handled = False
++        # Key tracing (2026-08-01). Until now only the screensaver branch
++        # below logged anything, so from the log alone "the key never
++        # arrived" and "the key arrived but there was nothing to act on"
++        # were indistinguishable -- and every "I pressed a button and
++        # nothing happened" report cost a live archaeology session on the
++        # device. One unconditional line per press: keyval, focus before
++        # and after, WHICH branch consumed it, and the current panel.
++        # The branch attribution is the load-bearing part: several of the
++        # branches below return handled=True, and a swallowed key looks
++        # exactly like a key that never arrived. _describe_focus() spells
++        # out mapped/sensitive/can-focus/detached, because a focus target
++        # that is still present but not focusable is precisely the failure
++        # mode that silently ate arrow keys here (see the resume branch).
++        self._key_trace_branch = "gtk-default"
++        focus_before = self._describe_focus(self.get_focus())
 +        if self.screensaver.is_showing:
 +            # Wake-on-any-key (2026-07-31): this machine is a 5-button D-pad
 +            # with no touchscreen, so the screensaver's only built-in
@@ -2996,9 +3490,11 @@ index 4efa3ac..2e74e90 100755
 +            self._reset_focus_clear_timeout()
 +            return True
          if keyval_name == "Escape":
++            self._key_trace_branch = "escape/go-home"
              self._menu_go_back(home=True)
 -        elif keyval_name == "BackSpace" and len(self._cur_panels) > 1 and self.keyboard is None:
 +        elif keyval_name == "BackSpace" and self.keyboard is None:
++            self._key_trace_branch = "backspace/panel-back"
              self.base_panel.back()
 +        elif keyval_name in ("Up", "Down", "Left", "Right"):
 +            if self.get_focus() is None:
@@ -3017,14 +3513,53 @@ index 4efa3ac..2e74e90 100755
 +                # move in the pressed direction -- that would risk a double
 +                # step once focus tracking below also updates). Subsequent
 +                # presses within the window behave exactly as before.
-+                if self._last_focus_widget is not None:
-+                    try:
-+                        mapped = self._last_focus_widget.get_mapped()
-+                    except Exception:
-+                        mapped = False
-+                    if mapped:
-+                        self.set_focus(self._last_focus_widget)
-+                        handled = True
++                # Dead-arrow-keys fix (2026-08-01, user: "вышел экранной
++                # кнопкой назад -- перестают кнопки работать"). The restore
++                # above used to check only get_mapped() and then claim the
++                # key unconditionally. Both halves were wrong, and together
++                # they wedged the D-pad permanently:
++                #
++                #   1. Gtk.Window.set_focus() delegates to
++                #      gtk_widget_grab_focus(), which returns silently and
++                #      does NOTHING if the target is insensitive, not
++                #      can-focus, or detached from this window. get_mapped()
++                #      rules out none of those.
++                #   2. handled=True was set whether or not focus actually
++                #      moved, so the key was swallowed and GTK's own
++                #      directional navigation never got to run.
++                #
++                # The trigger is the on-screen Back button. With no
++                # touchscreen, pressing it means focusing it and hitting
++                # Enter -- and its own handler pops the panel, so
++                # attach_panel() -> add_content() -> update_action_bar()
++                # makes control["back"] insensitive again at depth 1. GTK
++                # then drops window focus to None, while the button stays
++                # mapped and parented, so the old guard kept passing and
++                # kept eating every arrow, forever. Escape/BackSpace still
++                # worked (explicit branches above), which is exactly what
++                # the user saw. Measured on this device's GTK 3.24.49:
++                # after set_sensitive(False) on the focused button,
++                # get_focus() is None while get_mapped() is still True, and
++                # a further set_focus() on it leaves focus at None.
++                #
++                # So: validate the target against everything grab_focus()
++                # itself requires, drop it if it can no longer take focus,
++                # and claim the key only if focus really landed.
++                widget = self._last_focus_widget
++                self._key_trace_branch = f"resume-from-idle(last={self._describe_focus(widget)})"
++                if widget is not None and not self._can_take_focus(widget):
++                    self._last_focus_widget = widget = None
++                if widget is not None:
++                    self.set_focus(widget)
++                    handled = self.get_focus() is not None
++                if not handled:
++                    # Nothing valid to restore. Rather than hand the press
++                    # to GTK's from-nothing fallback (asymmetric: Down goes
++                    # to the sidebar bell, see the 2026-07-30 note above),
++                    # aim at the panel the user is actually looking at.
++                    handled = self._focus_into_current_panel(keyval_name)
++                    if handled:
++                        self._key_trace_branch += " -> focus-into-panel"
 +            if not handled and keyval_name in ("Up", "Down"):
 +                # D-pad list scrolling (2026-07-31, user: "их невозможно
 +                # листать"). Panels taller than this 320x240 screen had no
@@ -3043,7 +3578,102 @@ index 4efa3ac..2e74e90 100755
 +                # movement there is untouched.
 +                handled = self._dpad_scroll(keyval_name == "Down")
 +        self._reset_focus_clear_timeout()
++        logging.info(
++            f"Key {keyval_name}: focus {focus_before} -> "
++            f"{self._describe_focus(self.get_focus())} | handled={handled}"
++            f" via {self._key_trace_branch} | panel="
++            f"{self._cur_panels[-1] if self._cur_panels else None}"
++        )
 +        return handled
++
++    def _can_take_focus(self, widget):
++        # True only if Gtk.Window.set_focus(widget) would really move focus
++        # there. Mirrors gtk_widget_grab_focus()'s own preconditions: it is
++        # a SILENT no-op on an insensitive or non-focusable widget, and on
++        # one whose toplevel is no longer this window (unparented with a
++        # Python reference still holding it alive). Checking these up front
++        # is what lets the caller avoid claiming a key it did not use.
++        if widget is None:
++            return False
++        try:
++            return bool(
++                widget.get_mapped()
++                and widget.is_sensitive()
++                and widget.get_can_focus()
++                and widget.get_toplevel() is self
++            )
++        except Exception:
++            return False
++
++    def _focus_into_current_panel(self, keyval_name="Down"):
++        # Put focus somewhere sensible inside the visible panel body, and
++        # report whether it landed. Used when there is no focus and nothing
++        # valid to restore -- most importantly right after the on-screen
++        # Back button was activated, which makes that very button
++        # insensitive and so leaves focus at None with the user staring at
++        # a fresh panel. Aiming explicitly at base_panel.content keeps the
++        # press inside the panel actually on screen, instead of GTK's
++        # from-nothing fallback which sends Down to the sidebar bell.
++        content = getattr(self.base_panel, "content", None)
++        if content is None:
++            return False
++        pressed = {
++            "Up": Gtk.DirectionType.UP,
++            "Down": Gtk.DirectionType.DOWN,
++            "Left": Gtk.DirectionType.LEFT,
++            "Right": Gtk.DirectionType.RIGHT,
++        }.get(keyval_name, Gtk.DirectionType.DOWN)
++        # TAB_FORWARD as the fallback: a purely directional child_focus()
++        # can decline to enter a container at all depending on geometry,
++        # whereas tab order always has a first focusable element if one
++        # exists anywhere in the panel.
++        for direction in (pressed, Gtk.DirectionType.TAB_FORWARD):
++            try:
++                if content.child_focus(direction) and self.get_focus() is not None:
++                    return True
++            except Exception:
++                logging.exception("Focusing into the current panel failed")
++                return False
++        return False
++
++    def _describe_focus(self, widget):
++        # Short, log-safe identity of a focus target: type, its label, and
++        # the four properties that decide whether it can actually TAKE
++        # focus. mapped/sensitive/can-focus matter because
++        # gtk_widget_grab_focus() is a silent no-op when any of them is
++        # false -- so a set_focus() call can appear to succeed while focus
++        # stays exactly where it was. "detached" (toplevel is not this
++        # window) catches a widget that has been unparented out of the
++        # tree. Never raises: this only ever runs to build a log line, and
++        # a broken log line must not break input handling.
++        if widget is None:
++            return "None"
++        try:
++            name = type(widget).__name__
++            label = ""
++            if isinstance(widget, Gtk.Button):
++                label = widget.get_label() or ""
++            if not label:
++                try:
++                    label = widget.get_tooltip_text() or ""
++                except Exception:
++                    label = ""
++            label = str(label).strip().replace("\n", " ")[:24]
++            flags = ""
++            try:
++                if not widget.get_mapped():
++                    flags += " UNMAPPED"
++                if not widget.is_sensitive():
++                    flags += " INSENSITIVE"
++                if not widget.get_can_focus():
++                    flags += " NO-CAN-FOCUS"
++                if widget.get_toplevel() is not self:
++                    flags += " DETACHED"
++            except Exception:
++                pass
++            return f"{name}{'(' + label + ')' if label else ''}{flags}"
++        except Exception as exc:
++            return f"<undescribable {exc}>"
 +
 +    def _dpad_scrollables(self, widget, found, depth=0):
 +        # Collect the currently-mapped Gtk.ScrolledWindows of the visible
@@ -3115,10 +3745,12 @@ index 4efa3ac..2e74e90 100755
 +                    target = sw  # prefer the list the user is already in
 +                    break
 +            if target is None:
++                self._key_trace_branch = "gtk-default(no overflowing scrollable)"
 +                return False
 +            direction = Gtk.DirectionType.DOWN if down else Gtk.DirectionType.UP
 +            if target.child_focus(direction):
 +                self._dpad_reveal_focus(target)
++                self._key_trace_branch = "dpad-scroll/child_focus"
 +                return True
 +            # Either the list has no focusable children at all, or focus is
 +            # already on the last/first one -- move the viewport itself so
@@ -3129,7 +3761,14 @@ index 4efa3ac..2e74e90 100755
 +            value = adj.get_value() + (step if down else -step)
 +            value = min(max(value, adj.get_lower()), bottom)
 +            if abs(value - adj.get_value()) < 1:
++                self._key_trace_branch = (
++                    f"gtk-default(scrollable already at {'bottom' if down else 'top'}, "
++                    f"value={adj.get_value():.0f}/{bottom:.0f})"
++                )
 +                return False  # already at that end, let GTK have the key
++            self._key_trace_branch = (
++                f"dpad-scroll/adjustment {adj.get_value():.0f}->{value:.0f} of {bottom:.0f}"
++            )
 +            adj.set_value(value)
 +            return True
 +        except Exception:
@@ -3159,6 +3798,11 @@ index 4efa3ac..2e74e90 100755
 +        self._focus_clear_timeout_id = GLib.timeout_add_seconds(10, self._clear_focus_on_timeout)
 +
 +    def _clear_focus_on_timeout(self):
++        # Traced too (2026-08-01): this is what turns the NEXT arrow press
++        # into a restore-only press (see the resume branch in
++        # _key_press_event), which from the user's side is a key that did
++        # nothing visible -- so the log has to say when it fired.
++        logging.info(f"Focus cleared after idle: was {self._describe_focus(self.get_focus())}")
 +        self.set_focus(None)
 +        self._focus_clear_timeout_id = None
 +        return False
