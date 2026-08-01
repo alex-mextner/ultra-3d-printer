@@ -1303,6 +1303,10 @@ Gtk.ResponseType.OK: return`) — там `BackSpace` диалог не закр�
 **НЕ чинилось намеренно:** стартовый фокус на `Save`. Дефект реальный и
 записан в очередь, но порядок фокуса живёт в общей фабрике и задел бы
 диалоги печати (`job_status.py`), которые на этой машине проверить нечем.
+→ ✅ **Починено позже той же ночью**, см. `dialog-cancel-default-focus.patch`
+ниже: правка осталась в общей фабрике (иначе и нельзя), но привязана к
+наличию кнопки с ответом `CANCEL`, поэтому «задевает» диалоги печати ровно
+в ту сторону, в которую и надо.
 
 ### Как проверено живьём
 
@@ -1321,6 +1325,201 @@ scp orangepi-display/klipperscreen-patches/dialog-backspace-exit.patch root@192.
 ```
 
 Бэкап на приборе: `ks_includes/KlippyGtk.py.bak-before-dialog-backspace`.
+
+## ✅ dialog-cancel-default-focus.patch — ПРИМЕНЁН И ПРОВЕРЕН ЖИВЬЁМ (2026-08-01, ночь)
+
+Закрывает п.1 из «🔴 Осталось известным»: **диалог подтверждения открывался
+с фокусом на разрушительной кнопке.** Файл один — `ks_includes/KlippyGtk.py`.
+
+### Почему это не косметика
+
+`Save` в диалоге `Save Config` отправляет `SAVE_CONFIG`, а он переписывает
+`printer.cfg` **на самом принтере** и перезапускает Klipper. Правило проекта
+(`CLAUDE.md`) — источник истины только `printer-configs/` в репозитории; то
+есть один рефлекторный `Enter` не «делает что-то не то», а **молча разводит
+машину с репозиторием**, и следующий `deploy.sh` покажет расхождение,
+происхождение которого никто не восстановит. На пятикнопочной машине `Enter`
+— единственная клавиша, которую жмут не целясь.
+
+### Почему фокус вообще стартовал на разрушительной кнопке
+
+В форме «подтверждение» содержимое диалога — `Gtk.Label`, фокус взять
+некому, и GTK отдаёт его **первой кнопке action-area**. А первой в этой
+кодовой базе почти везде стоит именно опасная. Проверено грепом по ВСЕМ
+17 точкам создания `KlippyGtk.Dialog()`, а не на глаз:
+
+| Точка | Кнопки (в порядке добавления) | Кто получал фокус ДО патча |
+|---|---|---|
+| `screen.py:1287` `confirm_save` | Save (OK) / Cancel | **Save** — `SAVE_CONFIG` |
+| `panels/gcodes.py:345` `confirm_print` | **Delete** (REJECT) / Print (OK) / Cancel | **Delete** — стирает файл |
+| `panels/shutdown.py:88` | Host / Printer / Both / Cancel | **первая кнопка выключения** |
+| `panels/splash_screen.py:139` | Cancel / Printer / … | Cancel (уже был первым) |
+| `panels/updater.py:238` | Update (OK) / Cancel | **Update** — на пропатченный чекаут |
+| `panels/updater.py:157` `Recover` | Recover Hard (OK) / Recover Soft / Cancel | **Recover Hard** |
+| `panels/network.py:304` | Forget (OK) / Cancel / Disconnect | **Forget** |
+| `panels/job_status.py:572` `Save Z` | Apply (APPLY) / Cancel | Apply |
+| `panels/job_status.py:588` `Restart` | Restart Print (OK) / Go Back (CANCEL) | **Restart Print** |
+| `panels/job_status.py:627` `Cancel` | Cancel Print (OK) / Go Back (CANCEL) | **Cancel Print** |
+| `screen.py:1326` `_confirm_send_action` | Accept (OK) / Cancel | Accept |
+| `screen.py:619` error modal | Close (CLOSE) | Close — **единственная кнопка** |
+| `panels/base_panel.py:773` идущее обновление | Finish (OK) | Finish — единственная |
+| `ks_includes/widgets/prompts.py:128` | кнопки из gcode-промпта, ответы — **положительные int** (`self.id` с 1) | первая, как задумал автор промпта |
+| `gcodes.py:652`, `job_status.py:1080`, `heatergraph.py:63` | `buttons=None` | кнопок нет вовсе |
+
+### Что делает патч
+
+Одно место в фабрике, после `dialog.show_all()`: если среди кнопок есть
+кнопка с ответом `Gtk.ResponseType.CANCEL` — **она и получает стартовый
+фокус**. Нет такой кнопки — не трогаем ничего.
+
+Почему правило «по `CANCEL`», а не параметр фабрики «какая кнопка получает
+фокус» и не спец-случай для `Save Config`:
+
+- **`CANCEL` — единственный в этой кодовой базе маркер «кнопка, которая
+  ничего не делает».** Все колбэки ответа либо действуют только на
+  `OK`/`APPLY`/`ACCEPT`/`REJECT`, либо проверяют `CANCEL` явно и выходят.
+  Этот же греп уже делался, когда `BackSpace` привязывали к `CANCEL`
+  (`dialog-backspace-exit.patch`), — то есть база под правилом та же самая
+  и уже проверенная.
+- **Фокус — это не активация.** Патч не вызывает ни одного колбэка и не
+  меняет ни одного ответа; он меняет ровно то, куда попадёт `Enter`,
+  нажатый не целясь, и всегда в сторону «разрушительное → безобидное».
+  Поэтому диалоги печати (`job_status.py`), которые на этой машине
+  проверить нечем, он **не может** сломать: единственное последствие —
+  «Cancel Print»/«Restart Print» требуют одной стрелки, а случайный `Enter`
+  над ними больше не отменяет и не перезапускает печать.
+- **Спец-случай на `Save Config` был бы хуже.** Он оставил бы `Delete` в
+  диалоге печати и «выключить хост» в shutdown ровно там, где они и были —
+  под нецелящимся `Enter`.
+- **Диалоги без `CANCEL` остаются как были** — по построению: error modal
+  (`Close`), диалог идущего обновления (`Finish`), три диалога без кнопок и
+  **все gcode-промпты** (`widgets/prompts.py`), чьи ответы — положительные
+  int из собственного счётчика (`self.id` стартует с 1) и потому физически
+  не могут совпасть с отрицательными `Gtk.ResponseType`.
+- **`set_default_response()` / `set_default()` / `set_activates_default()`
+  в кодовой базе нет вообще** (греп 2026-08-01) — то есть `Enter`
+  определяется именно фокусом, и никакой «кнопки по умолчанию» тихо поверх
+  него нет. Это отдельно проверялось, потому что при её наличии патч был бы
+  безвредным no-op'ом.
+
+⚠️ **Фокус ставится ПОСЛЕ `show_all()` намеренно.** GTK засевает фокус окна
+в момент маппинга, всё выставленное раньше затирается. Ставится и
+`dialog.set_focus()`, и `grab_focus()` — проверено скриншотом, а не
+рассуждением.
+
+### Как проверено живьём (2026-08-01, ночь)
+
+| Что | Чем подтверждено |
+|---|---|
+| Фокус стартует на `Cancel` | Скриншот открытого «Save configuration? / Klipper will reboot»: подсвечен **Cancel**. Лог: `KlippyGtk.py:Dialog() - Dialog initial focus set to Cancel` |
+| Цепочка фокуса внутри диалога цела | `Left` → скриншот: подсвечен `Save`. То есть намеренный путь к `Save` — ровно одна стрелка |
+| Ничего не отправлено | `grep -c SAVE_CONFIG` по логу KlipperScreen — **0**; `printer/info` после прогона: `state: ready` |
+| Выход | `BackSpace` → `Dialog dismissed with BackSpace` → `Removing Dialog`, на экране снова `More` |
+
+⚠️ **Честно про охват:** живьём проверен ОДИН диалог (`Save Config`).
+Остальные строки таблицы выше — греп кнопок и колбэков, а не измерение;
+печати на этой машине нет, диалоги `job_status.py` показать нечем.
+Отдельно **статически** (эту машину не заденет вовсе): ветка `zoffset != 0`
+в `confirm_save` кладёт в content-area ещё две кнопки `Save Z Probe` /
+`Save Z Endstop`, обе тоже вызывают `SAVE_CONFIG` и обе стояли бы **перед**
+action-area в цепочке фокуса — то есть при ненулевом Z-офсете фокус
+стартовал бы на них. Тем же правилом это чинится, но увидеть двухкнопочную
+форму на этой машине нельзя.
+
+### Применить на принтере
+
+```
+scp orangepi-display/klipperscreen-patches/dialog-cancel-default-focus.patch root@192.168.11.160:/tmp/ && ssh root@192.168.11.160 'cd /home/ultra/KlipperScreen && git apply /tmp/dialog-cancel-default-focus.patch && python3 -m py_compile ks_includes/KlippyGtk.py && systemctl restart KlipperScreen && echo APPLIED_OK'
+```
+
+Бэкап на приборе: `ks_includes/KlippyGtk.py.bak-before-dialog-focus-and-capture-guard`.
+
+## ✅ slider-capture-status-guard.patch — ПРИМЕНЁН И ПРОВЕРЕН ЖИВЬЁМ (2026-08-01, ночь)
+
+Закрывает п.2 из «🔴 Осталось известным»: **захват слайдера перебивался
+обновлением статуса.** Файлов восемь: `screen.py`,
+`ks_includes/screen_panel.py`, `panels/{fan,limits,pressure_advance,
+retraction,pins,led}.py`.
+
+### Это НЕ теоретическая гонка — она воспроизведена
+
+Очередь утверждала «на практике не воспроизводится (в простое эти поля
+молчат) и данных не теряет». **Первое неверно, второе неверно.** Прогон на
+непропатченном дереве, панель Limits:
+
+1. `Enter` на слайдере `Max Velocity` → `Slider captured at 175`.
+2. С рабочей машины через Moonraker: `SET_VELOCITY_LIMIT VELOCITY=120`.
+3. Лог: `limits.py:update_option() - max_velocity 120.0`. Скриншот:
+   **захваченный (янтарный) слайдер показывает 120.**
+4. Стрелками увожу правку в 129 (`range-capture/adjust 126->129`), с
+   рабочей машины `SET_VELOCITY_LIMIT VELOCITY=175` — скриншот:
+   **на экране 175, правка пользователя стёрта**, захват при этом жив, и
+   никакого признака, что значение подменили, на экране нет.
+
+То есть «в простое поля молчат» — верно ровно до первого сообщения от
+Klipper, а прийти оно может от чего угодно: Mainsail, макрос, слайсер,
+второй человек, сам принтер по ходу печати. И потеря данных — настоящая:
+после подмены `Enter` отправит **чужое** значение (а если оно совпало с
+входным — молча ничего, `applied unchanged`).
+
+### Почему `has_grab()` тут вообще ничего не защищал
+
+`Gtk.Widget.has_grab()` отвечает на вопрос «этот виджет держит **указатель**»
+— то есть «на ручке зажата кнопка мыши». На этой машине мыши нет; правка
+идёт через клавиатурный захват (`_capture_range`, см.
+`slider-dpad-capture.patch`), который никакого grab'а не берёт. Апстримовый
+guard отвечал на вопрос, который тут никто не задаёт.
+
+⚠️ **Настоящий `gtk_grab_add()` на захваченный слайдер рассматривался и
+отвергнут** — он бы «починил» все четыре апстримовых guard'а одной строкой,
+но GTK-grab перенаправляет события в виджет-грабер, а обработчик
+`_key_press_event` висит на **окне**; `Enter`, которым захват отпускается,
+до него мог просто не дойти. Чинить контракт захвата средством, способным
+этот же контракт и сломать, — плохой размен.
+
+### Что делает патч
+
+- `screen.py`: публичный `range_captured(widget)` — «этот слайдер сейчас
+  в клавиатурном захвате?». Приватное состояние `_captured_range` наконец
+  можно спросить снаружи.
+- `ks_includes/screen_panel.py`: `range_is_busy(scale)` =
+  `scale.has_grab() or self._screen.range_captured(scale)`. Один метод на
+  базовом классе вместо шести копий одного и того же `or`; третий способ
+  «держать» слайдер, если появится, учить придётся только здесь.
+- Четыре панели, где guard был (`fan`, `limits`, `pressure_advance`,
+  `retraction`): `has_grab()` → `range_is_busy()`, плюс строка в лог, по
+  которой видно, что обновление пропущено осознанно.
+- **`pins.py` и `led.py`: guard'а не было вообще** — там `set_value()`
+  затирал слайдер даже под мышью (латентный апстрим-баг). Добавлен тот же.
+  В `pins.py` guard обёрнут вокруг трёх строк, а не сделан ранним
+  `return`, — чтобы ветка «нас позвали как обработчик клика»
+  (`if widget is not None`) работала ровно как раньше. В `led.py` —
+  `continue` внутри цикла: пропускается только редактируемый канал,
+  остальные продолжают следовать за принтером, а `self.color_data`
+  присваивается как и раньше (отправка всё равно перечитывает значения со
+  шкал в `update_color_data()`).
+
+### Как проверено живьём (после патча, та же панель Limits)
+
+| Что | Чем подтверждено |
+|---|---|
+| Захват держит значение | `Slider captured at 1500`, стрелками 1500→1522→1544, снаружи `SET_VELOCITY_LIMIT ACCEL=2000` → лог: `max_accel 2000.0` **и следом** `max_accel not applied: slider busy`. Скриншот: на экране по-прежнему **1544**, слайдер янтарный |
+| Панель не «залипает» после захвата | `BackSpace` (отмена) → `1544 restored to 1500`, затем снаружи `ACCEL=1800` → `update_option` отработал нормально, слайдер уехал на 1800 (скриншот) |
+| Ничего не отправлено с экрана | `Sending printer.gcode.script` в логе за весь прогон **не прибавился**: все `SET_VELOCITY_LIMIT` шли curl'ом в Moonraker, а не с панели |
+| Машина возвращена как была | `toolhead.max_accel: 1500.0`, `max_velocity: 175.0` (проверено запросом к Moonraker), `fan.speed: 0.0` |
+
+**`retraction`, `pins`, `led` живьём не проверялись и не могут быть:** в
+`printer.cfg` нет `[firmware_retraction]`, `[output_pin]` и светодиодов.
+Для них — статическая правка тем же одним методом.
+
+### Применить на принтере
+
+```
+scp orangepi-display/klipperscreen-patches/slider-capture-status-guard.patch root@192.168.11.160:/tmp/ && ssh root@192.168.11.160 'cd /home/ultra/KlipperScreen && git apply /tmp/slider-capture-status-guard.patch && python3 -m py_compile screen.py ks_includes/screen_panel.py panels/fan.py panels/limits.py panels/pressure_advance.py panels/retraction.py panels/pins.py panels/led.py && systemctl restart KlipperScreen && echo APPLIED_OK'
+```
+
+Бэкапы на приборе: `<файл>.bak-before-dialog-focus-and-capture-guard` для
+всех восьми файлов.
 
 ## ✅ camera-panel-mpv-deadlock.patch — ПРИМЕНЁН И ПРОВЕРЕН ЖИВЬЁМ (2026-08-01)
 

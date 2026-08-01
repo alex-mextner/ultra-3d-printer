@@ -53,10 +53,10 @@ index d53d64d..8f072d7 100644
  panel: settings
  
 diff --git a/ks_includes/KlippyGtk.py b/ks_includes/KlippyGtk.py
-index 44b1617..025b498 100644
+index 44b1617..80b31d7 100644
 --- a/ks_includes/KlippyGtk.py
 +++ b/ks_includes/KlippyGtk.py
-@@ -284,6 +284,46 @@ class KlippyGtk:
+@@ -284,6 +284,98 @@ class KlippyGtk:
      def dialog_content_decouple(self, widget, event, dialog):
          self.remove_dialog(dialog)
  
@@ -100,10 +100,62 @@ index 44b1617..025b498 100644
 +        dialog.response(Gtk.ResponseType.CANCEL)
 +        return True
 +
++    @staticmethod
++    def dialog_dismiss_button(dialog, buttons):
++        """The button a reflexive Enter is allowed to hit: Cancel, if there is one.
++
++        2026-08-01. A KlippyGtk.Dialog() has no content-area focus of its
++        own in the confirm shape (the content is a Gtk.Label), so GTK seeds
++        focus on the FIRST action-area button -- which in this codebase is
++        the destructive one almost everywhere it matters:
++
++            screen.py confirm_save          Save (runs SAVE_CONFIG, which
++                                            rewrites printer.cfg ON THE
++                                            PRINTER, around the repo, and
++                                            reboots Klipper)
++            panels/gcodes.py confirm_print  Delete (deletes the gcode file)
++            panels/shutdown.py              Host / Printer power off
++            panels/updater.py               Update / Recover Hard
++            panels/network.py               Forget
++            panels/job_status.py            Restart Print / Cancel Print
++
++        On a five-button machine with no touch and no mouse, Enter is the
++        one key a user presses without aiming, and BackSpace (this file's
++        dialog_key_press) is the only other way out. Seeding focus on the
++        no-op button instead makes the unaimed press harmless everywhere
++        at once, and costs exactly one extra arrow press for the deliberate
++        one.
++
++        Deliberately keyed on Gtk.ResponseType.CANCEL rather than on
++        "position in the list" or a per-caller parameter:
++
++        * CANCEL is this codebase's one marker for "the button that does
++          nothing": every response callback either acts only on OK/APPLY/
++          ACCEPT/REJECT, or tests CANCEL explicitly and returns. Focusing it
++          therefore cannot invoke behaviour anywhere -- focus is not
++          activation, and the callbacks were already grepped for this same
++          reason when BackSpace was wired to CANCEL.
++        * Dialogs WITHOUT a CANCEL button are left exactly as they were:
++          the error modal (Close), base_panel.py's update dialog (Finish),
++          both no-button image/graph dialogs, and every klipper-driven
++          prompt in widgets/prompts.py, whose responses are positive ints
++          from its own counter (self.id starts at 1) and so can never
++          collide with the negative Gtk.ResponseType values.
++        * Nothing in this codebase calls set_default_response(),
++          set_default() or set_activates_default() (grepped 2026-08-01), so
++          focus is genuinely what decides where Enter lands; there is no
++          default widget quietly overriding it.
++        """
++        if not buttons:
++            return None
++        if not any(button.get("response") == Gtk.ResponseType.CANCEL for button in buttons):
++            return None
++        return dialog.get_widget_for_response(Gtk.ResponseType.CANCEL)
++
      def Dialog(self, title, buttons, content, callback=None, *args):
          dialog = Gtk.Dialog(
              title=title,
-@@ -322,14 +362,57 @@ class KlippyGtk:
+@@ -322,16 +414,69 @@ class KlippyGtk:
          dialog.connect("response", self.screen.screensaver.reset_timeout)
          dialog.connect("response", self.screen.lock_screen.reset_timeout)
          dialog.connect("response", callback, *args)
@@ -163,7 +215,19 @@ index 44b1617..025b498 100644
 +        content_area.get_style_context().add_class("app_dialog_content")
  
          dialog.show_all()
++        # 2026-08-01: start on the harmless button, not the destructive one --
++        # see dialog_dismiss_button() above for the enumeration of callers and
++        # why CANCEL is the safe key. Done AFTER show_all() on purpose: GTK
++        # seeds a window's focus when it is mapped, so anything set before
++        # that is overwritten.
++        dismiss = self.dialog_dismiss_button(dialog, buttons)
++        if dismiss is not None:
++            dialog.set_focus(dismiss)
++            dismiss.grab_focus()
++            logging.info(f"Dialog initial focus set to {dismiss.get_label()}")
          # Change cursor to blank
+         self.set_cursor(show=self.screen.show_cursor, window=dialog.get_window())
+ 
 diff --git a/ks_includes/config.py b/ks_includes/config.py
 index 9eddbf8..3f275de 100644
 --- a/ks_includes/config.py
@@ -196,6 +260,36 @@ index 9eddbf8..3f275de 100644
                  )
              elif section.startswith("printer "):
                  bools = (
+diff --git a/ks_includes/screen_panel.py b/ks_includes/screen_panel.py
+index 9c71eb9..59acdf8 100644
+--- a/ks_includes/screen_panel.py
++++ b/ks_includes/screen_panel.py
+@@ -43,6 +43,25 @@ class ScreenPanel:
+         adj = scroll.get_vadjustment()
+         adj.set_value(adj.get_upper() - adj.get_page_size())
+ 
++    def range_is_busy(self, scale):
++        """True while the user is actively editing this slider -- do not set_value() on it.
++
++        2026-08-01. Upstream guards every slider's status-update path with
++        `scale.has_grab()`, which covers exactly one way of editing: a mouse
++        button held down on the handle. This machine has no mouse and no
++        touch; sliders are edited with the D-pad capture added the same day
++        (Enter captures, arrows move, Enter applies), which takes no pointer
++        grab at all -- so on this machine that guard was answering a question
++        nobody was asking, and an incoming notify_status_update overwrote the
++        value being edited. Reproduced live on Limits, see
++        KlipperScreen.range_captured() for the measurement.
++
++        One helper on the base class instead of six copies of the same `or`:
++        every panel that owns a Gtk.Scale inherits it, and a future third way
++        of holding a slider only has to be taught here.
++        """
++        return scale.has_grab() or self._screen.range_captured(scale)
++
+     def emergency_stop(self, widget):
+         if self._config.get_main_config().getboolean("confirm_estop", False):
+             self._screen._confirm_send_action(
 diff --git a/ks_includes/sdbus_nm.py b/ks_includes/sdbus_nm.py
 index 80d2481..e1d8716 100644
 --- a/ks_includes/sdbus_nm.py
@@ -1283,7 +1377,7 @@ index 858ea24..119ea59 100644
          filament_sensors = self._printer.get_filament_sensors()
          sensors = Gtk.Grid(valign=Gtk.Align.CENTER, row_spacing=5, column_spacing=5)
 diff --git a/panels/fan.py b/panels/fan.py
-index 1cfe7d0..0ea3703 100644
+index 1cfe7d0..8d428da 100644
 --- a/panels/fan.py
 +++ b/panels/fan.py
 @@ -22,6 +22,20 @@ class Panel(ScreenPanel):
@@ -1307,7 +1401,19 @@ index 1cfe7d0..0ea3703 100644
          scroll.add(self.labels["devices"])
  
          self.content.add(scroll)
-@@ -67,7 +81,15 @@ class Panel(ScreenPanel):
+@@ -39,7 +53,10 @@ class Panel(ScreenPanel):
+             return
+ 
+         if self.devices[fan]["changeable"] is True:
+-            if self.devices[fan]["scale"].has_grab():
++            # 2026-08-01: was has_grab() alone (mouse-only). range_is_busy()
++            # also covers the D-pad capture -- see ks_includes/screen_panel.py.
++            if self.range_is_busy(self.devices[fan]["scale"]):
++                logging.info(f"{fan} speed not applied: slider busy")
+                 return
+             self.devices[fan]["speed"] = round(float(speed) * 100)
+             self.devices[fan]["scale"].disconnect_by_func(self.set_fan_speed)
+@@ -67,7 +84,15 @@ class Panel(ScreenPanel):
          name.set_markup(f"\n<big><b>{fan_name}</b></big>\n")
  
          fan_col = Gtk.Box(spacing=5)
@@ -1666,7 +1772,7 @@ index 4e0c01a..dc800ce 100644
              max_width = self._screen.width * 0.9
              max_height = self._screen.height / 4
 diff --git a/panels/led.py b/panels/led.py
-index b06874b..47709b6 100644
+index b06874b..e08068a 100644
 --- a/panels/led.py
 +++ b/panels/led.py
 @@ -95,7 +95,17 @@ class Panel(ScreenPanel):
@@ -1734,8 +1840,23 @@ index b06874b..47709b6 100644
          for i, key in enumerate(self.presets):
              logging.info(f"Adding preset: {key}")
              preview = ColorPreviewArea(size=self.da_size)
+@@ -171,6 +202,14 @@ class Panel(ScreenPanel):
+ 
+     def update_scales(self, color_data):
+         for idx in self.scales:
++            # 2026-08-01: same missing busy guard as pins.py -- skip only the
++            # channel being edited, the others still follow the printer.
++            # color_data below is left assigned unconditionally on purpose:
++            # update_color_data() reads the values back off the scales when
++            # something is actually sent, so the send path stays consistent
++            # with what is on screen.
++            if self.range_is_busy(self.scales[idx]):
++                continue
+             self.scales[idx].set_value(int(color_data[idx] * 255))
+         self.color_data = color_data
+ 
 diff --git a/panels/limits.py b/panels/limits.py
-index 487c56a..a5372a4 100644
+index 487c56a..8bad2fb 100644
 --- a/panels/limits.py
 +++ b/panels/limits.py
 @@ -54,6 +54,45 @@ class Panel(ScreenPanel):
@@ -1784,7 +1905,20 @@ index 487c56a..a5372a4 100644
          scroll.add(self.grid)
          self.content.add(scroll)
          self.content.show_all()
-@@ -112,10 +151,36 @@ class Panel(ScreenPanel):
+@@ -73,7 +112,11 @@ class Panel(ScreenPanel):
+             logging.debug("not in self limits")
+             return
+ 
+-        if self.limits[option]["scale"].has_grab():
++        # 2026-08-01: was has_grab() alone, which only knows about a mouse
++        # button held on the handle. range_is_busy() also covers the D-pad
++        # capture -- see ks_includes/screen_panel.py.
++        if self.range_is_busy(self.limits[option]["scale"]):
++            logging.info(f"{option} not applied: slider busy")
+             return
+         if option == "minimum_cruise_ratio" and value < 1:
+             self.values[option] = int(value * 100)
+@@ -112,10 +155,36 @@ class Panel(ScreenPanel):
          adj = Gtk.Adjustment(option["value"], 1, max_value, 1, 5, 0)
          scale = Gtk.Scale(adjustment=adj, digits=0, hexpand=True, has_origin=True)
          scale.get_style_context().add_class("option_slider")
@@ -2540,7 +2674,7 @@ index 282c959..e8f0c7a 100644
      def clear(self, widget):
          self.tb.set_text("")
 diff --git a/panels/pins.py b/panels/pins.py
-index 311a714..518811b 100644
+index 311a714..df55f9d 100644
 --- a/panels/pins.py
 +++ b/panels/pins.py
 @@ -20,6 +20,18 @@ class Panel(ScreenPanel):
@@ -2581,6 +2715,28 @@ index 311a714..518811b 100644
              min_btn.set_hexpand(False)
              min_btn.connect("clicked", self.update_pin_value, pin, 0)
              pin_col = Gtk.Box(spacing=5)
+@@ -114,9 +136,18 @@ class Panel(ScreenPanel):
+         if pin not in self.devices:
+             return
+         if "scale" in self.devices[pin]:
+-            self.devices[pin]["scale"].disconnect_by_func(self.set_output_pin)
+-            self.devices[pin]["scale"].set_value(round(float(value) * 100))
+-            self.devices[pin]["scale"].connect("button-release-event", self.set_output_pin, pin)
++            # 2026-08-01: this path had NO busy guard at all, not even
++            # upstream's has_grab() -- a status update overwrote the slider
++            # even while a mouse button was held on it. Guarded here the same
++            # way as fan/limits/pressure_advance/retraction; wrapped rather
++            # than early-returned so the widget-is-not-None branch below (the
++            # click handler path) keeps working exactly as before.
++            if not self.range_is_busy(self.devices[pin]["scale"]):
++                self.devices[pin]["scale"].disconnect_by_func(self.set_output_pin)
++                self.devices[pin]["scale"].set_value(round(float(value) * 100))
++                self.devices[pin]["scale"].connect(
++                    "button-release-event", self.set_output_pin, pin
++                )
+         elif "switch" in self.devices[pin]:
+             self.devices[pin]["switch"].set_active(value == 1)
+         if widget is not None:
 diff --git a/panels/power.py b/panels/power.py
 index e69ac27..5f5acfc 100644
 --- a/panels/power.py
@@ -2605,7 +2761,7 @@ index e69ac27..5f5acfc 100644
  
          self.content.add(scroll)
 diff --git a/panels/pressure_advance.py b/panels/pressure_advance.py
-index fa2b68d..a7321c9 100644
+index fa2b68d..6e28764 100644
 --- a/panels/pressure_advance.py
 +++ b/panels/pressure_advance.py
 @@ -79,9 +79,36 @@ class Panel(ScreenPanel):
@@ -2646,8 +2802,20 @@ index fa2b68d..a7321c9 100644
  
          item = Gtk.Grid()
          item.attach(name_label, 0, 0, 2, 1)
+@@ -134,7 +161,10 @@ class Panel(ScreenPanel):
+         if option not in self.list:
+             return
+ 
+-        if self.list[option]["scale"].has_grab():
++        # 2026-08-01: was has_grab() alone (mouse-only). range_is_busy() also
++        # covers the D-pad capture -- see ks_includes/screen_panel.py.
++        if self.range_is_busy(self.list[option]["scale"]):
++            logging.info(f"{option} not applied: slider busy")
+             return
+ 
+         self.values[option] = float(value)
 diff --git a/panels/retraction.py b/panels/retraction.py
-index e798e5e..ff6683e 100644
+index e798e5e..73fdfe0 100644
 --- a/panels/retraction.py
 +++ b/panels/retraction.py
 @@ -68,6 +68,37 @@ class Panel(ScreenPanel):
@@ -2688,7 +2856,19 @@ index e798e5e..ff6683e 100644
          scroll.add(self.grid)
  
          self.content.add(scroll)
-@@ -122,7 +153,22 @@ class Panel(ScreenPanel):
+@@ -86,7 +117,10 @@ class Panel(ScreenPanel):
+         if option not in self.list:
+             return
+ 
+-        if self.list[option]["scale"].has_grab():
++        # 2026-08-01: was has_grab() alone (mouse-only). range_is_busy() also
++        # covers the D-pad capture -- see ks_includes/screen_panel.py.
++        if self.range_is_busy(self.list[option]["scale"]):
++            logging.info(f"{option} not applied: slider busy")
+             return
+ 
+         self.values[option] = float(value)
+@@ -122,7 +156,22 @@ class Panel(ScreenPanel):
          scale.get_style_context().add_class("option_slider")
          scale.connect("button-release-event", self.set_opt_value, option)
  
@@ -3359,7 +3539,7 @@ index 573180a..68e3517 100644
          self.content.add(grid)
  
 diff --git a/screen.py b/screen.py
-index 4efa3ac..d7ab424 100755
+index 4efa3ac..5399e3d 100755
 --- a/screen.py
 +++ b/screen.py
 @@ -101,7 +101,17 @@ class KlipperScreen(Gtk.ApplicationWindow):
@@ -3643,7 +3823,7 @@ index 4efa3ac..d7ab424 100755
          while len(self._cur_panels) > 1:
              self._remove_current_panel()
              del self._cur_panels[-1]
-@@ -1425,10 +1667,738 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -1425,10 +1667,761 @@ class KlipperScreen(Gtk.ApplicationWindow):
  
      def _key_press_event(self, widget, event):
          keyval_name = Gdk.keyval_name(event.keyval)
@@ -4081,6 +4261,29 @@ index 4efa3ac..d7ab424 100755
 +            f"Slider captured at {self._captured_range_entry_value:g}, "
 +            f"d-pad step {self._range_step(widget):g}"
 +        )
++
++    def range_captured(self, widget):
++        """Is this exact slider currently held in D-pad editing mode?
++
++        The keyboard counterpart of Gtk.Widget.has_grab(), and the reason it
++        has to exist: has_grab() answers only for a POINTER grab, i.e. "a
++        mouse button is down on this widget". Every panel that owns a slider
++        guards its status-update path with has_grab() so that an incoming
++        notify_status_update cannot yank the handle out from under a finger
++        -- but on this machine there is no finger, the edit is a keyboard
++        capture (_capture_range), and that guard saw nothing.
++
++        Reproduced live 2026-08-01 on Limits before this existed: slider
++        captured at 175, arrowed to 129, then SET_VELOCITY_LIMIT VELOCITY=175
++        sent from Moonraker -- limits.update_option() ran, set_value() landed
++        on the captured widget, and the screen showed 175 with the capture
++        still active and no indication the edit had been discarded.
++
++        Panels call ScreenPanel.range_is_busy(), which ORs this with
++        has_grab(); this method is what makes the private capture state
++        askable from outside.
++        """
++        return self._captured_range is not None and self._captured_range is widget
 +
 +    def _forget_range_capture(self):
 +        # Drop the capture state without sending or restoring anything.
