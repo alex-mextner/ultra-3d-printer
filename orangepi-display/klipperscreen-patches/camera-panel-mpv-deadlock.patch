@@ -1,5 +1,5 @@
 diff --git a/panels/camera.py b/panels/camera.py
-index 186b542..2a6fa6c 100644
+index 186b542..18c2983 100644
 --- a/panels/camera.py
 +++ b/panels/camera.py
 @@ -1,27 +1,246 @@
@@ -258,7 +258,7 @@ index 186b542..2a6fa6c 100644
                  image_name="camera",
                  label=cam["name"],
                  style=f"color{i % 4 + 1}",
-@@ -29,97 +248,104 @@ class Panel(ScreenPanel):
+@@ -29,97 +248,123 @@ class Panel(ScreenPanel):
                  position=Gtk.PositionType.LEFT,
                  lines=1,
              )
@@ -423,8 +423,27 @@ index 186b542..2a6fa6c 100644
 +        return max(64, self._gtk.content_width), max(64, self._gtk.content_height)
 +
 +    def visible(self):
-+        # Called from the worker thread; only reads plain attributes.
-+        return not self._screen.screensaver.is_showing
++        # Called from the worker thread, so it only reads plain attributes and
++        # never touches GTK. Two independent stop conditions, because a worker
++        # that outlives its panel is a 14%-of-a-core leak that would survive
++        # until the service restarts:
++        #
++        #   * the screensaver is up -- DPMS blanking raises it (screen.py
++        #     check_dpms_state), so this also covers a physically dark screen,
++        #     and nobody is looking at the frames either way;
++        #   * this panel is no longer the one on screen. deactivate() covers
++        #     that today on every path checked (BackSpace and Escape both reach
++        #     _remove_current_panel() via _menu_go_back, and reload_panels()
++        #     goes through _remove_all_panels()), but that is screen.py's
++        #     lifecycle discipline, not ours. Checking it here keeps the
++        #     guarantee local to the panel, so no future refactor upstream can
++        #     silently leave a thread polling forever.
++        panels = self._screen._cur_panels
++        return (
++            not self._screen.screensaver.is_showing
++            and bool(panels)
++            and panels[-1] == "camera"
++        )
 +
 +    def on_frame(self, pixbuf):
 +        self.image.set_from_pixbuf(pixbuf)
