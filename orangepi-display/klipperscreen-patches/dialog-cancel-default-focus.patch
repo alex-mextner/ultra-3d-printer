@@ -1,0 +1,78 @@
+--- a/ks_includes/KlippyGtk.py
++++ b/ks_includes/KlippyGtk.py
+@@ -324,6 +324,58 @@
+         dialog.response(Gtk.ResponseType.CANCEL)
+         return True
+ 
++    @staticmethod
++    def dialog_dismiss_button(dialog, buttons):
++        """The button a reflexive Enter is allowed to hit: Cancel, if there is one.
++
++        2026-08-01. A KlippyGtk.Dialog() has no content-area focus of its
++        own in the confirm shape (the content is a Gtk.Label), so GTK seeds
++        focus on the FIRST action-area button -- which in this codebase is
++        the destructive one almost everywhere it matters:
++
++            screen.py confirm_save          Save (runs SAVE_CONFIG, which
++                                            rewrites printer.cfg ON THE
++                                            PRINTER, around the repo, and
++                                            reboots Klipper)
++            panels/gcodes.py confirm_print  Delete (deletes the gcode file)
++            panels/shutdown.py              Host / Printer power off
++            panels/updater.py               Update / Recover Hard
++            panels/network.py               Forget
++            panels/job_status.py            Restart Print / Cancel Print
++
++        On a five-button machine with no touch and no mouse, Enter is the
++        one key a user presses without aiming, and BackSpace (this file's
++        dialog_key_press) is the only other way out. Seeding focus on the
++        no-op button instead makes the unaimed press harmless everywhere
++        at once, and costs exactly one extra arrow press for the deliberate
++        one.
++
++        Deliberately keyed on Gtk.ResponseType.CANCEL rather than on
++        "position in the list" or a per-caller parameter:
++
++        * CANCEL is this codebase's one marker for "the button that does
++          nothing": every response callback either acts only on OK/APPLY/
++          ACCEPT/REJECT, or tests CANCEL explicitly and returns. Focusing it
++          therefore cannot invoke behaviour anywhere -- focus is not
++          activation, and the callbacks were already grepped for this same
++          reason when BackSpace was wired to CANCEL.
++        * Dialogs WITHOUT a CANCEL button are left exactly as they were:
++          the error modal (Close), base_panel.py's update dialog (Finish),
++          both no-button image/graph dialogs, and every klipper-driven
++          prompt in widgets/prompts.py, whose responses are positive ints
++          from its own counter (self.id starts at 1) and so can never
++          collide with the negative Gtk.ResponseType values.
++        * Nothing in this codebase calls set_default_response(),
++          set_default() or set_activates_default() (grepped 2026-08-01), so
++          focus is genuinely what decides where Enter lands; there is no
++          default widget quietly overriding it.
++        """
++        if not buttons:
++            return None
++        if not any(button.get("response") == Gtk.ResponseType.CANCEL for button in buttons):
++            return None
++        return dialog.get_widget_for_response(Gtk.ResponseType.CANCEL)
++
+     def Dialog(self, title, buttons, content, callback=None, *args):
+         dialog = Gtk.Dialog(
+             title=title,
+@@ -415,6 +467,16 @@
+         content_area.get_style_context().add_class("app_dialog_content")
+ 
+         dialog.show_all()
++        # 2026-08-01: start on the harmless button, not the destructive one --
++        # see dialog_dismiss_button() above for the enumeration of callers and
++        # why CANCEL is the safe key. Done AFTER show_all() on purpose: GTK
++        # seeds a window's focus when it is mapped, so anything set before
++        # that is overwritten.
++        dismiss = self.dialog_dismiss_button(dialog, buttons)
++        if dismiss is not None:
++            dialog.set_focus(dismiss)
++            dismiss.grab_focus()
++            logging.info(f"Dialog initial focus set to {dismiss.get_label()}")
+         # Change cursor to blank
+         self.set_cursor(show=self.screen.show_cursor, window=dialog.get_window())
+ 

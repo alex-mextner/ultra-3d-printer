@@ -1,0 +1,158 @@
+--- a/screen.py
++++ b/screen.py
+@@ -2099,6 +2099,29 @@
+             f"d-pad step {self._range_step(widget):g}"
+         )
+ 
++    def range_captured(self, widget):
++        """Is this exact slider currently held in D-pad editing mode?
++
++        The keyboard counterpart of Gtk.Widget.has_grab(), and the reason it
++        has to exist: has_grab() answers only for a POINTER grab, i.e. "a
++        mouse button is down on this widget". Every panel that owns a slider
++        guards its status-update path with has_grab() so that an incoming
++        notify_status_update cannot yank the handle out from under a finger
++        -- but on this machine there is no finger, the edit is a keyboard
++        capture (_capture_range), and that guard saw nothing.
++
++        Reproduced live 2026-08-01 on Limits before this existed: slider
++        captured at 175, arrowed to 129, then SET_VELOCITY_LIMIT VELOCITY=175
++        sent from Moonraker -- limits.update_option() ran, set_value() landed
++        on the captured widget, and the screen showed 175 with the capture
++        still active and no indication the edit had been discarded.
++
++        Panels call ScreenPanel.range_is_busy(), which ORs this with
++        has_grab(); this method is what makes the private capture state
++        askable from outside.
++        """
++        return self._captured_range is not None and self._captured_range is widget
++
+     def _forget_range_capture(self):
+         # Drop the capture state without sending or restoring anything.
+         widget = self._captured_range
+--- a/ks_includes/screen_panel.py
++++ b/ks_includes/screen_panel.py
+@@ -43,6 +43,25 @@
+         adj = scroll.get_vadjustment()
+         adj.set_value(adj.get_upper() - adj.get_page_size())
+ 
++    def range_is_busy(self, scale):
++        """True while the user is actively editing this slider -- do not set_value() on it.
++
++        2026-08-01. Upstream guards every slider's status-update path with
++        `scale.has_grab()`, which covers exactly one way of editing: a mouse
++        button held down on the handle. This machine has no mouse and no
++        touch; sliders are edited with the D-pad capture added the same day
++        (Enter captures, arrows move, Enter applies), which takes no pointer
++        grab at all -- so on this machine that guard was answering a question
++        nobody was asking, and an incoming notify_status_update overwrote the
++        value being edited. Reproduced live on Limits, see
++        KlipperScreen.range_captured() for the measurement.
++
++        One helper on the base class instead of six copies of the same `or`:
++        every panel that owns a Gtk.Scale inherits it, and a future third way
++        of holding a slider only has to be taught here.
++        """
++        return scale.has_grab() or self._screen.range_captured(scale)
++
+     def emergency_stop(self, widget):
+         if self._config.get_main_config().getboolean("confirm_estop", False):
+             self._screen._confirm_send_action(
+--- a/panels/fan.py
++++ b/panels/fan.py
+@@ -53,7 +53,10 @@
+             return
+ 
+         if self.devices[fan]["changeable"] is True:
+-            if self.devices[fan]["scale"].has_grab():
++            # 2026-08-01: was has_grab() alone (mouse-only). range_is_busy()
++            # also covers the D-pad capture -- see ks_includes/screen_panel.py.
++            if self.range_is_busy(self.devices[fan]["scale"]):
++                logging.info(f"{fan} speed not applied: slider busy")
+                 return
+             self.devices[fan]["speed"] = round(float(speed) * 100)
+             self.devices[fan]["scale"].disconnect_by_func(self.set_fan_speed)
+--- a/panels/limits.py
++++ b/panels/limits.py
+@@ -112,7 +112,11 @@
+             logging.debug("not in self limits")
+             return
+ 
+-        if self.limits[option]["scale"].has_grab():
++        # 2026-08-01: was has_grab() alone, which only knows about a mouse
++        # button held on the handle. range_is_busy() also covers the D-pad
++        # capture -- see ks_includes/screen_panel.py.
++        if self.range_is_busy(self.limits[option]["scale"]):
++            logging.info(f"{option} not applied: slider busy")
+             return
+         if option == "minimum_cruise_ratio" and value < 1:
+             self.values[option] = int(value * 100)
+--- a/panels/pressure_advance.py
++++ b/panels/pressure_advance.py
+@@ -161,7 +161,10 @@
+         if option not in self.list:
+             return
+ 
+-        if self.list[option]["scale"].has_grab():
++        # 2026-08-01: was has_grab() alone (mouse-only). range_is_busy() also
++        # covers the D-pad capture -- see ks_includes/screen_panel.py.
++        if self.range_is_busy(self.list[option]["scale"]):
++            logging.info(f"{option} not applied: slider busy")
+             return
+ 
+         self.values[option] = float(value)
+--- a/panels/retraction.py
++++ b/panels/retraction.py
+@@ -117,7 +117,10 @@
+         if option not in self.list:
+             return
+ 
+-        if self.list[option]["scale"].has_grab():
++        # 2026-08-01: was has_grab() alone (mouse-only). range_is_busy() also
++        # covers the D-pad capture -- see ks_includes/screen_panel.py.
++        if self.range_is_busy(self.list[option]["scale"]):
++            logging.info(f"{option} not applied: slider busy")
+             return
+ 
+         self.values[option] = float(value)
+--- a/panels/pins.py
++++ b/panels/pins.py
+@@ -136,9 +136,18 @@
+         if pin not in self.devices:
+             return
+         if "scale" in self.devices[pin]:
+-            self.devices[pin]["scale"].disconnect_by_func(self.set_output_pin)
+-            self.devices[pin]["scale"].set_value(round(float(value) * 100))
+-            self.devices[pin]["scale"].connect("button-release-event", self.set_output_pin, pin)
++            # 2026-08-01: this path had NO busy guard at all, not even
++            # upstream's has_grab() -- a status update overwrote the slider
++            # even while a mouse button was held on it. Guarded here the same
++            # way as fan/limits/pressure_advance/retraction; wrapped rather
++            # than early-returned so the widget-is-not-None branch below (the
++            # click handler path) keeps working exactly as before.
++            if not self.range_is_busy(self.devices[pin]["scale"]):
++                self.devices[pin]["scale"].disconnect_by_func(self.set_output_pin)
++                self.devices[pin]["scale"].set_value(round(float(value) * 100))
++                self.devices[pin]["scale"].connect(
++                    "button-release-event", self.set_output_pin, pin
++                )
+         elif "switch" in self.devices[pin]:
+             self.devices[pin]["switch"].set_active(value == 1)
+         if widget is not None:
+--- a/panels/led.py
++++ b/panels/led.py
+@@ -202,6 +202,14 @@
+ 
+     def update_scales(self, color_data):
+         for idx in self.scales:
++            # 2026-08-01: same missing busy guard as pins.py -- skip only the
++            # channel being edited, the others still follow the printer.
++            # color_data below is left assigned unconditionally on purpose:
++            # update_color_data() reads the values back off the scales when
++            # something is actually sent, so the send path stays consistent
++            # with what is on screen.
++            if self.range_is_busy(self.scales[idx]):
++                continue
+             self.scales[idx].set_value(int(color_data[idx] * 255))
+         self.color_data = color_data
+ 
