@@ -1,0 +1,191 @@
+--- a/screen.py
++++ b/screen.py
+@@ -1698,8 +1698,50 @@
+             self._reset_focus_clear_timeout()
+             return True
+         if keyval_name == "Escape":
+-            self._key_trace_branch = "escape/go-home"
+-            self._menu_go_back(home=True)
++            # 2026-08-01, queue item 13: "Escape does not close the on-screen
++            # numpad". Escape went straight to _menu_go_back(home=True),
++            # which never asks the current panel whether it has something of
++            # its own to dismiss. On main_menu with the temperature numpad
++            # open that is a dead end: the numpad is
++            # main_menu.labels["keypad"], attached into the main_menu grid
++            # rather than pushed onto _cur_panels, so "go home" is already
++            # home -- depth stays 1, _menu_go_back takes its root-level early
++            # return, and the keypad stays on screen.
++            #
++            # This CORRECTS the fix sketched in the queue item, which
++            # proposed calling self.remove_keyboard() here. That cannot
++            # work, for two independent reasons measured in the source:
++            # _menu_go_back() already calls remove_keyboard() on its very
++            # first line, and remove_keyboard() only ever touches
++            # self.keyboard -- the full on-screen text keyboard built by
++            # show_keyboard(). The temperature numpad is a different widget
++            # and self.keyboard is None the whole time it is up, which is
++            # also precisely why backspace-numpad-guard.patch works.
++            #
++            # The path that does work is the one BackSpace already uses:
++            # ask the panel first (main_menu.back() -> hide_numpad()), and
++            # only go home if the panel had nothing to dismiss. Checked
++            # one by one before making this change: all nine panels that
++            # define back() -- bed_mesh, gcode_macros, gcodes, led,
++            # main_menu, move_advanced, network, spool_editor, system --
++            # return False unless a real overlay/sub-state of theirs is
++            # open, so Escape keeps its "get me all the way out" meaning
++            # everywhere else. backspace-numpad-guard.patch is untouched:
++            # it only relaxed the guard on the BackSpace branch below, and
++            # that branch is not modified.
++            panel = self.panels.get(self._cur_panels[-1]) if self._cur_panels else None
++            dismissed = False
++            if panel is not None and hasattr(panel, "back"):
++                try:
++                    dismissed = bool(panel.back())
++                except Exception:
++                    logging.exception("Panel back() failed on Escape")
++            if dismissed:
++                self._key_trace_branch = "escape/panel-back"
++                handled = True
++            else:
++                self._key_trace_branch = "escape/go-home"
++                self._menu_go_back(home=True)
+         elif keyval_name == "BackSpace" and self.keyboard is None:
+             self._key_trace_branch = "backspace/panel-back"
+             self.base_panel.back()
+@@ -1899,6 +1941,21 @@
+             for child in widget.get_children():
+                 self._dpad_scrollables(child, found, depth + 1)
+ 
++    def _scrollable_ancestor(self, widget, candidates):
++        # Which of the collected scrolled windows actually contains this
++        # widget, so a reveal scrolls the viewport the widget is really in.
++        # Returns None when the newly focused widget sits outside every
++        # list -- e.g. the console's command entry, which is a sibling of
++        # the log, not a row inside it. Scrolling `target` in that case
++        # would move a viewport the user is not even in.
++        for sw in candidates:
++            try:
++                if widget is sw or widget.is_ancestor(sw):
++                    return sw
++            except Exception:
++                continue
++        return None
++
+     def _dpad_reveal_focus(self, sw):
+         # Keep the newly focused row on screen. GTK3's own scroll-to-focus
+         # is not dependable across the container nestings the panels use
+@@ -1955,12 +2012,44 @@
+                 self._key_trace_branch = "gtk-default(no overflowing scrollable)"
+                 return False
+             direction = Gtk.DirectionType.DOWN if down else Gtk.DirectionType.UP
+-            if target.child_focus(direction):
+-                self._dpad_reveal_focus(target)
+-                self._key_trace_branch = "dpad-scroll/child_focus"
+-                return True
+-            # Either the list has no focusable children at all, or focus is
+-            # already on the last/first one -- move the viewport itself so
++            # Move the focus first -- and search the WHOLE visible panel
++            # body, not just the overflowing scrollable.
++            #
++            # 2026-08-01, console focus trap (user: "открыл сейчас консоль и
++            # курсор перестал двигаться, esc работает"). Searching only
++            # inside `target` had two failure modes which together bricked
++            # navigation on panels/console.py:
++            #   * it STEERS focus into the scrollable. The trace caught the
++            #     exact moment -- "Down: focus Button(Clear) -> TextView |
++            #     handled=True via dpad-scroll/child_focus" -- even though
++            #     the widget the user was heading for (the command entry)
++            #     is a SIBLING of the list, not a child of it. So this
++            #     function was not merely eating Up/Down, it was what
++            #     created the trap.
++            #   * once focus was inside, child_focus() had nowhere further
++            #     to go, so every later Up/Down fell through to scrolling
++            #     the viewport and still returned True. Focus could get IN
++            #     but never OUT -- and Left/Right meanwhile went to GTK,
++            #     where the focused widget's own arrow bindings ate them
++            #     (GtkTextView moves its caret, GtkScrolledWindow scrolls).
++            #     On a machine whose only other keys are Enter and Back
++            #     that is a dead panel.
++            # base_panel.content is the whole panel body, so focus can now
++            # cross between a list and its siblings. The "no overflowing
++            # scrollable" early return above is untouched, so this function
++            # stays completely inert on panels that already fit and their
++            # stock GTK arrow navigation is unaffected.
++            content = self.base_panel.content
++            if content is not None and content.child_focus(direction):
++                moved = self.get_focus()
++                if moved is not None and moved is not focus:
++                    reveal = self._scrollable_ancestor(moved, candidates)
++                    if reveal is not None:
++                        self._dpad_reveal_focus(reveal)
++                    self._key_trace_branch = "dpad-scroll/child_focus"
++                    return True
++            # Focus cannot move any further in this direction (or there is
++            # nothing focusable at all) -- move the viewport itself so
+             # long unfocusable content stays readable.
+             adj = target.get_vadjustment()
+             step = max(adj.get_page_size() * 0.8, 40)
+--- a/panels/console.py
++++ b/panels/console.py
+@@ -78,10 +78,60 @@
+         # message. It also restores the at-rest "there is more below" cue that
+         # overlay scrolling removes.
+         sw.set_overlay_scrolling(False)
++        # Second half of the 2026-08-01 focus-trap fix below. Making only
++        # the TextView unfocusable was NOT enough, and the trace said so:
++        #
++        #   Down: focus Button(Clear) -> ScrolledWindow | via dpad-scroll/child_focus
++        #   Right: focus ScrolledWindow -> ScrolledWindow | via gtk-default
++        #
++        # GtkScrolledWindow sets can-focus TRUE on itself and installs its
++        # own key bindings for all four arrows ("scroll-child"), so with the
++        # TextView out of the way it simply became the trap one level up --
++        # same dead end, different widget. Neither of these two widgets is
++        # something a 5-button user can act on, so neither should be a focus
++        # stop; the log stays scrollable through screen.py's _dpad_scroll(),
++        # which moves the vadjustment directly and does not need anything
++        # here to hold focus.
++        sw.set_can_focus(False)
+ 
+         tb = Gtk.TextBuffer()
+         tv = Gtk.TextView(buffer=tb, editable=False, cursor_visible=False)
+         tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
++        # 2026-08-01 dead-navigation fix (user: "открыл сейчас консоль и
++        # курсор перестал двигаться, esc работает"). This log view is a
++        # ONE-WAY FOCUS TRAP as long as it is focusable, and the key trace
++        # caught the whole thing:
++        #
++        #   Down: focus Button(Clear) -> TextView | via dpad-scroll/child_focus
++        #   Down: focus TextView -> TextView      | via dpad-scroll/adjustment
++        #   Left: focus TextView -> TextView      | via gtk-default
++        #
++        # screen.py's _dpad_scroll() puts focus IN here (child_focus on the
++        # ScrolledWindow, and this TextView is its only focusable child).
++        # After that nothing can get focus back out:
++        #   * Up/Down go to _dpad_scroll again -- child_focus now fails (no
++        #     other focusable child) so it scrolls the adjustment and
++        #     returns handled=True. Focus never moves.
++        #   * Left/Right fall through to GTK, whose GtkTextView "move-cursor"
++        #     binding consumes them to move the insertion caret -- which is
++        #     invisible here (cursor_visible=False) and pointless (this
++        #     buffer is editable=False). Focus never moves.
++        #   * Return does nothing, the buffer is read-only.
++        # So the entry field, Send, Auto-scroll and Clear became unreachable
++        # and the focus highlight stopped existing at all (this theme styles
++        # focus only via `button:focus`, and a TextView is not a button --
++        # which is exactly the "курсор перестал двигаться" the user saw).
++        # BackSpace/Escape still worked because they are explicit branches
++        # ahead of the arrow handling in _key_press_event -- the same
++        # asymmetry that fingered dead-arrow-keys-focus-restore.patch.
++        #
++        # There is nothing a user can DO while this widget holds focus, so
++        # it should never be a focus stop. Making it unfocusable both keeps
++        # _dpad_scroll from steering focus in here and stops GtkTextView
++        # from eating arrows; the log stays scrollable, because with no
++        # focusable child _dpad_scroll falls straight through to moving the
++        # viewport adjustment.
++        tv.set_can_focus(False)
+         # Small gutter so glyphs never touch the slider / screen edge; the
+         # timestamp column already gives the left side visual breathing room.
+         tv.set_right_margin(4)
