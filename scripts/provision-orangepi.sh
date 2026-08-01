@@ -40,6 +40,32 @@ apt-get update -qq
 apt-get install -y git curl python3 python3-pip
 
 echo
+echo "== 1b. udev: FTDI latency_timer = 1 =="
+# Зачем: у FTDI-мостов (FT232R встроен в саму плату Freaduino/RAMPS) дефолтный
+# latency_timer = 16 мс. На этой машине именно он в связке с нестабильным USB-хабом
+# вешал avrdude на middle-of-write при прошивке MCU - лечилось разовым
+# `echo 1 > .../latency_timer` (см. docs/printer-status.md, раздел «Прошивка MCU»).
+# Разовая запись живёт до переподключения кабеля/перезагрузки; правило делает её
+# постоянной. Klipper при 16 мс работает штатно, так что это профилактика для
+# следующей прошивки, а не исправление текущей поломки.
+# ATTRS{} (а не ATTR{}) - потому что idVendor лежит на РОДИТЕЛЬСКОМ usb-устройстве,
+# а latency_timer - на самом ttyUSB; на одном уровне их не сматчить.
+cat > /etc/udev/rules.d/99-ftdi-latency.rules <<'EOF'
+# FTDI USB-serial: снизить latency_timer с дефолтных 16мс до 1мс.
+# 0403 = FTDI. Покрывает FT232R (мост на плате Freaduino/RAMPS) и родню.
+ACTION=="add", SUBSYSTEM=="usb-serial", DRIVER=="ftdi_sio", ATTR{latency_timer}="1"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTR{device/latency_timer}="1"
+EOF
+udevadm control --reload-rules
+# Применить к уже воткнутому устройству, не дожидаясь передёргивания кабеля.
+# `|| true`: если ttyUSB сейчас нет (плата не подключена) - это не ошибка провижена.
+udevadm trigger --subsystem-match=usb-serial --action=add || true
+for lt in /sys/bus/usb-serial/devices/*/latency_timer; do
+    [ -e "$lt" ] || continue
+    echo "  $lt = $(cat "$lt")"
+done
+
+echo
 echo "== 2. KIAUH (Klipper Install And Update Helper) =="
 # ВАЖНО: клонировать и запускать KIAUH нужно от ultra, НЕ от root - весь стек
 # (klipper.service User=ultra, printer_data/config, deploy.sh) живёт в

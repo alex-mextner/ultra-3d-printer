@@ -5,10 +5,10 @@
 ## С ЧЕГО НАЧАТЬ МИНИ-СЕССИЮ (читать это первым)
 
 1. **Проверь, что живо**: `curl -s http://192.168.11.160:7125/printer/info` → ожидается `"state":"ready"`.
-2. **Не доверяй снимку конфига из этого файла вслепую** — если правишь `printer.cfg`, сначала прочитай живой: `ssh ultra@192.168.11.160 "cat ~/printer_data/config/printer.cfg"`. Снимок ниже актуален на 2026-07-29, но расходится при любой правке.
-3. **Правило правки конфига**: перед изменением — `cp printer.cfg printer.cfg.bak.$(date +%Y%m%d%H%M%S)`, после — `curl -X POST .../printer/restart` и обязательно проверить, что вернулось `ready` (а не `error`). Вставляя новый блок — следи, чтобы маркер вставки не разрезал существующую секцию с многострочным телом (уже ловили такую ошибку, см. раздел про макросы стола).
+2. **Единственный источник истины по конфигу — `printer-configs/printer.cfg` в этом репозитории.** Снимка конфига в этом документе больше НЕТ (был, дважды устаревал, удалён 2026-08-01 — см. раздел «printer.cfg — где искать»). Хочешь убедиться, что на принтере то же самое: `bash scripts/deploy.sh --dry-run` — он покажет diff и ничего не зальёт.
+3. **Правило правки конфига**: править только в `printer-configs/`, выкатывать только `scripts/deploy.sh` (он сам делает бэкап на принтере, рестарт и проверку `ready`). Руками по SSH конфиг не редактировать. Вставляя новый блок — следи, чтобы маркер вставки не разрезал существующую секцию с многострочным телом (уже ловили такую ошибку, см. раздел про макросы стола).
 4. **Инструмент для SSH**: только Bash (Git Bash/MSYS2), НЕ PowerShell — причина описана в `CLAUDE.md` (лежит в корне репозитория, на уровень выше `docs/`). На этом однажды потеряли много времени.
-5. **Секреты** (пароли Wi-Fi/SSH) — только в `Downloads\.env`, в документах их быть не должно.
+5. **Секреты** (пароли Wi-Fi/SSH) — только в `.env` в корне репозитория (файл в `.gitignore`), в документах их быть не должно.
 6. Хосты: принтер `ultra@192.168.11.160` / `root@192.168.11.160`, роутер `root@192.168.11.1` (ключ настроен, пароль не нужен).
 
 ## СОСТОЯНИЕ НА КОНЕЦ СЕССИИ (2026-07-29)
@@ -22,20 +22,21 @@
 - ⚠️ УСТАРЕЛО (2026-07-30): SPI0 на Orange Pi включён — но `/dev/spidev0.0` (`spi-spidev` оверлей) с 2026-07-30 БОЛЬШЕ НЕ СУЩЕСТВУЕТ, снят при установке экрана (`scripts/install-display.sh`), т.к. экран сам занимает SPI0 CS0 напрямую через свой оверлей. См. «ПЛАН: экран + 5 кнопок навигации», подраздел «ПРОГРЕСС (2026-07-30)».
 
 **⚠️ ТЕКУЩЕЕ ФИЗИЧЕСКОЕ СОСТОЯНИЕ — ВАЖНО ДЛЯ БЕЗОПАСНОСТИ:**
-- 🔴 **НЕ ЗАПУСКАТЬ `G28 Y` и `G28 X`, пока не выкачен `scripts/deploy.sh` (по состоянию на 2026-08-01).** На принтере сейчас живёт СТАРЫЙ `[stepper_y]` с `dir_pin: !PF7` — именно он 2026-08-01 увёл каретку ОТ концевика и потребовал аварийной остановки. Исправление (для обеих осей) лежит в репозитории, но не задеплоено. Повторный `G28 Y` на живом конфиге = каретка снова едет в раму на 50 мм/с. По X ещё хуже: там вдобавок не подтверждена сторона концевика. Подробности и порядок безопасной проверки — в разделах «Y — направление мотора» и «X — направление» ниже.
+- ✅ **ДЕПЛОЙ СДЕЛАН — конфиг на принтере и в репозитории идентичны.** Проверено 2026-08-01 13:2x двумя независимыми способами: `bash scripts/deploy.sh --dry-run` → «Изменений нет, деплоить нечего», и прямой `ssh … grep` живого `~/printer_data/config/printer.cfg`. Файл на принтере записан 2026-08-01 02:25, Klipper перезапущен 02:25:09, последний коммит, тронувший `printer-configs/printer.cfg`, — `e8fd74f` (02:23). На машине сейчас: `dir_pin: PF1` (X) / `PF7` (Y) без `!`, `rotation_distance` X = 36, `position_endstop` X = 0, `homing_speed` = 10 на обеих осях. **Прежняя запись «на принтере живёт СТАРЫЙ `[stepper_y]` с `!PF7`, фикс не задеплоен» — БЫЛА ВЕРНА до 02:25 и УДАЛЕНА как устаревшая.**
+- 🔴 **НО `G28 X` и `G28 Y` по-прежнему НЕ ЗАПУСКАТЬ** — причина теперь другая, чем была ночью. Деплой снял только половину: **ни один `G28` за всю историю машины ещё не проходил успешно**, а по X вдобавок не подтверждена физически сторона концевика (`position_endstop: 0` — гипотеза). Подтверждение (2026-08-01 13:2x): `GET /printer/objects/query?toolhead` → `homed_axes: ""`, и в `klippy.log` после рестарта 02:25 нет ни одной команды движения — то есть с момента деплоя ось никто не гонял. Сначала пройти проверку руками из разделов «Y — направление мотора» и «X — направление мотора» (шаги: `M84` → каретку в середину → `QUERY_ENDSTOPS` пальцем → `FORCE_MOVE` на 10 мм → только потом `G28`).
 - **Хотэнд/экструдер РАЗОБРАН** (сопло не подходило к старому хитблоку, ждём новый хитблок + CR-Touch). **НЕ подавать команды нагрева экструдера** (`M104`/`SET_HEATER_TEMPERATURE HEATER=extruder`) — нагревательный картридж вне блока, в открытом воздухе перегреется. Все тесты, требующие нагрева экструдера, отложены до пересборки. Для проверки вентиляторов без нагрева есть безопасный приём: временно объявить пин как `[fan_generic]` и крутить его командой `SET_FAN_SPEED`, не трогая нагреватель.
 - **Стол можно греть, но ТОЛЬКО под непрерывным присмотром.** Он собран и проверен (`TEST_BED_TEMP` / `BED_OFF`), НО вся обязательная силовая обвязка 220В по состоянию на 2026-07-29 **ОТСУТСТВУЕТ**: нет отдельного предохранителя на AC-стороне, нет радиатора на SSR, нет механического термопредохранителя. Это 1000Вт сетевого напряжения без единого аппаратного бэкапа: если SSR залипнет во включённом состоянии или перегреется, остановить нагрев сможет только `verify_heater` в софте — а он бесполезен, если зависнет сам Klipper или отвалится термистор. **Не оставлять греющийся стол без присмотра ни на минуту, пока обвязка не установлена** (список — в разделе «Дозаказать»).
 - Стол физически ещё не закреплён на кронштейне рамы.
 
-**Главные незакрытые хвосты (кандидаты в мини-сессии, по приоритету):**
-0. 🔴 **X и Y: направления моторов исправлены в репозитории, ЖДУТ ДЕПЛОЯ И ФИЗИЧЕСКОЙ ПРОВЕРКИ** (2026-08-01). `dir_pin: !PF7` → `PF7` (Y), `!PF1` → `PF1` (X), `homing_speed` на обеих осях временно 50 → 10. До деплоя `G28 X`/`G28 Y` не запускать. См. разделы «Y — направление мотора» и «X — направление». Команда деплоя: `bash scripts/deploy.sh --yes` (гейт безопасности — в разделе «Деплой конфигов» ниже; посмотреть, что уедет, не заливая: `bash scripts/deploy.sh --dry-run`).
+**Главные незакрытые хвосты — краткая выжимка. ПОЛНЫЙ И АКТУАЛЬНЫЙ список — в разделе «Что осталось — ТРИ КОРЗИНЫ» внизу документа** (там же готовые команды для каждого действия пользователя). Если эти два списка когда-нибудь разойдутся — прав тот, что внизу: он ревизуется целиком, этот — только выжимка.
+0. 🔴 **X и Y: направления моторов исправлены И ЗАДЕПЛОЕНЫ (02:25), ждут только ФИЗИЧЕСКОЙ ПРОВЕРКИ** (2026-08-01, сверено 13:2x). `dir_pin: !PF7` → `PF7` (Y), `!PF1` → `PF1` (X), `homing_speed` на обеих осях временно 50 → 10 — всё это уже крутится на машине. Осталось не софтовое действие, а ручное: пройти пошаговую проверку из разделов «Y — направление мотора» и «X — направление мотора». **После первого удачного `G28` по каждой оси — вернуть `homing_speed: 50` в `printer-configs/printer.cfg` и задеплоить** (этот хвост легко теряется, он записан отдельным пунктом в корзине A-отложенное).
 1. ⚠️ **`[stepper_x]`: сторона концевика по-прежнему НЕ подтверждена** — пользователь физически передвинул концевик X 2026-07-28, никто с тех пор не смотрел, на какой он стороне. 2026-08-01 `position_endstop` переставлен с `220` на `0` по заявленной пользователем системе координат (начало спереди-слева ⇒ концевик слева = MIN), но это ГИПОТЕЗА. **Проверить руками до первого `G28 X`** — процедура в разделе «X — направление».
-2. ✅ **`rotation_distance` X = 36 — ВЫВЕДЕНО И ЖДЁТ ДЕПЛОЯ.** GT2 2 мм × **18 зубьев**; замер по метке НА РЕМНЕ (голова снята), повторён: 226 мм на 6.25 оборота = 36.16, расхождение с 36 — 0.4%. Сходится и с классическими 88.889 шага/мм семейства Replicator, клоном которого является mbot. За ночь значение прошло 40 → 32 → 36; **все промежуточные замеры делались по метке на КАРЕТКЕ и были неверны** — разбор в разделе «rotation_distance…», подраздел «**X РЕШЁН: `rotation_distance` = 36**». По **Y** оставлено 40 сознательно: единственный замер по Y не различает 36 и 40 (обоснование там же), нужна одна команда с меткой на ремне.
+2. ✅ **`rotation_distance` X = 36 — ВЫВЕДЕНО, ЗАКОММИЧЕНО (`e8fd74f`) И ЗАДЕПЛОЕНО** (02:25, сверено на живом конфиге 13:2x). GT2 2 мм × **18 зубьев**; замер по метке НА РЕМНЕ (голова снята), повторён: 226 мм на 6.25 оборота = 36.16, расхождение с 36 — 0.4%. Сходится и с классическими 88.889 шага/мм семейства Replicator, клоном которого является mbot. За ночь значение прошло 40 → 32 → 36; **все промежуточные замеры делались по метке на КАРЕТКЕ и были неверны** — разбор в разделе «rotation_distance…», подраздел «**X РЕШЁН: `rotation_distance` = 36**». По **Y** оставлено 40 сознательно: единственный замер по Y не различает 36 и 40 (обоснование там же), нужна одна команда с меткой на ремне.
 2а. 🔴 **НОВОЕ И СЕРЬЁЗНОЕ: каретка X отставала от ремня на 13–20%.** Ремень в тех же условиях идёт ровно (0.4%), а метка на каретке недобирала. Либо проскальзывает зажим ремня на каретке / каретка подклинивает — **и тогда на этой оси печатать нельзя**, либо ранние замеры были просто плохими. **Различающий замер — одна команда с двумя метками одновременно (на ремне и на каретке)**, он же контрольная проверка нового значения: при `rotation_distance: 36` команда `FORCE_MOVE STEPPER=stepper_x DISTANCE=180 VELOCITY=20 ACCEL=200` — ровно 5 оборотов, ремень обязан пройти 180 мм. Подробности и таблица результатов — в том же подразделе.
 2б. ⚠️ **`max_velocity: 175` — подозрение переформулировано, прежняя оценка «теряет 8% на 175 мм/с» СНЯТА** (она считалась от неверного R=32 и по замеру каретки). По ремню на 20 мм/с потерь нет; **по ремню на высокой скорости никто не мерил**. Проверять тем же способом на `VELOCITY=20` и `VELOCITY=175` подряд.
 2в. 📏 **`position_max: 220` занижен и вообще никем не мерен** — ремень за один проход прошёл 226 мм. Померить рулеткой фактический ход каретки от упора до упора (и то же по Y/Z), поставить реальное значение минус 2–5 мм.
 3. Пересборка экструдера, когда приедут хитблок и CR-Touch → проверка направления подачи → калибровка `rotation_distance` экструдера.
-4. Первая тестовая печать → подбор `max_accel`/`square_corner_velocity` (методика в `ramps-diagnostics.html`).
+4. Первая тестовая печать → подбор `max_accel`/`square_corner_velocity` (методика в `ramps-diagnostics.html`). **Ждёт не хоуминга, а ЖЕЛЕЗА**: печать невозможна без собранного хотэнда (п. 3), так что это корзина C, а не «после доверенного хоуминга», как значилось раньше.
 5. ~~Экран + 5 кнопок на Orange Pi~~ — **собрано и физически работает (2026-07-30)**, подробности и остаточные открытые пункты — в разделе «ПЛАН: экран + 5 кнопок навигации» (подраздел «ПРОГРЕСС (2026-07-30)») и в `orangepi-display/README.md`.
 6. Отложено сознательно: UART для TMC2209 (сейчас все драйверы в standalone, ток только триммерами).
 
@@ -234,7 +235,7 @@
 
 **Секция `[force_move] enable_force_move: True` — ОСТАЁТСЯ ПОСТОЯННО (решение 2026-07-29).** Изначально добавлялась как временная, для проверки направлений до доверенного хоуминга — эти тесты завершены. **Но убирать её не нужно и не планируется:** это кастомный принтер, который часто бывает в ремонте/апгрейде (замена хотэнда, перестановка концевиков, смена драйверов), и после каждого такого изменения хоуминг снова становится недоверенным. `FORCE_MOVE`/`SET_KINEMATIC_POSITION` — именно тот инструмент, которым в такой ситуации безопасно двигают ось. Компромисс принят осознанно: эти команды обходят проверку лимитов, поэтому ошибочная `DISTANCE` может увести ось в раму — использовать малые значения.
 
-Ждёт: `G28 Y` — 2026-08-01 попробовали впервые, каретка поехала не туда, остановлено аварийно; фикс `dir_pin` лежит в репозитории и ждёт деплоя, см. раздел «Y — направление мотора». `G28 Z` — после перепроверки Z-концевика (крепление переделано). `G28 X` — только после пересборки `[stepper_x]` под новое положение концевика (хвост №1 в очереди задач).
+Ждёт (состояние на 2026-08-01 13:2x, `homed_axes: ""` — ни одна ось не отхомлена): `G28 Y` — 2026-08-01 попробовали впервые, каретка поехала не туда, остановлено аварийно; фикс `dir_pin: PF7` **задеплоен 02:25**, но пошаговая проверка руками ещё не пройдена, см. раздел «Y — направление мотора». `G28 Z` — после перепроверки Z-концевика (крепление переделано) и с той же оговоркой: направление Z закрыто только `FORCE_MOVE`-ом, `G28 Z` не запускался ни разу. `G28 X` — после подтверждения глазами, на какой стороне стоит концевик (`position_endstop: 0` — гипотеза), см. раздел «X — направление мотора».
 
 **Z: TMC2209 в гнезде, UART не отвечает** (`Unable to read tmc uart register GCONF` через `DUMP_TMC`) — **это ожидаемо, а не неисправность: провода PDN_UART физически не подключены** (см. раздел «UART для TMC2209» выше). Решено работать без UART: `[tmc2209 stepper_z]` закомментирован, Z работает как X/Y/E — физический TMC2209 в гнезде, ток через триммер (формула `Vref = run_current × 2.5 × Rsense`, Rsense 0.110 Ом подтверждён визуально).
 
@@ -255,7 +256,7 @@
 
 ## Настройка скорости и тока — результаты (2026-07-27/28)
 
-Пользователь самостоятельно поднимал ток по всем осям (протокол из `ramps-diagnostics.html`: шаг 0.1А, проверка `STEPPER_BUZZ` + нагрев рукой + лёгкое сопротивление рукой во время движения) и параллельно искал потолок скорости через `FORCE_MOVE` с растущим `VELOCITY`. Итоги, уже записаны в живой `printer.cfg` (см. снимок ниже):
+Пользователь самостоятельно поднимал ток по всем осям (протокол из `ramps-diagnostics.html`: шаг 0.1А, проверка `STEPPER_BUZZ` + нагрев рукой + лёгкое сопротивление рукой во время движения) и параллельно искал потолок скорости через `FORCE_MOVE` с растущим `VELOCITY`. Итоги, уже записаны в конфиг (`printer-configs/printer.cfg`, секция `[printer]`):
 
 | Ось | Тест | Результат | В конфиге |
 |---|---|---|---|
@@ -408,7 +409,31 @@ fan_speed: 1.0
 
 SSR — zero-cross тип, поэтому управление **bang-bang** (`control: watermark`), не PID/ШИМ — zero-cross SSR не может переключаться быстрее ближайшего перехода через ноль сети, из-за чего PID с коротким `pwm_cycle_time` всё равно вырождается в грубое вкл/выкл. Это же поведение по умолчанию у официального `generic-ramps.cfg` в самом Klipper.
 
-**Значения `[heater_bed]` тут намеренно НЕ дублируются** — брать из снимка `printer.cfg` ниже в этом файле. История инцидента со 120/2.0 — в «Что было починено по дороге» выше.
+**Значения `[heater_bed]` тут намеренно НЕ дублируются** — брать из `printer-configs/printer.cfg` (секция `[heater_bed]`). История инцидента со 120/2.0 — в «Что было починено по дороге» выше.
+
+### 🔴 Термопредохранитель 133°C — запас НЕ измерен, и это вопрос безопасности (разобрано 2026-08-01)
+
+Раздел «Дозаказать» до 2026-08-01 утверждал: «запас в 13°C держится только если PID стола откалиброван, `pid_Kp/Ki/Kd` ещё дефолтные — прогнать `PID_CALIBRATE HEATER=heater_bed`». **Это утверждение фактически неверно и снято.** Проверено по живому конфигу 2026-08-01:
+
+- **У `[heater_bed]` нет PID вообще.** Он на `control: watermark` + `max_delta: 1.0` — bang-bang. Регулятор по определению не имеет ни Kp, ни Ki, ни Kd, калибровать в нём нечего.
+- `pid_Kp: 22.2 / pid_Ki: 1.08 / pid_Kd: 114`, которые док называл «дефолтными для стола», лежат в секции **`[extruder]`**. Это правда «не откалибровано» — но это хотэнд, и его калибровка ждёт пересборки (корзина **C1**), к столу отношения не имеет.
+- **`PID_CALIBRATE HEATER=heater_bed` — не безобидная процедура.** Проверено по исходнику Klipper на самом принтере (`klippy/extras/pid_calibrate.py`, строка 48): после калибровки `SAVE_CONFIG` пишет в секцию не только Kp/Ki/Kd, но и `configfile.set(cfgname, 'control', 'pid')`. То есть выполнение этой «рекомендации» **молча отменило бы осознанное решение про zero-cross SSR и bang-bang** (абзац выше). Запускать её нельзя как рутинную задачу — это смена архитектуры управления столом, решение пользователя, а не хвост в очереди.
+
+**Что на самом деле неизвестно (два числа, оба меряются, ни одно не мерено):**
+
+1. **Пиковый заброс над уставкой** при watermark. `max_delta: 1.0` — это только порог, на котором регулятор выключает нагрев (target+1.0); фактический перелёт из-за тепловой инерции 1000-ваттного стола к нему не сводится и никем не записан. Косвенное: при `max_delta: 2.0` и target 120 срабатывал аварийный `max_temp: 120` на 120.279 — но это говорит только о том, что регулятор ЗАПЛАНИРОВАЛ догрев до 122, а не о величине реального перелёта.
+2. **Насколько точка крепления предохранителя горячее термистора.** Предохранитель лепится на нагреватель, термистор сидит в другом месте, а по поверхности стола уже намерен разброс ~20°C (см. «Найденные особенности»). Разница в 10-15°C здесь совершенно обычна.
+
+**Почему это не теория.** `max_temp: 130` в конфиге стоит **всего на 3°C ниже** номинала предохранителя, а предохранитель **одноразовый**: он не «предупреждает», он необратимо рвёт цепь и требует физической замены. Оба неизвестных играют в одну сторону — в сторону срабатывания при штатном нагреве.
+
+**Как закрыть (требует пользователя рядом, стол греется):**
+```
+TEST_BED_TEMP TARGET=110        # рабочая температура, не предельная
+# смотреть график температуры стола в Mainsail до выхода на полку;
+# записать МАКСИМУМ, которого достигло показание (не уставку)
+BED_OFF
+```
+Заброс над 110 плюс запас на «нагреватель горячее термистора» — это и есть реальный расход от 133°C. Если после замера окажется, что зазор меньше ~10°C, вариантов два: снизить рабочую температуру стола либо ставить предохранитель на более высокий номинал. Решение — за пользователем, но принимать его вслепую нельзя.
 
 Пины (`PH5`/`PK6`) сверены с официальным `config/generic-ramps.cfg` из репозитория Klipper — это реальная распиновка D8/T1 на RAMPS 1.4 для Mega2560, не путать с более ранним предложенным вариантом от стороннего инструмента (`PC9`/`PC4` — синтаксически невалидные пины для этого MCU, порт C не имеет бита 9 и не подключён к АЦП).
 
@@ -443,258 +468,22 @@ SSR — zero-cross тип, поэтому управление **bang-bang** (`c
 - Компьютер, с которого идёт работа — Windows. Операционные инструкции (какой shell-инструмент использовать и т.д.) — в `CLAUDE.md` в корне репозитория, прочитать его. (На момент этой записи, 2026-07-27, проект ещё не был перенесён в отдельный репозиторий — `CLAUDE.md` лежал в рабочей директории Claude Code того времени, не рядом с этим файлом; с 2026-07-29 оба файла в одном репозитории.)
 - **Роутер (192.168.11.1) — доступен и стабилен** по SSH (ключ настроен, см. раздел про роутер выше).
 - **Принтер (Orange Pi) — доступен по SSH на `192.168.11.160`, подтверждено (2026-07-27).** Раньше в этой сессии был недоступен на `.160` из-за DHCP-нюанса (см. раздел про роутер) — решено, IP стабилен после перезагрузки Orange Pi.
-- **Живой `printer.cfg` сверен и совпадает со снимком ниже** (проверено 2026-07-29 побайтово).
+- **Живой `printer.cfg` сверен с `printer-configs/printer.cfg` и совпадает** (последняя сверка 2026-08-01 13:2x, `scripts/deploy.sh --dry-run` + `ssh grep`).
 
-## printer.cfg - текущее содержимое (снято живым `cat` по SSH)
+## printer.cfg — где искать (снимок из этого документа УДАЛЁН 2026-08-01)
 
-> ⚠️ **2026-08-01: снимок ниже = то, что СЕЙЧАС КРУТИТСЯ НА ПРИНТЕРЕ, и по `[stepper_x]`/`[stepper_y]` он уже РАСХОДИТСЯ с репозиторием.** В `printer-configs/printer.cfg` уже лежат `dir_pin: PF1` / `dir_pin: PF7` (без `!`), `position_endstop: 0` для X и `homing_speed: 10` на обеих осях — но это не задеплоено. Снимок специально не переписан: он показывает, с чем машина реально поедет, если запустить `G28` прямо сейчас (то есть не туда). После `scripts/deploy.sh` — переснять снимок и убрать это предупреждение.
+**Копии конфига в этом документе больше нет, и это осознанно.** Она лежала здесь с 2026-07-27, устарела дважды (2026-07-29 и в ночь на 2026-08-01) и оба раза успевала соврать следующей сессии про то, что реально стоит на машине. Второй источник истины для файла, который и так лежит в git, себя не оправдал — ровно та же логика, по которой значения `[heater_bed]` тут намеренно не дублируются (см. раздел «SSR / heater_bed»).
 
-```ini
-[include mainsail.cfg]
+| Что нужно | Как получить |
+|---|---|
+| Что ДОЛЖНО стоять на машине | `printer-configs/printer.cfg` в этом репозитории — источник истины. Комментарии в нём подробные и поддерживаются, читать их наравне с этим документом |
+| Что РЕАЛЬНО стоит на машине прямо сейчас | `bash scripts/deploy.sh --dry-run` — покажет diff репозитория с живым файлом и **ничего не зальёт**. «Изменений нет, деплоить нечего» = файлы идентичны |
+| Живой файл целиком | `ssh ultra@192.168.11.160 "cat ~/printer_data/config/printer.cfg"` |
+| Почему значение такое, а не другое | `git log -p -- printer-configs/printer.cfg` |
 
-# force_move: KEPT PERMANENTLY - deliberate choice, do not "clean up".
-# Originally added 2026-07-27 for direction-verification testing before homing
-# was trusted; that testing is now finished. It stays because this is a custom,
-# frequently-modified machine (repairs, upgrades, swapped hotends/endstops), and
-# FORCE_MOVE / SET_KINEMATIC_POSITION are exactly what you need to move an axis
-# safely when homing is not yet trustworthy after a change.
-# Trade-off accepted knowingly: these commands bypass normal position/limit
-# checks, so a wrong DISTANCE can drive an axis into the frame. Use small values.
-[force_move]
-enable_force_move: True
+**Последняя сверка: 2026-08-01 ~13:2x, расхождений нет.** `deploy.sh --dry-run` → «Изменений нет»; живой `printer.cfg` на принтере записан 02:25, Klipper перезапущен 02:25:09, последний коммит по конфигу — `e8fd74f` (02:23). Из удалённого снимка не потеряно ничего: единственное, чего в нём было и нет в актуальном файле, — старые значения `[stepper_x]`/`[stepper_y]` (`dir_pin: !PF1`/`!PF7`, `position_endstop: 220`, `homing_speed: 50`), то есть ровно то, что и было исправлено.
 
-[mcu]
-# by-id path, NOT /dev/ttyUSB* - the ttyUSB number changes between reboots and
-# when the cable moves to another port. The FT232R is built into the Freaduino
-# board itself (behind its miniUSB socket), not a separate external adapter.
-serial: /dev/serial/by-id/usb-FTDI_FT232R_USB_UART_AJV9MLVG-if00-port0
-baud: 250000                # Klipper default and recommended value - do not change
-
-[printer]
-kinematics: cartesian
-# All three limits below were found EMPIRICALLY (FORCE_MOVE at rising VELOCITY
-# under hand load), not from datasheets - the motors are unbranded and have none.
-max_velocity: 175           # X/Y ran clean at 200mm/s under load; 175 keeps ~12% margin
-max_accel: 1500             # NOT calibrated - generic default. Needs a ringing-tower
-                            # test print to set properly (method in ramps-diagnostics.html)
-max_z_velocity: 18          # Z plateaued at 20mm/s regardless of current -> mechanical/
-                            # back-EMF ceiling, not torque. Well above real need (5-15).
-# square_corner_velocity: not set -> Klipper default 5mm/s. Also needs a test print.
-
-[idle_timeout]
-# After this many seconds with no real gcode activity Klipper silently runs
-# TURN_OFF_HEATERS. Status polling via API does NOT count as activity.
-# This caused several "the bed switched itself off" scares - it is normal behaviour.
-timeout: 600                # Klipper default (10 min). Raise temporarily if testing.
-
-[virtual_sdcard]
-path: /home/ultra/printer_data/gcodes
-on_error_gcode: CANCEL_PRINT   # abort the print if an error occurs mid-job
-
-# ---------------------------------------------------------------------------
-# FANS - three of them, only two are under Klipper control:
-#   D9  -> [fan] below                      : part cooling, slicer-driven
-#   D11 -> [controller_fan] below           : extruder MOTOR cooling
-#   (none) electronics fan                  : wired to constant 12V, always on
-# ---------------------------------------------------------------------------
-
-# Part-cooling fan (blows on the printed part). RAMPS D9 = PH6, a real MOSFET
-# output, so it drives a fan directly. Controlled by the slicer via M106/M107.
-[fan]
-pin: PH6
-
-# Extruder MOTOR cooling fan. D11 = PB5 sits on the SERVOS header, which is a raw
-# 5V logic pin with NO onboard MOSFET - it cannot drive a fan directly, so an
-# external IRL640 logic-level MOSFET was added (gate via 460R to PB5, source to
-# GND, drain to fan minus, fan plus to 12V).
-#
-# DESIGN DECISION (2026-07-29): this fan cools the STEPPER MOTOR, not a heatbreak
-# heatsink. The mbot cube never had heatbreak-heatsink cooling and this build
-# does not either - an oversized heatsink was fitted instead, on the expectation
-# that it dissipates passively. Hence the fan is tied to machine ACTIVITY, not to
-# hotend temperature: motors heat up from coil current, not from the hotend.
-#
-# IF HEAT-CREEP JAMS APPEAR (filament softening ABOVE the melt zone and clogging
-# the heatbreak/feeder - shows up as under-extrusion late in long prints, feeder
-# clicking, stuck filament), the passive heatsink is not enough. The fix is to add
-# a SEPARATE fan on a SEPARATE pin configured as:
-#     [heater_fan heatbreak_fan]
-#     heater: extruder
-#     heater_temp: 50.0
-# i.e. on whenever the hotend is hot, regardless of motion. Do NOT repurpose this
-# motor fan for that job - the two have different trigger logic.
-[controller_fan extruder_motor_fan]
-pin: PB5
-fan_speed: 1.0              # 100% whenever active - motor cooling wants full flow
-idle_timeout: 60            # keep running 60s after activity stops, to clear residual heat
-stepper: stepper_x, stepper_y, stepper_z, extruder   # any energized stepper turns it on
-heater: extruder                                     # ...as does the hotend heater
-
-# Monitoring only - shows the Orange Pi CPU temperature in Mainsail.
-# Drives no fan (the electronics fan is on constant 12V, outside Klipper).
-[temperature_sensor OrangePi_CPU]
-sensor_type: temperature_host
-sensor_path: /sys/class/thermal/thermal_zone0/temp
-min_temp: 0
-max_temp: 90
-
-# Convenience wrappers so bed testing does not require editing [heater_bed].
-[gcode_macro TEST_BED_TEMP]
-description: Heat bed to TARGET (default 120) and hold for observation, without touching [heater_bed] config. Usage: TEST_BED_TEMP or TEST_BED_TEMP TARGET=100
-gcode:
-    {% set target = params.TARGET|default(120)|float %}
-    SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET={target}
-    RESPOND MSG="Bed heating to {target}C - use BED_OFF to stop early"
-
-[gcode_macro BED_OFF]
-description: Immediately stop the bed test heater (target=0), independent of idle_timeout
-gcode:
-    SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0
-    RESPOND MSG="Bed target set to 0"
-
-# autotune_tmc.cfg stays disabled: it needs a working TMC UART link, which does
-# not exist here (see the [tmc2209] block at the bottom of this file).
-#[include autotune_tmc.cfg]
-
-[stepper_x]
-step_pin: PF0
-dir_pin: !PF1               # "!" = inverted. Confirmed by FORCE_MOVE test - without
-                            # it the axis moved the wrong way.
-enable_pin: !PD7            # "!" here is normal: A4988/TMC enable is active-low
-microsteps: 16              # must match the physical MS1/MS2 jumpers on the driver
-rotation_distance: 40       # PLACEHOLDER (GT2 20T default). CALIBRATE: jog a known
-                            # distance, measure actual, new = old * (actual/commanded)
-# =====================================================================
-# !!! STALE / DO NOT TRUST THIS BLOCK AS-IS  (flagged 2026-07-29) !!!
-# The X endstop was PHYSICALLY MOVED by the user on 2026-07-28 and its new
-# position has NOT been determined yet. The endstop_pin / position_endstop
-# values below still describe the OLD placement (X-MAX side, PE4).
-# => DO NOT run G28 X until this is re-derived, or the head can crash.
-# To fix: determine which side the switch is on now (MIN=left / MAX=right),
-# set endstop_pin accordingly (MIN=^!PE5, MAX=^!PE4), set position_endstop
-# (0 for MIN side, or the measured position_max for MAX side), then verify
-# with QUERY_ENDSTOPS by pressing/releasing the switch by hand BEFORE homing.
-# =====================================================================
-endstop_pin: ^!PE4          # "^" = enable pullup, "!" = invert (switch reads inverted)
-position_endstop: 220       # equals position_max because this is the MAX side
-position_max: 220           # PLACEHOLDER - measure with a tape and subtract 2-5mm margin
-homing_speed: 50
-
-[stepper_y]
-step_pin: PF6
-dir_pin: !PF7               # inversion confirmed correct - do not remove
-enable_pin: !PF2
-microsteps: 16
-rotation_distance: 40       # PLACEHOLDER - calibrate the same way as X
-endstop_pin: ^!PJ1          # Y-MIN. Polarity was inverted and is now fixed.
-position_endstop: 0         # 0 because the switch is on the MIN side
-position_max: 220           # PLACEHOLDER - measure with a tape
-homing_speed: 50
-
-[stepper_z]
-step_pin: PL3
-dir_pin: !PL1               # inverted after FORCE_MOVE showed "+" moved the bed the wrong way
-enable_pin: !PK0
-microsteps: 16
-rotation_distance: 8        # PLACEHOLDER (assumes T8 leadscrew, 8mm lead). Could be
-                            # T8x2 (2mm lead) - CALIBRATE with a measured move.
-endstop_pin: ^!PD3          # Z-MIN, at the TOP of the screw. On this machine the BED
-                            # moves: Z=0 means bed raised closest to the nozzle.
-position_endstop: 0.5       # recheck - the Z endstop bracket was rebuilt as adjustable
-position_max: 190           # PLACEHOLDER - measure with a tape
-
-[extruder]
-step_pin: PA4
-dir_pin: PA6                # NOT verified for direction yet (extruder is disassembled).
-                            # Check with filament loaded before the first print.
-enable_pin: !PA2
-microsteps: 16              # NOTE: driver here is A4988, where the 3rd jumper is MS3
-                            # and DOES affect microstepping - must match this value
-rotation_distance: 23.562   # theoretical: pi * 7.5mm BMG hobbed gear (see gear_ratio).
-                            # CALIBRATE by extruding a measured 100mm.
-gear_ratio: 50:17           # real BMG reduction (the marketed "3:1" is rounded)
-nozzle_diameter: 0.400
-filament_diameter: 1.750
-max_extrude_only_velocity: 35  # tested clean to 50mm/s under finger load; 35 = margin
-heater_pin: PB4             # RAMPS D10
-sensor_type: Generic 3950   # CONFIRMED by user: hotend thermistor is 100K NTC 3950
-sensor_pin: PK5             # RAMPS T0
-control: pid
-pid_Kp: 22.2                # generic values from generic-ramps.cfg - NOT calibrated.
-pid_Ki: 1.08                # run PID_CALIBRATE once the hotend is reassembled.
-pid_Kd: 114
-min_temp: 0
-max_temp: 250
-min_extrude_temp: 170       # safety: refuses to extrude below this. Do not lower.
-# Extruder driver is A4988 - no UART. Its current is set ONLY by the module's
-# physical Vref trimpot. Formula: Vref = run_current x 8 x Rsense, Rsense = 0.100
-# (marking "S1 R100"/"S2 R100"). NOTE: on this machine the currents were never
-# actually measured - no meter that reads below ~0.5V - they were dialled in by
-# behaviour (no skipped steps at speed/under load, no overheating).
-
-# Bed: stock Creality K1 Max, 1000W @ 220V AC, thermistor NTC 100K/B3950.
-# Wired to RAMPS D8 -> external zero-cross SSR (the MOSFET cannot switch mains).
-[heater_bed]
-heater_pin: PH5             # RAMPS D8 - drives the SSR's DC input, not the bed directly
-sensor_type: Generic 3950
-sensor_pin: PK6             # RAMPS T1
-pullup_resistor: 4700       # standard 4.7k pullup on RAMPS thermistor inputs
-smooth_time: 2.0            # averaging window - the bed is slow, so smoothing is fine
-min_temp: 0
-max_temp: 130               # HARD safety ceiling, NOT the working target. Must stay
-                            # 5-10C above the highest target you use: with watermark
-                            # the regulator itself overshoots by max_delta, and if
-                            # max_temp sat at the target the normal cycle would trip it.
-max_power: 1.0
-control: watermark          # bang-bang (on/off), NOT PID - correct choice for a
-                            # zero-cross SSR, which physically cannot switch faster
-                            # than the mains zero crossing, so PWM/PID degenerates
-                            # into on/off anyway. Matches Klipper's generic-ramps.cfg.
-max_delta: 1.0              # watermark hysteresis: heater off at target+1.0, back on
-                            # at target-1.0. Was 2.0, which overshot into max_temp.
-
-[verify_heater heater_bed]
-# Thermal-runaway protection. Do NOT disable "for convenience" - this is the only
-# software guard against a stuck-on SSR or a detached thermistor.
-max_error: 120
-check_gain_time: 60         # the 1000W bed is large and slow; 60s avoids false trips
-hysteresis: 5
-
-# [tmc2209 stepper_x/y/z] DISABLED - and this is the correct current state.
-# Status as of 2026-07-29:
-#   - X/Y/Z sockets DO hold real TMC2209 modules (they were briefly swapped to
-#     A4988 during oscilloscope fault-finding in July; TMC2209 are back in now).
-#   - The PDN_UART wires to AUX-2/AUX-3 are NOT connected. This is still only a
-#     plan - the intent is to plug them with ordinary dupont connectors (no
-#     soldering needed, AUX is a standard 2.54mm header).
-#   - Therefore every driver runs in STANDALONE mode and its current is set ONLY
-#     by the module's physical Vref trimpot. run_current values below would do
-#     nothing until UART is actually wired.
-#     TMC2209: Vref = current x 2.5 x 0.110  |  A4988 (extruder): Vref = current x 8 x 0.100
-#   - Past 'Unable to read tmc uart register IFCNT/GCONF' errors were simply the
-#     result of no wire being present - not a fault to diagnose.
-# To enable UART later: plug the 3 dupont wires per the table in printer-status.md,
-# uncomment below, RESTART, then verify with DUMP_TMC STEPPER=stepper_x.
-#
-# [tmc2209 stepper_x]
-# uart_pin: PB0
-# run_current: 0.4
-# sense_resistor: 0.110
-#
-# [tmc2209 stepper_y]
-# uart_pin: PL0
-# run_current: 0.4
-# sense_resistor: 0.110
-#
-# [tmc2209 stepper_z]
-# uart_pin: PG1
-# run_current: 0.4
-# sense_resistor: 0.110
-```
-
-**Подтверждено применённым и рабочим** (SSH `cat` живого файла + Moonraker `/printer/restart` -> `state: ready`) - реальное содержимое живого файла на момент записи.
-
-✅ Комментарии в живом конфиге приведены в соответствие 2026-07-29 — их можно читать наравне с этим документом.
+➡️ **Правило на будущее:** если снова захочется вставить сюда снимок конфига — не вставлять. Вместо этого обновить строку «Последняя сверка» выше: дата + чем проверено. Дата без указания способа проверки не считается.
 
 ## Полезные команды
 
@@ -749,7 +538,7 @@ sudo systemctl start klipper
 
 ## План на 2026-07-28 — ИТОГИ (закрыт, оставлен для истории)
 
-1. **Переставить концевики** — ✅ сделано пользователем самостоятельно (магазин не понадобился). Z — крепление переделано на регулируемое по высоте, сам концевик остался сверху (см. следующий раздел). X — передвинут. ⚠️ **Но конфиг под X ещё НЕ приведён в соответствие** — см. раздел «X — переставлен» ниже, это открытый хвост №1.
+1. **Переставить концевики** — ✅ сделано пользователем самостоятельно (магазин не понадобился). Z — крепление переделано на регулируемое по высоте, сам концевик остался сверху (см. следующий раздел). X — передвинут. ⚠️ **Конфиг под X приведён в соответствие 2026-08-01 и задеплоен, но по ГИПОТЕЗЕ (концевик слева), а не по факту** — сторона до сих пор не подтверждена глазами. См. раздел «X — направление мотора и сторона концевика» и пункт **B1** в «Три корзины».
 2. **Протестировать нагревательный стол** — ✅ сделано, грелся до 120°C и держал. По пути нашли и починили два независимых источника «стол сам выключается» (`max_temp` vs `max_delta` и `idle_timeout`), плюс задокументировали разрыв датчик↔поверхность. См. «SSR / heater_bed».
 3. **Подключить framebuffer-дисплей** — ✅ сделано полностью. SPI0 был включён и подтверждён (`/dev/spidev0.0`) ещё 2026-07-28, монтаж экрана и кнопок выполнен 2026-07-30 — см. раздел «ПЛАН: экран + 5 кнопок», подраздел «ПРОГРЕСС (2026-07-30)».
 
@@ -771,9 +560,11 @@ sudo systemctl start klipper
 
 **Сделано физически (2026-07-28, со слов пользователя):** крепление Z переделано на регулируемое по высоте. Z endstop_pin/position_endstop в текущем `printer.cfg` (`^!PD3`, `position_endstop: 0.5`) — это значение НЕ обязательно всё ещё верно после переделки крепления, нужно перепроверить `QUERY_ENDSTOPS` + аккуратный джог перед следующим `G28 Z`, не доверять старому числу автоматически.
 
-## Y — направление мотора: исправлено в репозитории 2026-08-01, ждёт деплоя и физической проверки
+## Y — направление мотора: исправлено и ЗАДЕПЛОЕНО 2026-08-01, ждёт физической проверки
 
-🔴 **Пока не выкачен `scripts/deploy.sh` — `G28 Y` не запускать.** На принтере живёт старый `[stepper_y]`, который и увёл каретку в раму.
+✅ **Деплой сделан 2026-08-01 02:25** — на принтере уже `dir_pin: PF7` (без `!`) и `homing_speed: 10`. Сверено 13:2x: `deploy.sh --dry-run` → «Изменений нет», `ssh grep` живого конфига подтверждает. Прежняя строчка «пока не выкачен deploy.sh — на принтере живёт старый `[stepper_y]`» **удалена как устаревшая**.
+
+🔴 **`G28 Y` всё равно не запускать, пока не пройдены шаги 1-3 из списка внизу этого раздела.** Деплой поменял конфиг, а не физику: гипотеза «мотор просто инвертирован» проверяется одним медленным `FORCE_MOVE` на 10 мм, и это ещё не сделано (`homed_axes: ""` на 13:2x, в `klippy.log` после рестарта 02:25 нет ни одной команды движения).
 
 **Симптом (2026-08-01).** Пользователь запустил `G28 Y` — каретка поехала ПРОЧЬ от переднего концевика; пришлось жать аварийную остановку. Формулировка пользователя: «y двигается не в ту сторону почему-то опять, начало координат же спереди вверху слева должно быть и там же в минимуме и концевик».
 
@@ -791,7 +582,7 @@ sudo systemctl start klipper
 
 Здесь по логу видно, что **сторона концевика в конфиге правильная**: `^!PJ1` — это разъём Y-MIN на RAMPS, `position_endstop: 0`, хоуминг командуется в минус, и всё это совпадает с системой координат, которую называет пользователь (0,0 спереди-слева, там же концевик). Значит расходится ровно одно — **физическое направление мотора**. Отсюда фикс: снять инверсию.
 
-**Изменение в `printer-configs/printer.cfg` (закоммичено, НЕ задеплоено):**
+**Изменение в `printer-configs/printer.cfg` (закоммичено `8dd3298`, задеплоено 02:25, на машине проверено 13:2x):**
 ```
 -dir_pin: !PF7               # inversion confirmed correct - do not remove
 +dir_pin: PF7
@@ -806,7 +597,7 @@ sudo systemctl start klipper
 
 **Открытый вопрос к пользователю (не угадывать, спросить):** ставилось ли физически новое крепление головы (`ultra-print-head-mount`, работа последних дней) с перезажимом ремня GT2? Если каретку прицепили к ПРОТИВОПОЛОЖНОЙ ветви ремённой петли, направление разворачивается механически — и тогда `!PF7` в июле был честно верным, а сломало его железо, а не ошибочный отчёт. На сам фикс конфига это не влияет (он одинаков в обоих случаях), влияет только на формулировку «почему именно сейчас».
 
-**Порядок безопасной проверки ПОСЛЕ `scripts/deploy.sh` — строго по шагам, не перепрыгивать:**
+**Порядок безопасной проверки — деплой уже сделан (02:25), можно начинать с шага 1 прямо сейчас. Строго по шагам, не перепрыгивать:**
 1. `M84` — снять питание с моторов и **рукой поставить каретку примерно в СЕРЕДИНУ оси Y**. Это обязательный шаг: если каретка стоит вплотную к переднему концевику, тестовое движение из п.3 продавит её сквозь концевик в раму.
 2. Пальцем нажать и отпустить сам Y-концевик, между нажатиями — `QUERY_ENDSTOPS`. Должно быть `stepper_y:TRIGGERED` при нажатом и `stepper_y:open` при отпущенном. Это проверка, что концевик вообще способен сработать, до любого движения.
 3. **Перед этим шагом ещё раз убедиться, что каретка стоит примерно в середине оси** — на шаге 2 к концевику тянутся рукой и её легко туда же и подвинуть; из положения вплотную к концевику движение из этого шага продавит её сквозь концевик в раму. Затем `FORCE_MOVE STEPPER=stepper_y DISTANCE=-10 VELOCITY=5` — каретка должна поехать **ВПЕРЁД, к концевику** (в сторону начала координат). 10 мм на 5 мм/с — это две секунды медленного хода, смотреть глазами.
@@ -817,11 +608,13 @@ sudo systemctl start klipper
 
 ## X — направление мотора и сторона концевика (2026-08-01)
 
-🔴 **`G28 X` не запускать** — ни до деплоя, ни после него, пока не пройдена проверка руками из этого раздела.
+✅ **Деплой сделан 2026-08-01 02:25** — на принтере уже `dir_pin: PF1` (без `!`), `position_endstop: 0`, `rotation_distance: 36`, `homing_speed: 10`. Сверено 13:2x (`deploy.sh --dry-run` + `ssh grep`).
+
+🔴 **`G28 X` не запускать** — деплой это НЕ разблокировал. Сторона концевика — по-прежнему непроверенная гипотеза, пока не пройдена проверка руками из этого раздела (шаги ниже).
 
 **Что сообщил пользователь:** «x тоже двигается в обратном направлении». По логу видно, как это проверялось: `FORCE_MOVE STEPPER=stepper_x DISTANCE=10 VELOCITY=250`, затем дважды `DISTANCE=100 VELOCITY=250`. То есть положительное направление увело голову не туда, куда должно при начале координат спереди-слева (там `+X` = ВПРАВО).
 
-**Что изменено в `printer-configs/printer.cfg` (закоммичено, НЕ задеплоено):**
+**Что изменено в `printer-configs/printer.cfg` (закоммичено `8dd3298`, задеплоено 02:25, на машине проверено 13:2x):**
 ```
 -dir_pin: !PF1               # "!" = inverted. Confirmed by FORCE_MOVE test ...
 +dir_pin: PF1
@@ -840,7 +633,7 @@ sudo systemctl start klipper
 
 **Почему июльское «направление X проверено» не переносится:** тогда концевик был на MAX-стороне (справа), и «правильным» считалось направление, при котором `+` едет к правому концевику. С тех пор концевик физически переставлен, а система координат зафиксирована как «начало спереди-слева». Плюс тот же процессный дефект, что и по Y (см. правило ниже): направление тогда закрывали `FORCE_MOVE`-ом, а `G28 X` не запускался ни разу за всю историю машины.
 
-**Проверка ПОСЛЕ деплоя — строго по шагам:**
+**Проверка — деплой уже сделан (02:25), можно начинать с шага 1 прямо сейчас. Строго по шагам:**
 1. `M84`, рукой поставить голову **в середину оси X**.
 2. Нажать/отпустить сам концевик X пальцем, между этим — `QUERY_ENDSTOPS`.
    - `stepper_x` меняется `open` ↔ `TRIGGERED` → провод действительно в PE4, `endstop_pin: ^!PE4` верен.
@@ -1572,34 +1365,135 @@ RSS, 2.1% CPU, снапшот отдаёт за 60 мс), а 640×480 нужны
 (`backspace-numpad-guard.patch`). Выход есть — навести фокус на «✗», — но с
 пяти кнопок это неочевидно. Отдельный мелкий баг, в очередь ниже.
 
-## Что осталось (по приоритету) — очередь мини-сессий
+## Что осталось — ТРИ КОРЗИНЫ (полная ревизия 2026-08-01, каждый пункт ПРОВЕРЕН)
 
-**Блокирующее (мешает хоумингу и всему, что после него):**
-1. ⚠️ **Пересобрать `[stepper_x]` под новое физическое положение концевика.** Нужно от пользователя: на какой стороне теперь концевик (MIN слева / MAX справа) и на каком расстоянии. Затем: `endstop_pin` (MIN=`^!PE5`, MAX=`^!PE4`), `position_endstop` (0 для MIN, либо новый `position_max` для MAX). После правки — `QUERY_ENDSTOPS` вручную (нажать/отпустить) ПЕРЕД первым `G28 X`.
-2. **Проверить, не съехал ли Z-концевик после переделки крепления на регулируемое.** `position_endstop: 0.5` — старое значение, могло разойтись с реальностью. `QUERY_ENDSTOPS` + осторожный джог перед `G28 Z`.
+> **Чем это отличается от прежней «очереди мини-сессий» (нумерованный список 1-13).** Тот список перестал быть правдой быстрее, чем его успевали читать: он утверждал, что фиксы X/Y «ждут деплоя» (деплой был сделан в 02:25), что калибровать `rotation_distance` надо методом, который за ту же ночь был отозван, и что у стола надо откалибровать PID (у стола нет PID). Список **заменён, а не дополнен** — специально, чтобы следующая сессия не прочитала старую формулировку и не откатила работу.
+>
+> **Как проверялся каждый пункт (2026-08-01, ~13:2x):** `bash scripts/deploy.sh --dry-run` (репозиторий vs живой конфиг), `ssh … grep` живого `printer.cfg`, `GET /printer/objects/query?toolhead` (`homed_axes`), `klippy.log` на принтере, исходники Klipper на самом принтере, `git log`. Ни один пункт не переписан «по прочтению» — только по проверке.
+>
+> **Смысл деления:** (A) — то, что закрывается софтом с рабочей машины, без пользователя. (B) — то, где нужны руки, глаза и рулетка; для каждого пункта дана ГОТОВАЯ команда или конкретный вопрос. (C) — то, что физически ждёт железа. **Корзина (A) сейчас ПУСТА** — всё, что закрывалось удалённо, закрыто.
 
-**Калибровка (не требует новых деталей, можно делать хоть сейчас):**
-3. **`rotation_distance` для X/Y/Z рулеткой.** Метод: `G91` → `G1 X100 F600` → измерить РЕАЛЬНОЕ перемещение → `новый = текущий × (реально / скомандовано)` → вписать, `RESTART`, перепроверить. Для Z — меньше дистанция и скорость (`G1 Z50 F300`); если ось не отхомлена — через `FORCE_MOVE`. Чем больше дистанция теста, тем точнее результат.
-4. **`position_max` для X/Y/Z рулеткой** — доехать до физического предела, измерить от нуля, вписать МИНУС 2-5мм запаса. Делать ПОСЛЕ п.3 (иначе замер в «командных» мм пересчитается неверно).
+### (A) Можно закрыть удалённо прямо сейчас — ПУСТО ✅
 
-**Ждёт железа (хитблок + CR-Touch):**
-5. Пересборка экструдера → на первых длинных печатях следить за признаками heat creep (недоэкструзия ближе к концу, щелчки фидера, застрявший филамент); при появлении — добавить ОТДЕЛЬНЫЙ `[heater_fan]` на отдельный пин, не трогая вентилятор мотора (см. «Охлаждение хотэнда — принятое решение») → проверить направление подачи (`FORCE_MOVE STEPPER=extruder DISTANCE=20 VELOCITY=5` с филаментом, смотреть выходит ли наружу) → калибровка `rotation_distance` экструдера через измеренную экструзию 100мм.
-6. Разобраться с соплом, которое не докручивалось в старый хитблок (нужно фото рядом с блоком) — возможно, снимется само с новым хитблоком.
-7. `PID_CALIBRATE` хотэнда после сборки.
+Закрыто в эту ревизию (2026-08-01):
 
-**После доверенного хоуминга:**
-8. Тестовая печать `ringing_tower.stl` → подбор `max_accel`, при желании поднять `square_corner_velocity` выше дефолтных 5 (методика в `ramps-diagnostics.html`).
+| Было | Стало |
+|---|---|
+| «Фиксы `dir_pin` X/Y лежат в репозитории, не задеплоены» (в 6 местах документа) | ✅ Неправда с 02:25. Деплой сделан, конфиг машины == репозиторий, проверено двумя способами. Все 6 мест переписаны с указанием, чем и когда проверено |
+| Снимок `printer.cfg` на 250 строк внутри этого документа | ✅ Удалён. Второй источник истины устаревал дважды; вместо него — раздел «printer.cfg — где искать» + строка «последняя сверка». `CLAUDE.md` поправлен в том же коммите (он обещал «живой снимок») |
+| «Секреты — только в `Downloads\.env`» (п. 5 в «С ЧЕГО НАЧАТЬ») | ✅ Противоречило `CLAUDE.md`. Теперь везде: `.env` в корне репозитория |
+| «Прогнать `PID_CALIBRATE HEATER=heater_bed`, у стола дефолтный PID» | ✅ Фактически неверно: стол на `control: watermark`, PID у него нет вообще, а названные `pid_Kp/Ki/Kd` — из `[extruder]`. Переписано, см. «Термопредохранитель 133°C» |
+| Метод калибровки `rotation_distance` из старого п.3 (`G91` → `G1 X100 F600` → рулетка) | ✅ Это ровно тот метод, который за ночь дал 40 → 32 → 29.4 и был отозван. Заменён на рабочий (обороты + метка на РЕМНЕ), см. B4/B5 |
+| Старый п.9: неинтерактивный `deploy.sh` (issue #4) | ✅ Проверено на живом скрипте: есть `--dry-run`, `--yes`, чтение подтверждения из `/dev/tty` с настоящей проверкой открытия. `--dry-run` отработал начисто |
+| Старый п.12: `latency_timer` через udev | ✅ Правило добавлено в `scripts/provision-orangepi.sh` (шаг 1b). На живой машине сейчас 16 (правила не было, проверено) — это безвредно, Klipper при 16 работает штатно; применить сейчас не обязательно, при следующей прошивке MCU — см. B11 |
 
-**Готово / почти готово:**
-9. ~~Экран + 5 кнопок на Orange Pi~~ — физически смонтировано и работает (2026-07-30), включая font/keypad-фикс и фикс DPMS-чёрного-экрана, см. «ПЛАН: экран + 5 кнопок», подраздел «ПРОГРЕСС (2026-07-30)» и `orangepi-display/README.md`. ~~Светлая тема не найдена~~ — **построена своя (`big-font-light`) и активна, см. раздел «Светлая тема `big-font-light`» выше, закрывает issue #10.** ~~Остаётся известный баг неинтерактивного `deploy.sh` — GitHub issue #4.~~ — **исправлен 2026-08-01** вместе с добавлением автономного режима `--yes`, см. раздел «Деплой конфигов — гейт безопасности».
+**(A), отложенное — зависит от (B). Это не «сделаем потом», а «нельзя сделать раньше»:**
 
-**Ждёт деталей:**
-10. Подсветка (D6) — нужен ещё один логический MOSFET, единственный IRL640 ушёл на вентилятор. Датчик runout (D4) — MOSFET не нужен, можно ставить как только будет сам датчик.
+- ⏳ **Вернуть `homing_speed: 50`** для `[stepper_x]` и `[stepper_y]` в `printer-configs/printer.cfg` → коммит → `deploy.sh`. Разблокируется первым удачным `G28` по каждой оси (B2, B3). Сейчас 10 — сознательно, чтобы было время среагировать. **Хвост, который теряется чаще всего: без него принтер навсегда останется с медленным хоумингом.**
+- ⏳ **Вписать измеренные значения** `rotation_distance` Y (B5) и `position_max` X/Y/Z (B7) → коммит → `deploy.sh`.
+- ⏳ **Обновить строку «Последняя сверка»** в разделе «printer.cfg — где искать» после следующего деплоя.
+- 🚫 **`Escape` не закрывает экранный нумпад** и всё остальное по KlipperScreen — **этой сессией занимается отдельный агент**, статус здесь намеренно не фиксируется, чтобы не разъехаться с его правками. Смотреть разделы про экран ниже и `orangepi-display/README.md`.
 
-**Отложено сознательно / низкий приоритет:**
-11. UART для TMC2209 — **не диагностика, а простой монтаж**: воткнуть 3 dupont-провода PDN_UART→AUX по таблице в разделе «UART для TMC2209», раскомментировать `[tmc2209 ...]`, `RESTART`, проверить `DUMP_TMC`. Ошибки `IFCNT`/`GCONF` в прошлом были просто следствием отсутствия проводов. Не блокирует ничего — standalone по триммерам работает штатно. Даст: программное управление током, `hold_current` (меньше нагрев в простое), диагностику драйверов.
-12. Постоянный фикс `latency_timer` через udev-правило.
-13. **`Escape` не закрывает экранный нумпад** (обнаружено 2026-08-01 попутно с фиксом камеры). `_menu_go_back(home=True)` отрабатывает, панель уходит в `main_menu`, но оверлей клавиатуры остаётся, а `BackSpace` в этом состоянии намеренно отдан нумпаду (`backspace-numpad-guard.patch`). Выйти можно — навести фокус на «✗» и нажать `Enter`, — но с пяти кнопок это неочевидно. Правка напрашивается в `_key_press_event`: на `Escape` сначала снимать клавиатуру (`self.remove_keyboard()`), если она есть, и только потом уходить домой.
+### (B) Требует физических действий пользователя — по одному действию на пункт
+
+> ⚠️ **Одна общая оговорка, которую надо снять первой.** Всё состояние ниже снято с машины, которая с 02:25 стоит без движения. **Проверить нельзя удалённо: трогали ли что-то руками за эти часы** — ставили ли голову обратно, перетягивали ли ремень, двигали ли концевик. Если трогали — B1 и B4 надо делать заново независимо от того, что здесь написано.
+
+**B1. На какой стороне стоит концевик X? — БЛОКИРУЕТ `G28 X`, ответ нужен глазами, не рассуждением.**
+Сейчас в конфиге `position_endstop: 0` — это ГИПОТЕЗА («начало координат спереди-слева ⇒ концевик слева»). Пользователь передвинул концевик 2026-07-28, с тех пор его никто не видел.
+```
+QUERY_ENDSTOPS          # нажать концевик X пальцем, повторить, отпустить, повторить
+```
+- Меняется `open` ↔ `TRIGGERED` → провод в PE4, `endstop_pin: ^!PE4` верен.
+- Не меняется → провод в другом разъёме, переткнуть в PE5, в репозитории поставить `endstop_pin: ^!PE5`.
+- **И отдельно посмотреть глазами:** концевик СЛЕВА → `position_endstop: 0` (как стоит). СПРАВА → в репозитории вернуть `position_endstop: 220`, `dir_pin: PF1` при этом НЕ трогать.
+
+**B2. Проверка направления Y + первый `G28 Y`.** Полная процедура — раздел «Y — направление мотора», шаги 1-5. Коротко:
+```
+M84                                                    # затем РУКОЙ каретку в СЕРЕДИНУ оси Y
+QUERY_ENDSTOPS                                         # пальцем нажать/отпустить Y-концевик
+FORCE_MOVE STEPPER=stepper_y DISTANCE=-10 VELOCITY=5   # ДОЛЖНА поехать ВПЕРЁД, к концевику
+G28 Y                                                  # только если поехала вперёд. Палец на Emergency Stop
+```
+
+**B3. Проверка направления X + первый `G28 X`.** Только ПОСЛЕ B1. Полная процедура — раздел «X — направление мотора».
+```
+M84                                                    # затем РУКОЙ голову в СЕРЕДИНУ оси X
+FORCE_MOVE STEPPER=stepper_x DISTANCE=-10 VELOCITY=5   # ДОЛЖНА поехать ВЛЕВО, к концевику
+G28 X                                                  # только если поехала влево. Палец на Emergency Stop
+```
+
+**B4. 🔴 Каретка X отставала от ремня на 13-20% — ось может быть непечатаемой. Различающий замер.**
+Ремень в тех же условиях шёл ровно (0.4%), а метка на каретке недобирала. Либо проскальзывает зажим ремня на каретке / каретка подклинивает, либо ранние замеры были просто плохими. **Две метки одновременно — изолента на РЕМНЕ и изолента на КАРЕТКЕ, обе против рисок на неподвижной раме, потом ОДИН проход:**
+```
+FORCE_MOVE STEPPER=stepper_x DISTANCE=180 VELOCITY=20 ACCEL=200   # 5 оборотов при R=36
+```
+| Что увидишь | Вывод |
+|---|---|
+| Ремень 180, каретка 180 | ✅ Ранние замеры были плохие, ось исправна, вопрос закрыт |
+| Ремень 180, каретка ~156 | 🔴 Сцепка проскальзывает. **Печатать нельзя.** Переобжать зажим ремня, проверить ход каретки рукой |
+| Ремень < 180 | Проскальзывает на шкиве — винт-фиксатор шкива на валу, натяжение ремня |
+
+Заодно это контрольная проверка `rotation_distance: 36`: 5 оборотов обязаны дать 180 мм ремня.
+
+**B5. `rotation_distance` по Y — сейчас 40, и это скорее всего неверно. Одна команда.**
+Единственный замер по Y (100 мм при R=40 → ~90 мм) не различает 36 и 40 — разбор в подразделе «Ось Y — оставлено 40». Метка на ремне Y + метка на раме, метку ставить ПОСЛЕДНЕЙ перед проходом:
+```
+FORCE_MOVE STEPPER=stepper_y DISTANCE=120 VELOCITY=20 ACCEL=200   # 3 оборота при R=40
+```
+Ход **ремня** ÷ 3: **108 → 36 (18 зубьев)** · 120 → 40 (20 зубьев) · 96 → 32 (16 зубьев). Зубья посчитать тоже, но верить замеру: на X счёт «на глаз» ошибся (называлось 16, оказалось 18).
+
+**B6. `max_velocity: 175` — по ремню на высокой скорости не мерил никто.**
+Прежняя тревога «теряет 8% на 175 мм/с» СНЯТА (считалась от неверного R=32 и по замеру каретки). Что известно: на 20 мм/с потерь нет. Что неизвестно: всё остальное.
+```
+FORCE_MOVE STEPPER=stepper_x DISTANCE=180 VELOCITY=20 ACCEL=200    # метка на РЕМНЕ, замерить
+FORCE_MOVE STEPPER=stepper_x DISTANCE=180 VELOCITY=175 ACCEL=200   # заново метка, замерить
+```
+Совпали → 175 в порядке. На 175 меньше → это срыв шагов: смотреть ток драйверов (**прибором не мерился ни разу**), натяжение, режим драйвера.
+
+**B7. `position_max` X/Y/Z — рулеткой. Сейчас 220/220/190, ни одно не измерено.**
+Это не косметика: Klipper перед хоумингом к минимуму насильно ставит позицию в `position_endstop + 1.5 × (position_max − position_min)` — именно так в логе появилось `330 = 1.5 × 220`. **Неверный `position_max` = неверная дистанция хоуминга**, то есть вопрос безопасности, а не только диапазона. Плюс известно, что 220 занижен: ремень за один проход прошёл 226 мм.
+Порядок: сначала B5 (иначе замер в «командных» мм пересчитается неверно) → потом рулеткой фактический ход от упора до упора по каждой оси → в конфиг реальное значение **минус 2-5 мм**.
+
+**B8. Z-концевик: не съехал ли после переделки крепления на регулируемое.** `position_endstop: 0.5` — значение с июля. Плюс: направление Z закрыто только `FORCE_MOVE`-ом, `G28 Z` не запускался ни разу за всю историю машины, то есть Z формально в той же категории, что были X и Y.
+```
+QUERY_ENDSTOPS                                         # пальцем нажать/отпустить Z-концевик
+FORCE_MOVE STEPPER=stepper_z DISTANCE=-5 VELOCITY=3    # медленно, смотреть глазами
+G28 Z                                                  # палец на Emergency Stop
+```
+
+**B9. 🔴 БЕЗОПАСНОСТЬ: измерить заброс температуры стола. Поднято в приоритете.**
+Термопредохранитель на 133°C — **одноразовый**, а `max_temp` в конфиге 130, то есть зазор 3°C. Реальный заброс над уставкой при `control: watermark` никем не мерен, и точка крепления предохранителя (на нагревателе) горячее термистора. Полный разбор — «Термопредохранитель 133°C — запас не измерен». **Стол греется ТОЛЬКО под непрерывным присмотром** (обвязка 220В не собрана).
+```
+TEST_BED_TEMP TARGET=110    # смотреть график в Mainsail до выхода на полку
+                            # записать МАКСИМУМ показания (не уставку)
+BED_OFF
+```
+Зазор меньше ~10°C → либо снижать рабочую температуру стола, либо брать предохранитель на больший номинал. **`PID_CALIBRATE HEATER=heater_bed` НЕ запускать** — он молча переключит стол с `watermark` на `pid`, отменив осознанное решение по zero-cross SSR.
+
+**B10. UART для TMC2209 — воткнуть 3 dupont-провода.** Это монтаж, а не диагностика: таблица PDN_UART→AUX в разделе «UART для TMC2209». После этого раскомментировать `[tmc2209 …]` в `printer-configs/printer.cfg`, задеплоить, проверить `DUMP_TMC STEPPER=stepper_x`. Ничего не блокирует — standalone по триммерам работает штатно. Даст программный ток, `hold_current` и диагностику драйверов.
+
+**B11. Мелочь: `latency_timer` на живой машине.** Правило есть в провижене, но текущая машина провижен не перезапускала — сейчас там 16. Разово (не обязательно, Klipper при 16 работает): `sudo sh -c 'echo 1 > /sys/bus/usb-serial/devices/ttyUSB0/latency_timer'`. Постоянно — скопировать правило из `scripts/provision-orangepi.sh` (шаг 1b) в `/etc/udev/rules.d/`. Актуально к следующей прошивке MCU.
+
+**B12. Стол физически не закреплён на кронштейне рамы** — ждёт переходной пластины (см. C).
+
+**B13. Перед первой реальной печатью:** проверить пучок проводов на каретке X (спиральная оплётка) — не пережимает ли PTFE-трубку, не трётся ли изоляция на выходе из экструдера; натяжение ремней и перпендикулярность гантри.
+
+### (C) Ждёт железа — раньше не сделать ничем
+
+**C1. Хитблок + CR-Touch (в пути) → пересборка хотэнда/экструдера.** Тянет за собой цепочку, ни одно звено не делается раньше:
+- проверка направления подачи: `FORCE_MOVE STEPPER=extruder DISTANCE=20 VELOCITY=5` с филаментом, смотреть, выходит ли наружу;
+- калибровка `rotation_distance` экструдера (сейчас 23.562 — теоретическая, из π × 7.5 мм) через измеренную экструзию 100 мм;
+- `PID_CALIBRATE` **хотэнда** (вот у него PID настоящий и правда некалиброванный: `pid_Kp: 22.2 / pid_Ki: 1.08 / pid_Kd: 114` — дженерик из `generic-ramps.cfg`);
+- на первых длинных печатях следить за heat creep (недоэкструзия к концу, щелчки фидера, застрявший филамент) — при появлении добавить ОТДЕЛЬНЫЙ `[heater_fan]` на отдельный пин, не трогая вентилятор мотора.
+**До пересборки не подавать команды нагрева экструдера** — картридж вне блока.
+
+**C2. Сопло, которое не докручивалось в старый хитблок.** Возможно, снимется само с новым хитблоком. Если нет — нужно фото сопла рядом с блоком.
+
+**C3. Первая тестовая печать `ringing_tower.stl` → `max_accel` / `square_corner_velocity`.** Раньше числилась как «после доверенного хоуминга» — **это занижало блокер**: печать требует собранного хотэнда, то есть ждёт C1, а не только B2/B3. `max_accel: 1500` сейчас — дженерик, не калиброван.
+
+**C4. Обвязка 220В стола** (полный список и обоснования — в «Дозаказать»): радиатор на SSR (заказан, едет), предохранитель 5-6А на AC-стороне, механический термопредохранитель 133°C (куплен, но сначала B9), переходная пластина под крепление стола к раме (не куплена).
+
+**C5. Электроника, которой ещё нет:** MOSFET IRLZ44N (подсветка D6 + сирена), датчик runout (D4, MOSFET не нужен — соберётся из имеющегося концевика с длинной лапкой), датчик дыма MQ-2 с интеграцией в Klipper через `[gcode_button]`.
 
 **Роутер — ЗАВЕРШЕНО, вопросов не осталось** (подробности и итоги в разделе про роутер выше). Единственный нерешаемый момент — аппаратно рабочим остался 1 LAN-порт из 4.
 **Полезная заметка на будущее:** `networkctl renew` на Linux-клиенте с systemd-networkd продлевает старую аренду, а не запрашивает новую — если ещё раз понадобится форсировать смену IP на статичный, сразу удалять старую запись из `/tmp/dhcp.leases` на роутере + `dnsmasq restart`, не тратить время на `renew`.
@@ -1610,7 +1504,7 @@ RSS, 2.1% CPU, снапшот отдаёт за 60 мс), а 640×480 нужны
 - ✅ Термостойкий силиконовый провод под 220В — уже правильный, есть.
 - ✅ Предохранитель + держатель — не нужно докупать отдельно, нашёлся встроенным в корпусной IEC-разъём 220В (там же и выключатель питания — бонус).
 - 🕓 Радиатор для SSR — заказан, едет с термоклеем (не термопаста, но для SSR-радиатора это ок).
-- ✅ Механический термопредохранитель — взят на **133°C** (осознанный компромисс: 120°C — практический предел, к которому редко подходят вплотную; пользователь не хочет более высокий номинал (150-180°C), чтобы в случае реального перегрева не испортить магнитную подложку стола). Разумнее исходного заказа на 121°C, но запас всего ~13°C держится только если PID стола откалиброван — сейчас `pid_Kp/Ki/Kd` в `printer.cfg` ещё дефолтные (не под реальную тепловую массу этого стола), а без калибровки нагрев может давать заброс на несколько градусов выше уставки при выходе на температуру, что съедает часть запаса непредсказуемо. **Перед тем как полагаться на этот предохранитель — прогнать `PID_CALIBRATE HEATER=heater_bed TARGET=120` (или на реальную рабочую температуру) и записать `pid_Kp/Ki/Kd` в конфиг.** Также при монтаже не лепить предохранитель вплотную к самому горячему участку нагревателя — иначе он видит температуру выше, чем показывает термистор, даже в штатном режиме.
+- ✅ Механический термопредохранитель — взят на **133°C** (осознанный компромисс: 120°C — практический предел, к которому редко подходят вплотную; пользователь не хочет более высокий номинал (150-180°C), чтобы в случае реального перегрева не испортить магнитную подложку стола). Разумнее исходного заказа на 121°C. ⚠️ **Запас в ~13°C — величина НЕИЗМЕРЕННАЯ, и это открытый вопрос безопасности, см. подраздел «Термопредохранитель 133°C — запас не измерен» в разделе про SSR/heater_bed.** Там же исправлено прежнее утверждение этого пункта («запас держится только если откалиброван PID стола, прогнать `PID_CALIBRATE HEATER=heater_bed`») — **оно было фактически неверным: у стола нет и не должно быть PID**, он на `control: watermark`, а `pid_Kp/Ki/Kd` в конфиге принадлежат `[extruder]`. Что действительно делать при монтаже: не лепить предохранитель вплотную к самому горячему участку нагревателя — иначе он видит температуру выше, чем показывает термистор, даже в штатном режиме, и одноразовый предохранитель может сработать «просто так».
 - ⬜ Переходная пластина под крепление стола к раме mbot — всё ещё не куплена.
 
 **Электроника:**
