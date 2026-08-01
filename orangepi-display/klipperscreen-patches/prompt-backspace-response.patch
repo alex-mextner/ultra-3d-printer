@@ -1,0 +1,29 @@
+--- a/ks_includes/widgets/prompts.py
++++ b/ks_includes/widgets/prompts.py
+@@ -136,6 +136,26 @@
+         self.screen.screensaver.close()
+ 
+     def response(self, dialog, response_id):
++        if response_id == Gtk.ResponseType.CANCEL:
++            # 2026-08-01. BackSpace on a prompt stopped working the moment
++            # KlippyGtk.Dialog() grew its own key-press handler
++            # (dialog-backspace-exit.patch): that handler is connected inside
++            # the factory, this class connects _key_press_event to the same
++            # dialog afterwards, and "key-press-event" is a boolean-accumulator
++            # signal -- the factory returning True ends the emission, so
++            # _key_press_event below never ran, close() never fired, and no
++            # action:prompt_end went out. The dialog just sat there, because
++            # the loop below finds no match for CANCEL (-6): prompt button
++            # responses are positive ints from self.id.
++            #
++            # Answering CANCEL here restores exactly what this class already
++            # intended for BackSpace, through the response contract the rest
++            # of the codebase uses (gcodes.py, job_status.py, network.py all
++            # test CANCEL explicitly). Note the dialog is still torn down by
++            # Klipper echoing action:prompt_end back -> screen.py -> end(),
++            # not by this line; that is upstream's own closing path.
++            self.close()
++            return
+         for button in self.buttons:
+             if button["response"] == response_id:
+                 self.screen._send_action(None, "printer.gcode.script", {"script": button["gcode"]})

@@ -504,6 +504,37 @@ index cbcdaa4..9f9da7a 100644
          self.entry.connect("activate", self._on_keypad_clicked, "E")
  
          close_btn = self._gtk.Button("cancel", scale=0.66)
+diff --git a/ks_includes/widgets/prompts.py b/ks_includes/widgets/prompts.py
+index aa14798..3ee93b6 100644
+--- a/ks_includes/widgets/prompts.py
++++ b/ks_includes/widgets/prompts.py
+@@ -136,6 +136,26 @@ class Prompt:
+         self.screen.screensaver.close()
+ 
+     def response(self, dialog, response_id):
++        if response_id == Gtk.ResponseType.CANCEL:
++            # 2026-08-01. BackSpace on a prompt stopped working the moment
++            # KlippyGtk.Dialog() grew its own key-press handler
++            # (dialog-backspace-exit.patch): that handler is connected inside
++            # the factory, this class connects _key_press_event to the same
++            # dialog afterwards, and "key-press-event" is a boolean-accumulator
++            # signal -- the factory returning True ends the emission, so
++            # _key_press_event below never ran, close() never fired, and no
++            # action:prompt_end went out. The dialog just sat there, because
++            # the loop below finds no match for CANCEL (-6): prompt button
++            # responses are positive ints from self.id.
++            #
++            # Answering CANCEL here restores exactly what this class already
++            # intended for BackSpace, through the response contract the rest
++            # of the codebase uses (gcodes.py, job_status.py, network.py all
++            # test CANCEL explicitly). Note the dialog is still torn down by
++            # Klipper echoing action:prompt_end back -> screen.py -> end(),
++            # not by this line; that is upstream's own closing path.
++            self.close()
++            return
+         for button in self.buttons:
+             if button["response"] == response_id:
+                 self.screen._send_action(None, "printer.gcode.script", {"script": button["gcode"]})
 diff --git a/ks_includes/widgets/scroll.py b/ks_includes/widgets/scroll.py
 index e9accaa..4c00f38 100644
 --- a/ks_includes/widgets/scroll.py
