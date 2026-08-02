@@ -535,6 +535,51 @@ index aa14798..3ee93b6 100644
          for button in self.buttons:
              if button["response"] == response_id:
                  self.screen._send_action(None, "printer.gcode.script", {"script": button["gcode"]})
+diff --git a/ks_includes/widgets/screensaver.py b/ks_includes/widgets/screensaver.py
+index f62cf1a..4e1a418 100644
+--- a/ks_includes/widgets/screensaver.py
++++ b/ks_includes/widgets/screensaver.py
+@@ -42,6 +42,19 @@ class ScreenSaver:
+         if self.screensaver_timeout is not None:
+             GLib.source_remove(self.screensaver_timeout)
+             self.screensaver_timeout = None
++        # Smoke alarm (2026-08-02): never blank over a live alarm banner.
++        # Without this the screen goes black a few minutes into an alarm
++        # that nobody has come to yet, and the first key press then only
++        # wakes the screensaver (that branch swallows it), so the alarm
++        # would need two presses instead of the one the user asked for.
++        # Deliberately AFTER the source_remove above: returning before it
++        # would leave a dead source id in screensaver_timeout for the next
++        # reset_timeout() to remove a second time. The timeout is re-armed
++        # by KlipperScreen._smoke_alarm_hide_banner() on dismissal.
++        # getattr(): screen.py may predate this feature.
++        if getattr(self.screen, "_smoke_alarm_showing", False):
++            logging.info("Screensaver: suppressed, the smoke alarm banner is up")
++            return False
+         if self.screen.blanking_time == 0:
+             return False
+         self.screen.remove_keyboard()
+@@ -103,9 +116,17 @@ class ScreenSaver:
+         logging.debug("Closed Screensaver")
+         for child in self.screen.overlay.get_children():
+             child.show()
+-        for dialog in self.screen.dialogs:
+-            logging.info(f"Restoring Dialog {dialog}")
+-            dialog.show()
++        # Smoke alarm (2026-08-02): the alarm banner hides every dialog on
++        # purpose -- a KlippyGtk.Dialog() is a modal toplevel and would sit
++        # ON TOP of the banner and eat the keys meant to dismiss it. Waking
++        # from the screensaver in the middle of an alarm must not undo that;
++        # KlipperScreen._smoke_alarm_hide_banner() restores them itself.
++        if getattr(self.screen, "_smoke_alarm_showing", False):
++            logging.info("Screensaver: dialogs stay hidden, the smoke alarm banner is up")
++        else:
++            for dialog in self.screen.dialogs:
++                logging.info(f"Restoring Dialog {dialog}")
++                dialog.show()
+         self.screen.lock_screen.relock()
+         return False
+ 
 diff --git a/ks_includes/widgets/scroll.py b/ks_includes/widgets/scroll.py
 index e9accaa..4c00f38 100644
 --- a/ks_includes/widgets/scroll.py
@@ -3570,10 +3615,38 @@ index 573180a..68e3517 100644
          self.content.add(grid)
  
 diff --git a/screen.py b/screen.py
-index 4efa3ac..5399e3d 100755
+index 4efa3ac..4230317 100755
 --- a/screen.py
 +++ b/screen.py
-@@ -101,7 +101,17 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -60,6 +60,27 @@ class AppState:
+ class KlipperScreen(Gtk.ApplicationWindow):
+     MAX_RETRIES = 4
+ 
++    # ------------------------------------------------------------------
++    # Smoke-alarm contract (2026-08-02). THE ONLY PLACE these three names
++    # exist: the hardware half of this feature (smoke sensor + siren on the
++    # RAMPS board) is being built separately, and if it renames anything the
++    # fix is a one-line edit here.
++    #
++    #   SMOKE_ALARM_OBJECT  a Klipper object carried by KlipperScreen's
++    #                       ordinary Moonraker object subscription (an
++    #                       [output_pin] is picked up automatically by
++    #                       ws_subscribe() via printer.get_output_pins()).
++    #   SMOKE_ALARM_FIELD   the field inside it; > 0 means "alarm sounding".
++    #   SMOKE_SNOOZE_MACRO  the g-code macro that silences the siren and
++    #                       mutes the system for 10 minutes.
++    #
++    # If the object does not exist on this printer (it does not yet -- the
++    # hardware is not wired), _smoke_alarm_value() returns None and every
++    # code path below is inert: no banner, no key branch, no log noise.
++    SMOKE_ALARM_OBJECT = "output_pin siren"
++    SMOKE_ALARM_FIELD = "value"
++    SMOKE_SNOOZE_MACRO = "SMOKE_SNOOZE"
++
+     def __init__(self, args):
+         try:
+             super().__init__(title="KlipperScreen")
+@@ -101,7 +122,29 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.env = Environment(extensions=["jinja2.ext.i18n"], autoescape=True)
          self.env.install_gettext_translations(self._config.get_lang())
  
@@ -3586,12 +3659,24 @@ index 4efa3ac..5399e3d 100755
 +        # capture started, so BackSpace/Escape can put it back.
 +        self._captured_range = None
 +        self._captured_range_entry_value = None
++        # Smoke alarm (2026-08-02, see the constants at the top of the class).
++        # _smoke_alarm_banner is the full-screen red Gtk.Box while it is up,
++        # None otherwise -- it is ADDED TO and REMOVED FROM self.overlay
++        # rather than shown/hidden, because two existing code paths
++        # resurrect any hidden overlay child: attach_panel() ends in
++        # self.show_all(), and ScreenSaver.delayed_wake() calls show() on
++        # every overlay child. _smoke_alarm_latched makes the banner
++        # edge-triggered: it goes up on the 0 -> non-zero transition only,
++        # so dismissing it while the pin is still high does not immediately
++        # re-raise it, and a fresh alarm after a snooze does.
++        self._smoke_alarm_banner = None
++        self._smoke_alarm_latched = False
          self.connect("key-press-event", self._key_press_event)
 +        self.connect("set-focus", self._on_set_focus)
          self.connect("configure_event", self.update_size)
          display = Gdk.Display.get_default()
          self.display_number = os.environ.get("DISPLAY") or ":0"
-@@ -148,6 +158,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -148,6 +191,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.vertical_mode = self.aspect_ratio < 1.0
          logging.info(f"Screen resolution: {self.width}x{self.height}")
          self.theme = self._config.get_main_config().get("theme")
@@ -3603,7 +3688,7 @@ index 4efa3ac..5399e3d 100755
          self.show_cursor = self._config.get_main_config().getboolean("show_cursor", fallback=False)
          self.setup_gtk_settings()
          self.style_provider = Gtk.CssProvider()
-@@ -160,9 +175,50 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -160,9 +208,50 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.base_panel = BasePanel(self)
          self.change_theme(self.theme)
          self.overlay = Gtk.Overlay()
@@ -3654,7 +3739,7 @@ index 4efa3ac..5399e3d 100755
          self.update_cursor(self.show_cursor)
          min_ver = (3, 8)
          if sys.version_info < min_ver:
-@@ -640,6 +696,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -640,6 +729,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
              screen, self.style_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
          )
  
@@ -3818,7 +3903,7 @@ index 4efa3ac..5399e3d 100755
      def change_theme(self, theme_name=None):
          if not theme_name:
              theme_name = self._config.get_main_config().get("theme")
-@@ -692,6 +905,35 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -692,6 +938,35 @@ class KlipperScreen(Gtk.ApplicationWindow):
      def _menu_go_back(self, widget=None, home=False):
          logging.info(f"#### Menu go {'home' if home else 'back'}")
          self.remove_keyboard()
@@ -3854,7 +3939,253 @@ index 4efa3ac..5399e3d 100755
          while len(self._cur_panels) > 1:
              self._remove_current_panel()
              del self._cur_panels[-1]
-@@ -1425,10 +1667,761 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -699,6 +974,215 @@ class KlipperScreen(Gtk.ApplicationWindow):
+                 break
+         self.attach_panel(self._cur_panels[-1])
+ 
++    # ----------------------------------------------------------------------
++    # Smoke alarm banner (2026-08-02).
++    #
++    # The user asked for: a red full-screen banner whenever the smoke siren
++    # is sounding, on top of whatever is on screen, dismissed by ANY of the
++    # five buttons, and dismissing it silences the siren for 10 minutes.
++    # The names of the Klipper object and of the macro are the contract with
++    # the hardware half of the feature and live in the class constants at
++    # the top of this file.
++    #
++    # Design notes, all of them consequences of bugs already paid for in
++    # this codebase:
++    #
++    # * The banner is an OVERLAY CHILD, added on raise and removed on
++    #   dismiss. Not a panel: panels are torn down and rebuilt constantly
++    #   (a Klipper shutdown alone runs _remove_all_panels() plus a full
++    #   reinit), and the one moment the banner must survive is exactly the
++    #   moment the printer is in trouble. self.overlay outlives all of it.
++    #   Never merely hidden, because both attach_panel() (self.show_all())
++    #   and ScreenSaver.delayed_wake() (child.show() on every overlay child)
++    #   would put a hidden banner back on screen.
++    # * It contains NO focusable widget and never touches focus. Ten input
++    #   bugs in this session came from focus left pointing at a widget that
++    #   went away; the cheapest way not to add an eleventh is to leave the
++    #   focus chain exactly as it was and let the key branch swallow keys
++    #   while the banner is up.
++    # * Modal KlippyGtk.Dialog()s are separate toplevels: they would sit ON
++    #   TOP of the banner and eat the keys (see KlippyGtk.dialog_key_press).
++    #   So they are hidden on raise and restored on dismiss, the same way
++    #   ScreenSaver.show()/delayed_wake() already do it.
++    # * No mistouch/deaf window after raise, deliberately. A guard period
++    #   would mean a key press that visibly does nothing, which is the
++    #   exact failure mode this session spent ten bugs on -- and the user's
++    #   requirement is literally "any button closes it". The siren itself is
++    #   what draws attention; the banner only has to say why.
++    # ----------------------------------------------------------------------
++    @property
++    def _smoke_alarm_showing(self):
++        return self._smoke_alarm_banner is not None
++
++    def _smoke_alarm_value(self):
++        # None means "no such object / nothing usable" -> feature inert.
++        if self.printer is None:
++            return None
++        try:
++            value = self.printer.get_stat(self.SMOKE_ALARM_OBJECT).get(self.SMOKE_ALARM_FIELD)
++            return None if value is None else float(value)
++        except (TypeError, ValueError, AttributeError):
++            return None
++
++    def _smoke_alarm_update(self):
++        # Called on every notify_status_update. Edge-triggered on purpose:
++        # raising on every update while the pin stays high would put the
++        # banner back a fraction of a second after the user dismissed it,
++        # forever. The latch is released when the pin returns to 0, so a
++        # SECOND alarm after the snooze expires shows the banner again.
++        value = self._smoke_alarm_value()
++        if value is None:
++            return
++        if value > 0:
++            if not self._smoke_alarm_latched:
++                self._smoke_alarm_latched = True
++                self._smoke_alarm_raise(value)
++            return
++        if self._smoke_alarm_latched:
++            logging.info(f"Smoke alarm: {self.SMOKE_ALARM_OBJECT} back to 0, re-arming")
++            self._smoke_alarm_latched = False
++        if self._smoke_alarm_showing:
++            # Silenced somewhere else (Mainsail, the macro's own timer, a
++            # console SET_PIN): take the banner down without sending
++            # anything -- there is nothing left to snooze.
++            logging.info("Smoke alarm: source cleared, hiding banner")
++            self._smoke_alarm_hide_banner()
++
++    def _smoke_alarm_raise(self, value):
++        logging.info(f"Smoke alarm: RAISED ({self.SMOKE_ALARM_OBJECT} = {value})")
++        self.log_notification("SMOKE ALARM / ДЫМ", 2)
++        if self._smoke_alarm_showing:
++            return
++        self.close_popup_message()
++        for dialog in self.dialogs:
++            logging.info("Smoke alarm: hiding dialog")
++            dialog.hide()
++        # The screen is very likely blanked: this fires unattended, at
++        # night, on a machine whose backlight goes off after a few minutes.
++        # wake_screen() drives DPMS (no-op when use_dpms is off) and
++        # screensaver.close() takes the black overlay away. ScreenSaver.show()
++        # additionally refuses to blank while the banner is up, so it cannot
++        # come back over it a minute later.
++        self.wake_screen()
++        self.screensaver.close()
++        self._smoke_alarm_banner = self._smoke_alarm_build_banner()
++        self.overlay.add_overlay(self._smoke_alarm_banner)
++        self._smoke_alarm_banner.show_all()
++
++    def _smoke_alarm_build_banner(self):
++        # Sized to the whole screen explicitly, like ScreenSaver's box: an
++        # overlay child that only asks for its natural size leaves the panel
++        # underneath visible around it.
++        box = Gtk.Box(
++            orientation=Gtk.Orientation.VERTICAL,
++            halign=Gtk.Align.FILL,
++            valign=Gtk.Align.FILL,
++            width_request=self.width,
++            height_request=self.height,
++        )
++        box.get_style_context().add_class("smoke_alarm")
++        title = Gtk.Label(label="ДЫМ!", hexpand=True, vexpand=True)
++        title.get_style_context().add_class("smoke_alarm_title")
++        text = Gtk.Label(label="СРАБОТАЛ ДАТЧИК ДЫМА", hexpand=True)
++        text.get_style_context().add_class("smoke_alarm_text")
++        hint = Gtk.Label(
++            label="Любая кнопка — тишина 10 мин",
++            hexpand=True,
++            wrap=True,
++            wrap_mode=Pango.WrapMode.WORD_CHAR,
++        )
++        hint.get_style_context().add_class("smoke_alarm_hint")
++        for label in (title, text, hint):
++            label.set_can_focus(False)
++            box.add(label)
++        return box
++
++    def _smoke_alarm_hide_banner(self):
++        banner = self._smoke_alarm_banner
++        if banner is None:
++            return
++        self._smoke_alarm_banner = None
++        try:
++            self.overlay.remove(banner)
++            banner.destroy()
++        except Exception:
++            logging.exception("Smoke alarm: removing the banner failed")
++        for dialog in self.dialogs:
++            logging.info("Smoke alarm: restoring dialog")
++            dialog.show()
++        # Blanking was suppressed while the banner was up (see
++        # ScreenSaver.show()); start the countdown again from now.
++        self.screensaver.reset_timeout()
++
++    def _smoke_alarm_macro_missing(self):
++        # MEASURED 2026-08-02 on this printer: Klipper answers
++        # printer.gcode.script for an unknown command with
++        # {"result": "ok"} plus a plain "// Unknown command:..." console
++        # line -- NOT a JSON-RPC error. So the response callback below
++        # cannot tell a correct macro name from a wrong one, and the only
++        # reliable check is the config Klipper already published to us.
++        # This is the contract-drift alarm: if the hardware half ships the
++        # macro under a different name, the user finds out the first time
++        # they dismiss the banner instead of silently not snoozing.
++        config = getattr(self.printer, "config", None) if self.printer else None
++        if not config:
++            # Config not known (early startup) -- do not accuse, just send.
++            return False
++        wanted = f"gcode_macro {self.SMOKE_SNOOZE_MACRO}".lower()
++        return all(section.lower() != wanted for section in config)
++
++    def _smoke_alarm_dismiss(self):
++        self._smoke_alarm_hide_banner()
++        if self._smoke_alarm_macro_missing():
++            self._smoke_alarm_snooze_failed(f"нет макроса {self.SMOKE_SNOOZE_MACRO}")
++            return
++        sent = False
++        try:
++            if self._ws is not None:
++                sent = self._ws.api.gcode_script(
++                    self.SMOKE_SNOOZE_MACRO, self._smoke_alarm_snooze_result
++                )
++        except Exception:
++            logging.exception(f"Smoke alarm: sending {self.SMOKE_SNOOZE_MACRO} raised")
++            sent = False
++        if sent:
++            logging.info(f"Smoke alarm: dismissed, sent {self.SMOKE_SNOOZE_MACRO}")
++        else:
++            # send_method() returns False when the websocket is down.
++            self._smoke_alarm_snooze_failed("нет связи с Moonraker")
++
++    def _smoke_alarm_snooze_result(self, response, method, params, *args):
++        # Moonraker answers every JSON-RPC call; an unknown macro, or a
++        # Klipper that is shut down after an M112, comes back as "error".
++        # That is the whole point of passing a callback: the banner is
++        # already gone by then (it must be -- a screen that cannot be
++        # dismissed during a fire is the worst possible failure), so this
++        # is the only thing left that can tell the user the siren is still
++        # live.
++        error = response.get("error") if isinstance(response, dict) else None
++        if error:
++            message = error.get("message", error) if isinstance(error, dict) else error
++            self._smoke_alarm_snooze_failed(str(message))
++            return
++        logging.info(f"Smoke alarm: {self.SMOKE_SNOOZE_MACRO} accepted by Klipper")
++
++    def _smoke_alarm_snooze_failed(self, reason):
++        logging.error(f"Smoke alarm: {self.SMOKE_SNOOZE_MACRO} FAILED: {reason}")
++        # level 2 = warning: stays on screen for 300s instead of 10, and
++        # lands in the notification log behind the bell, so the message
++        # survives being missed. Deliberately NOT re-raising the banner:
++        # with the pin still high that would loop banner -> key -> failure
++        # -> banner and lock the user out of the very UI they need to
++        # recover Klipper (FIRMWARE_RESTART lives behind that UI).
++        #
++        # Three short lines rather than one sentence: MEASURED live on this
++        # 320px screen, show_popup_message()'s popover clips at roughly 28
++        # characters per line (its label wraps at max_width_chars=40, which
++        # is already wider than the popover), so a long single line loses
++        # its beginning AND its end.
++        reason = str(reason).strip().replace("\n", " ")[:56]
++        self.show_popup_message(f"Сирена НЕ выключена:\n{reason}\nВыключите её вручную!", 2)
++
+     def check_dpms_state(self):
+         if not self.use_dpms or self.wayland:
+             return False
+@@ -708,7 +1192,14 @@ class KlipperScreen(Gtk.ApplicationWindow):
+             self.set_dpms(False)
+             return False
+         elif state != functions.DPMS_State.On:
+-            if not self.screensaver.is_showing:
++            if self._smoke_alarm_showing:
++                # Do not drop the screensaver over a live alarm. Forcing
++                # DPMS back on returns the state to On, so this runs once
++                # per blanking attempt rather than once a second -- xset is
++                # a forked process and this is a 512MB box.
++                logging.info("Smoke alarm: DPMS blanked the panel, waking it back up")
++                self.wake_screen()
++            elif not self.screensaver.is_showing:
+                 self.screensaver.show()
+         return True
+ 
+@@ -996,6 +1487,13 @@ class KlipperScreen(Gtk.ApplicationWindow):
+             self.show_panel(*action)
+ 
+     def process_update(self, *args):
++        # Smoke alarm (2026-08-02): only on status updates, for two
++        # reasons. It is the only action that can carry the siren object at
++        # all, and log_notification() calls process_update("notify_log",
++        # ...) -- which _smoke_alarm_raise() triggers, so reacting to every
++        # action would re-enter this from inside itself.
++        if args and args[0] == "notify_status_update":
++            self._smoke_alarm_update()
+         self.base_panel.process_update(*args)
+         if (
+             self.printer
+@@ -1425,10 +1923,791 @@ class KlipperScreen(Gtk.ApplicationWindow):
  
      def _key_press_event(self, widget, event):
          keyval_name = Gdk.keyval_name(event.keyval)
@@ -3877,6 +4208,28 @@ index 4efa3ac..5399e3d 100755
 +        # mode that silently ate arrow keys here (see the resume branch).
 +        self._key_trace_branch = "gtk-default"
 +        focus_before = self._describe_focus(self.get_focus())
++        if self._smoke_alarm_showing:
++            # Smoke alarm (2026-08-02): ANY key takes the banner down and
++            # sends SMOKE_SNOOZE. Placed FIRST, ahead of the screensaver
++            # branch, because raising the banner wakes the screen and
++            # ScreenSaver.close() keeps is_showing True for its whole
++            # screensaver_wake_delay window -- during that second the banner
++            # is already drawn on top of the black box (overlay children
++            # paint above the overlay's main child, which is what the
++            # blackbox is), so the user can see it and will press. Landing
++            # in the screensaver branch there would swallow that press as a
++            # "mistouch" and the alarm would need a second key.
++            #
++            # Swallowed (handled=True) like the screensaver branch does, so
++            # the press that dismisses the alarm cannot also actuate
++            # whatever widget still holds focus underneath -- the banner has
++            # no focusable widget of its own by design, so focus is
++            # untouched and the panel behaves exactly as before afterwards.
++            self._key_trace_branch = f"smoke-alarm/dismiss({keyval_name})"
++            self._smoke_alarm_dismiss()
++            self._reset_focus_clear_timeout()
++            self._trace_key(keyval_name, focus_before, True)
++            return True
 +        if self.screensaver.is_showing:
 +            # Wake-on-any-key (2026-07-31): this machine is a 5-button D-pad
 +            # with no touchscreen, so the screensaver's only built-in
@@ -4073,13 +4426,21 @@ index 4efa3ac..5399e3d 100755
 +                # movement there is untouched.
 +                handled = self._dpad_scroll(keyval_name == "Down")
 +        self._reset_focus_clear_timeout()
++        self._trace_key(keyval_name, focus_before, handled)
++        return handled
++
++    def _trace_key(self, keyval_name, focus_before, handled):
++        # One line per key press, see the comment at the top of
++        # _key_press_event. A method rather than an inline logging.info()
++        # since 2026-08-02, so the branches that return early (the smoke
++        # alarm one) produce the exact same line as the common path instead
++        # of a differently-shaped one that greps would miss.
 +        logging.info(
 +            f"Key {keyval_name}: focus {focus_before} -> "
 +            f"{self._describe_focus(self.get_focus())} | handled={handled}"
 +            f" via {self._key_trace_branch} | panel="
 +            f"{self._cur_panels[-1] if self._cur_panels else None}"
 +        )
-+        return handled
 +
 +    def _can_take_focus(self, widget):
 +        # True only if Gtk.Window.set_focus(widget) would really move focus
@@ -4633,7 +4994,7 @@ index 6853f6c..ebb2662 100644
 +# 512 MB SBCs this runs on.
 +segno>=1.6.6;python_version>="3.8"
 diff --git a/styles/base.css b/styles/base.css
-index 91f526b..35dc74c 100644
+index 91f526b..7c7d37c 100644
 --- a/styles/base.css
 +++ b/styles/base.css
 @@ -25,6 +25,61 @@ button:disabled {
@@ -4937,7 +5298,50 @@ index 91f526b..35dc74c 100644
  }
  
  .heater-grid {
-@@ -613,6 +825,36 @@ trough progress {
+@@ -608,11 +820,79 @@ popover button {
+     margin: 0;
+ }
+ 
++/* 2026-08-02 smoke alarm banner (screen.py, _smoke_alarm_build_banner).
++ * Full-screen red overlay child shown while the siren is sounding.
++ *
++ * Sizes are absolute px on CLASS selectors, not KS_FONT_SIZE and not
++ * element selectors, for one specific reason: every theme's style.css is
++ * concatenated AFTER this file and each of them contains a bare
++ * `* { font-size: 14px }`. A class selector outranks `*` on specificity, so
++ * these survive both themes and the day/night switch between them; anything
++ * relying on inheritance or on source order would silently come out 14px.
++ * Both themes get the same red -- an alarm is not a place for a light and a
++ * dark variant, and the text is white on a deep red in either case.
++ * Colours are literal rather than @error so that a theme redefining @error
++ * cannot dilute them. */
++.smoke_alarm {
++    background-color: #B00000;
++    background-image: none;
++    border: 0;
++    margin: 0;
++    padding: 0.2em;
++}
++
++.smoke_alarm_title {
++    color: #FFFFFF;
++    font-size: 46px;
++    font-weight: bold;
++}
++
++.smoke_alarm_text {
++    color: #FFFFFF;
++    font-size: 18px;
++    font-weight: bold;
++}
++
++.smoke_alarm_hint {
++    color: #FFD5D5;
++    font-size: 13px;
++}
++
+ .option_slider_max trough highlight,
+ trough progress {
      background-color: @error;
  }
  
