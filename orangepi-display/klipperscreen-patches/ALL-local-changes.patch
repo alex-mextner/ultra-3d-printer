@@ -3615,10 +3615,10 @@ index 573180a..68e3517 100644
          self.content.add(grid)
  
 diff --git a/screen.py b/screen.py
-index 4efa3ac..4230317 100755
+index 4efa3ac..e3b2dea 100755
 --- a/screen.py
 +++ b/screen.py
-@@ -60,6 +60,27 @@ class AppState:
+@@ -60,6 +60,58 @@ class AppState:
  class KlipperScreen(Gtk.ApplicationWindow):
      MAX_RETRIES = 4
  
@@ -3633,20 +3633,51 @@ index 4efa3ac..4230317 100755
 +    #                       [output_pin] is picked up automatically by
 +    #                       ws_subscribe() via printer.get_output_pins()).
 +    #   SMOKE_ALARM_FIELD   the field inside it; > 0 means "alarm sounding".
-+    #   SMOKE_SNOOZE_MACRO  the g-code macro that silences the siren and
-+    #                       mutes the system for 10 minutes.
++    #   SMOKE_SILENCE_MACRO the g-code macro that silences the siren while
++    #                       Klipper is still alive. Bench/test path ONLY --
++    #                       a real alarm always ends in a shutdown, where no
++    #                       macro can run at all (see below).
++    #   SMOKE_SHUTDOWN_MARKER
++    #                       prefix that printer-configs/smoke-alarm.cfg puts
++    #                       into webhooks.state_message via
++    #                       action_emergency_stop("SMOKE ALARM: ..."), which
++    #                       is what distinguishes a fire from any other
++    #                       Klipper shutdown.
 +    #
-+    # If the object does not exist on this printer (it does not yet -- the
-+    # hardware is not wired), _smoke_alarm_value() returns None and every
-+    # code path below is inert: no banner, no key branch, no log noise.
++    # TWO SOURCES, because a fire ends in an emergency stop (M112) and that
++    # takes the first source away:
++    #
++    #   shutdown  THE REAL ONE. Klipper down AND state_message carrying the
++    #             marker. A fire means an emergency stop, so by the time the
++    #             user sees anything Klipper is already shut down: the pin's
++    #             reported value is then meaningless (the MCU drives the
++    #             buzzer from shutdown_value, the host-side value does not
++    #             follow) and NO g-code can run at all -- klippy/gcode.py
++    #             allows exactly M110/M112/M115/RESTART/FIRMWARE_RESTART/
++    #             ECHO/STATUS/HELP after a shutdown. The only thing that
++    #             silences it is FIRMWARE_RESTART, which also starts the
++    #             config's automatic 10-minute disarm window.
++    #   pin       [output_pin siren].value > 0 with Klipper still alive.
++    #             Bench path: SMOKE_TEST_SIREN, and the few milliseconds
++    #             inside SMOKE_ALARM between its SET_PIN and its shutdown
++    #             (worth keeping: if that update wins the race the banner is
++    #             up marginally earlier, and it costs nothing if it loses).
++    #             Silenced by SMOKE_SILENCE_MACRO, never by a firmware
++    #             restart -- a live Klipper may be printing, and no bench
++    #             test is worth aborting a print by surprise.
++    #
++    # If none of this exists on the printer, _smoke_alarm_source() returns
++    # None and every code path below is inert: no banner, no key branch, no
++    # log noise.
 +    SMOKE_ALARM_OBJECT = "output_pin siren"
 +    SMOKE_ALARM_FIELD = "value"
-+    SMOKE_SNOOZE_MACRO = "SMOKE_SNOOZE"
++    SMOKE_SILENCE_MACRO = "SMOKE_SILENCE_MANUAL"
++    SMOKE_SHUTDOWN_MARKER = "SMOKE ALARM"
 +
      def __init__(self, args):
          try:
              super().__init__(title="KlipperScreen")
-@@ -101,7 +122,29 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -101,7 +153,35 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.env = Environment(extensions=["jinja2.ext.i18n"], autoescape=True)
          self.env.install_gettext_translations(self._config.get_lang())
  
@@ -3670,13 +3701,19 @@ index 4efa3ac..4230317 100755
 +        # so dismissing it while the pin is still high does not immediately
 +        # re-raise it, and a fresh alarm after a snooze does.
 +        self._smoke_alarm_banner = None
++        self._smoke_alarm_text = None
 +        self._smoke_alarm_latched = False
++        # Sticky once the shutdown marker has been seen, cleared when
++        # Klipper leaves shutdown: during a shutdown Moonraker updates stop
++        # reaching us entirely, so the marker has to be remembered rather
++        # than re-read (see _smoke_shutdown_active).
++        self._smoke_shutdown_marker = False
          self.connect("key-press-event", self._key_press_event)
 +        self.connect("set-focus", self._on_set_focus)
          self.connect("configure_event", self.update_size)
          display = Gdk.Display.get_default()
          self.display_number = os.environ.get("DISPLAY") or ":0"
-@@ -148,6 +191,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -148,6 +228,11 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.vertical_mode = self.aspect_ratio < 1.0
          logging.info(f"Screen resolution: {self.width}x{self.height}")
          self.theme = self._config.get_main_config().get("theme")
@@ -3688,7 +3725,7 @@ index 4efa3ac..4230317 100755
          self.show_cursor = self._config.get_main_config().getboolean("show_cursor", fallback=False)
          self.setup_gtk_settings()
          self.style_provider = Gtk.CssProvider()
-@@ -160,9 +208,50 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -160,9 +245,50 @@ class KlipperScreen(Gtk.ApplicationWindow):
          self.base_panel = BasePanel(self)
          self.change_theme(self.theme)
          self.overlay = Gtk.Overlay()
@@ -3739,7 +3776,7 @@ index 4efa3ac..4230317 100755
          self.update_cursor(self.show_cursor)
          min_ver = (3, 8)
          if sys.version_info < min_ver:
-@@ -640,6 +729,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -640,6 +766,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
              screen, self.style_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
          )
  
@@ -3903,7 +3940,7 @@ index 4efa3ac..4230317 100755
      def change_theme(self, theme_name=None):
          if not theme_name:
              theme_name = self._config.get_main_config().get("theme")
-@@ -692,6 +938,35 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -692,6 +975,35 @@ class KlipperScreen(Gtk.ApplicationWindow):
      def _menu_go_back(self, widget=None, home=False):
          logging.info(f"#### Menu go {'home' if home else 'back'}")
          self.remove_keyboard()
@@ -3939,7 +3976,7 @@ index 4efa3ac..4230317 100755
          while len(self._cur_panels) > 1:
              self._remove_current_panel()
              del self._cur_panels[-1]
-@@ -699,6 +974,215 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -699,6 +1011,342 @@ class KlipperScreen(Gtk.ApplicationWindow):
                  break
          self.attach_panel(self._cur_panels[-1])
  
@@ -3993,32 +4030,117 @@ index 4efa3ac..4230317 100755
 +        except (TypeError, ValueError, AttributeError):
 +            return None
 +
-+    def _smoke_alarm_update(self):
-+        # Called on every notify_status_update. Edge-triggered on purpose:
-+        # raising on every update while the pin stays high would put the
-+        # banner back a fraction of a second after the user dismissed it,
-+        # forever. The latch is released when the pin returns to 0, so a
-+        # SECOND alarm after the snooze expires shows the banner again.
++    def _smoke_klipper_is_down(self):
++        state = self.printer.get_stat("webhooks", "state") if self.printer else None
++        return state in ("shutdown", "error")
++
++    def _smoke_shutdown_active(self):
++        # "Klipper is down BECAUSE of smoke", as opposed to any other
++        # shutdown. The marker is remembered rather than re-tested every
++        # time because _status_update() drops every update once the state
++        # is shutdown -- the message may only ever be seen once, or arrive
++        # out of band from the printer.info query below.
++        if not self._smoke_klipper_is_down():
++            self._smoke_shutdown_marker = False
++            return False
++        message = self.printer.get_stat("webhooks", "state_message")
++        if self._smoke_marker_in(message):
++            self._smoke_shutdown_marker = True
++        return self._smoke_shutdown_marker
++
++    def _smoke_marker_in(self, message):
++        # Containment, NOT startswith. MEASURED live 2026-08-02 by running
++        # SMOKE_ALARM on this printer: Klipper's invoke_shutdown() does not
++        # use the macro's text verbatim, it wraps it --
++        #
++        #   "Shutdown due to SMOKE ALARM: MQ-2 triggered\nOnce the
++        #    underlying issue is corrected, use the \"FIRMWARE_RESTART\"
++        #    command to reset the firmware, reload the config, and restart
++        #    the host software."
++        #
++        # -- so a prefix test against "SMOKE ALARM" never matches and the
++        # banner would never appear in the one scenario it exists for.
++        # (printer-configs/smoke-alarm.cfg still documents it as a prefix;
++        # reported to the hardware half.)
++        return isinstance(message, str) and self.SMOKE_SHUTDOWN_MARKER in message
++
++    def _smoke_alarm_source(self):
++        # Which of the two sources says there is a fire, if any.
++        if self._smoke_shutdown_active():
++            return "shutdown"
 +        value = self._smoke_alarm_value()
-+        if value is None:
-+            return
-+        if value > 0:
++        if value is not None and value > 0:
++            return "pin"
++        return None
++
++    def _smoke_alarm_update(self):
++        # Edge-triggered on purpose: raising on every update while the
++        # source is still hot would put the banner back a fraction of a
++        # second after the user dismissed it, forever. The latch is
++        # released when the source goes quiet, so a SECOND alarm after the
++        # snooze expires shows the banner again.
++        source = self._smoke_alarm_source()
++        if source is not None:
 +            if not self._smoke_alarm_latched:
 +                self._smoke_alarm_latched = True
-+                self._smoke_alarm_raise(value)
++                self._smoke_alarm_raise(source)
 +            return
 +        if self._smoke_alarm_latched:
-+            logging.info(f"Smoke alarm: {self.SMOKE_ALARM_OBJECT} back to 0, re-arming")
++            logging.info("Smoke alarm: source quiet again, re-arming")
 +            self._smoke_alarm_latched = False
 +        if self._smoke_alarm_showing:
 +            # Silenced somewhere else (Mainsail, the macro's own timer, a
-+            # console SET_PIN): take the banner down without sending
-+            # anything -- there is nothing left to snooze.
++            # console SET_PIN, a FIRMWARE_RESTART from the web UI): take
++            # the banner down without sending anything -- there is nothing
++            # left to silence.
 +            logging.info("Smoke alarm: source cleared, hiding banner")
 +            self._smoke_alarm_hide_banner()
 +
-+    def _smoke_alarm_raise(self, value):
-+        logging.info(f"Smoke alarm: RAISED ({self.SMOKE_ALARM_OBJECT} = {value})")
++    @staticmethod
++    def _smoke_alarm_headline(source):
++        return "ПЕЧАТЬ ОСТАНОВЛЕНА" if source == "shutdown" else "СРАБОТАЛ ДАТЧИК ДЫМА"
++
++    def _smoke_alarm_on_shutdown(self):
++        # Klipper going down is the ONE transition the status-update hook
++        # cannot be trusted with: NotificationHandler._status_update()
++        # discards everything once printer.state == "shutdown", so if
++        # notify_klippy_shutdown wins the race against the status update
++        # carrying state_message, the marker never reaches
++        # _smoke_alarm_update() and the banner would never appear -- in the
++        # only scenario that actually matters. Re-evaluate here, where the
++        # state transition itself lands, and if state_message is not known
++        # yet ask Moonraker for it directly: one RPC, only on a shutdown,
++        # and printer.info answers during a shutdown (that is the point of
++        # the contract in printer-configs/smoke-alarm.cfg).
++        self._smoke_alarm_update()
++        if self._smoke_alarm_showing:
++            # Very common: SMOKE_ALARM's SET_PIN update wins the race
++            # against its own shutdown, so the banner is already up saying
++            # "СРАБОТАЛ ДАТЧИК ДЫМА" when the printer stops. Tell the user
++            # the more important fact now that it is true.
++            if self._smoke_shutdown_active() and self._smoke_alarm_text is not None:
++                self._smoke_alarm_text.set_label(self._smoke_alarm_headline("shutdown"))
++            return
++        message = self.printer.get_stat("webhooks", "state_message") if self.printer else None
++        if isinstance(message, str) and message.strip():
++            return  # message known, and it is not ours
++        try:
++            if self._ws is not None:
++                self._ws.api.get_printer_info(self._smoke_alarm_printer_info)
++        except Exception:
++            logging.exception("Smoke alarm: printer.info query failed")
++
++    def _smoke_alarm_printer_info(self, response, method, params, *args):
++        result = response.get("result") if isinstance(response, dict) else None
++        message = result.get("state_message", "") if isinstance(result, dict) else ""
++        if not self._smoke_marker_in(message):
++            return
++        logging.info("Smoke alarm: marker found in printer.info state_message")
++        self._smoke_shutdown_marker = True
++        self._smoke_alarm_update()
++
++    def _smoke_alarm_raise(self, source):
++        logging.info(f"Smoke alarm: RAISED (source={source})")
 +        self.log_notification("SMOKE ALARM / ДЫМ", 2)
 +        if self._smoke_alarm_showing:
 +            return
@@ -4034,11 +4156,11 @@ index 4efa3ac..4230317 100755
 +        # come back over it a minute later.
 +        self.wake_screen()
 +        self.screensaver.close()
-+        self._smoke_alarm_banner = self._smoke_alarm_build_banner()
++        self._smoke_alarm_banner = self._smoke_alarm_build_banner(source)
 +        self.overlay.add_overlay(self._smoke_alarm_banner)
 +        self._smoke_alarm_banner.show_all()
 +
-+    def _smoke_alarm_build_banner(self):
++    def _smoke_alarm_build_banner(self, source="pin"):
 +        # Sized to the whole screen explicitly, like ScreenSaver's box: an
 +        # overlay child that only asks for its natural size leaves the panel
 +        # underneath visible around it.
@@ -4052,7 +4174,21 @@ index 4efa3ac..4230317 100755
 +        box.get_style_context().add_class("smoke_alarm")
 +        title = Gtk.Label(label="ДЫМ!", hexpand=True, vexpand=True)
 +        title.get_style_context().add_class("smoke_alarm_title")
-+        text = Gtk.Label(label="СРАБОТАЛ ДАТЧИК ДЫМА", hexpand=True)
++        # Line lengths are not free-form: MEASURED on this 320px panel, the
++        # middle line fits ~21 characters at its size and the hint ~38.
++        #
++        # The hint is the SAME in both cases on purpose. It describes what
++        # the user gets, not the mechanism -- and it stays true either way,
++        # because FIRMWARE_RESTART also brings the pin back to value: 0 and
++        # restarts the config's 600-second disarm window. Saying "рестарт
++        # прошивки" would be both scarier and less accurate about the
++        # outcome; and since the pin update often wins the race against the
++        # shutdown, the same real fire can raise the banner from either
++        # source, so the two wordings would be a coin toss.
++        self._smoke_alarm_text = text = Gtk.Label(
++            label=self._smoke_alarm_headline(source),
++            hexpand=True,
++        )
 +        text.get_style_context().add_class("smoke_alarm_text")
 +        hint = Gtk.Label(
 +            label="Любая кнопка — тишина 10 мин",
@@ -4071,6 +4207,7 @@ index 4efa3ac..4230317 100755
 +        if banner is None:
 +            return
 +        self._smoke_alarm_banner = None
++        self._smoke_alarm_text = None
 +        try:
 +            self.overlay.remove(banner)
 +            banner.destroy()
@@ -4097,30 +4234,55 @@ index 4efa3ac..4230317 100755
 +        if not config:
 +            # Config not known (early startup) -- do not accuse, just send.
 +            return False
-+        wanted = f"gcode_macro {self.SMOKE_SNOOZE_MACRO}".lower()
++        wanted = f"gcode_macro {self.SMOKE_SILENCE_MACRO}".lower()
 +        return all(section.lower() != wanted for section in config)
 +
 +    def _smoke_alarm_dismiss(self):
++        # The silencing action is decided HERE, from the live state, not
++        # from whatever raised the banner. SMOKE_ALARM sets the pin and
++        # then shuts Klipper down milliseconds later, so a banner raised by
++        # the pin is very often dismissed with Klipper already down -- and
++        # then g-code is refused outright (klippy/gcode.py allows only
++        # M110/M112/M115/RESTART/FIRMWARE_RESTART/ECHO/STATUS/HELP after a
++        # shutdown), so a macro here would be a guaranteed no-op.
++        down = self._smoke_klipper_is_down()
 +        self._smoke_alarm_hide_banner()
-+        if self._smoke_alarm_macro_missing():
-+            self._smoke_alarm_snooze_failed(f"нет макроса {self.SMOKE_SNOOZE_MACRO}")
++        if down:
++            # FIRMWARE_RESTART is what ends the alarm: it brings the pin
++            # back to its configured value: 0 (silence) and restarts the
++            # config's `initial_duration: 600` disarm window, which IS the
++            # user's "ten minutes". Nothing else to call -- the snooze is
++            # automatic on the Klipper side.
++            self._smoke_alarm_send(
++                "printer.firmware_restart", {}, "FIRMWARE_RESTART", "Нужен FIRMWARE_RESTART"
++            )
 +            return
++        if self._smoke_alarm_macro_missing():
++            self._smoke_alarm_silence_failed(f"нет {self.SMOKE_SILENCE_MACRO}")
++            return
++        self._smoke_alarm_send(
++            "printer.gcode.script",
++            {"script": self.SMOKE_SILENCE_MACRO},
++            self.SMOKE_SILENCE_MACRO,
++        )
++
++    def _smoke_alarm_send(self, method, params, label, hint="Выключите её вручную!"):
 +        sent = False
 +        try:
 +            if self._ws is not None:
-+                sent = self._ws.api.gcode_script(
-+                    self.SMOKE_SNOOZE_MACRO, self._smoke_alarm_snooze_result
++                sent = self._ws.send_method(
++                    method, params, self._smoke_alarm_rpc_result, label, hint
 +                )
 +        except Exception:
-+            logging.exception(f"Smoke alarm: sending {self.SMOKE_SNOOZE_MACRO} raised")
++            logging.exception(f"Smoke alarm: sending {label} raised")
 +            sent = False
 +        if sent:
-+            logging.info(f"Smoke alarm: dismissed, sent {self.SMOKE_SNOOZE_MACRO}")
++            logging.info(f"Smoke alarm: dismissed, sent {label}")
 +        else:
 +            # send_method() returns False when the websocket is down.
-+            self._smoke_alarm_snooze_failed("нет связи с Moonraker")
++            self._smoke_alarm_silence_failed("нет связи с Moonraker", hint)
 +
-+    def _smoke_alarm_snooze_result(self, response, method, params, *args):
++    def _smoke_alarm_rpc_result(self, response, method, params, *args):
 +        # Moonraker answers every JSON-RPC call; an unknown macro, or a
 +        # Klipper that is shut down after an M112, comes back as "error".
 +        # That is the whole point of passing a callback: the banner is
@@ -4128,15 +4290,17 @@ index 4efa3ac..4230317 100755
 +        # dismissed during a fire is the worst possible failure), so this
 +        # is the only thing left that can tell the user the siren is still
 +        # live.
++        label = args[0] if args else "?"
++        hint = args[1] if len(args) > 1 else "Выключите её вручную!"
 +        error = response.get("error") if isinstance(response, dict) else None
 +        if error:
 +            message = error.get("message", error) if isinstance(error, dict) else error
-+            self._smoke_alarm_snooze_failed(str(message))
++            self._smoke_alarm_silence_failed(str(message), hint)
 +            return
-+        logging.info(f"Smoke alarm: {self.SMOKE_SNOOZE_MACRO} accepted by Klipper")
++        logging.info(f"Smoke alarm: {label} accepted")
 +
-+    def _smoke_alarm_snooze_failed(self, reason):
-+        logging.error(f"Smoke alarm: {self.SMOKE_SNOOZE_MACRO} FAILED: {reason}")
++    def _smoke_alarm_silence_failed(self, reason, hint="Выключите её вручную!"):
++        logging.error(f"Smoke alarm: silencing FAILED: {reason}")
 +        # level 2 = warning: stays on screen for 300s instead of 10, and
 +        # lands in the notification log behind the bell, so the message
 +        # survives being missed. Deliberately NOT re-raising the banner:
@@ -4150,12 +4314,12 @@ index 4efa3ac..4230317 100755
 +        # is already wider than the popover), so a long single line loses
 +        # its beginning AND its end.
 +        reason = str(reason).strip().replace("\n", " ")[:56]
-+        self.show_popup_message(f"Сирена НЕ выключена:\n{reason}\nВыключите её вручную!", 2)
++        self.show_popup_message(f"Сирена НЕ выключена:\n{reason}\n{hint}", 2)
 +
      def check_dpms_state(self):
          if not self.use_dpms or self.wayland:
              return False
-@@ -708,7 +1192,14 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -708,7 +1356,14 @@ class KlipperScreen(Gtk.ApplicationWindow):
              self.set_dpms(False)
              return False
          elif state != functions.DPMS_State.On:
@@ -4171,7 +4335,26 @@ index 4efa3ac..4230317 100755
                  self.screensaver.show()
          return True
  
-@@ -996,6 +1487,13 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -891,6 +1546,7 @@ class KlipperScreen(Gtk.ApplicationWindow):
+             msg += _("A FIRMWARE_RESTART may fix the issue.") + "\n"
+         elif "micro-controller" in state:
+             msg += _("Please recompile and flash the micro-controller.") + "\n"
++        self._smoke_alarm_on_shutdown()  # see state_shutdown()
+         self.printer_initializing(msg + "\n" + state, go_to_splash=True)
+         self.state.initialized = False
+ 
+@@ -920,6 +1576,10 @@ class KlipperScreen(Gtk.ApplicationWindow):
+     def state_shutdown(self):
+         self.printer.stop_tempstore_updates()
+         msg = self.printer.get_stat("webhooks", "state_message")
++        # Smoke alarm (2026-08-02): a fire ends here, in a shutdown, and
++        # status updates stop reaching us the moment we arrive -- so this
++        # is the last chance to notice. See _smoke_alarm_on_shutdown().
++        self._smoke_alarm_on_shutdown()
+         self.printer_initializing(_("Klipper has shutdown") + "\n\n" + msg, go_to_splash=True)
+ 
+     def check_active_commands(self):
+@@ -996,6 +1656,13 @@ class KlipperScreen(Gtk.ApplicationWindow):
              self.show_panel(*action)
  
      def process_update(self, *args):
@@ -4185,7 +4368,7 @@ index 4efa3ac..4230317 100755
          self.base_panel.process_update(*args)
          if (
              self.printer
-@@ -1425,10 +1923,791 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -1425,10 +2092,791 @@ class KlipperScreen(Gtk.ApplicationWindow):
  
      def _key_press_event(self, widget, event):
          keyval_name = Gdk.keyval_name(event.keyval)
