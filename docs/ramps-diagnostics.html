@@ -656,7 +656,7 @@
     <li><a href="#a4988-bench">A4988 — на столе</a></li>
     <li><a href="#tmc-bench">TMC2209 — на столе</a></li>
     <li><a href="#scope-live">В гнезде + осциллограф</a></li>
-    <li><a href="#uart-scope">TMC2209 — линия UART</a></li>
+    <li><a href="#uart-scope">Линия UART к драйверам (драйвер ↔ Mega)</a></li>
     <li><a href="#swap">Протокол перестановки</a></li>
     <li><a href="#tree">Дерево решений</a></li>
   </ol>
@@ -673,7 +673,7 @@
 
   <div class="toc-group-title">Инфраструктура</div>
   <ol>
-    <li><a href="#uart-direct">Прямой UART Orange Pi ↔ Mega</a></li>
+    <li><a href="#uart-direct">Замена USB на прямой UART (отвергнуто)</a></li>
   </ol>
 
   <div class="toc-group-title">Хотэнд</div>
@@ -1204,7 +1204,7 @@
 
   <div class="callout warn">
     <span class="ctitle">UART не заработает без VMOT — это не поломка</span>
-    <p>Приёмопередатчик PDN_UART у TMC2209 запитан внутренним стабилизатором от VMOT, а не от VDD. На столе, без силового 12В, линия UART в принципе не будет «оживать» — это нормально и ничего не говорит об исправности. Полноценный тест UART возможен только в разделе <a href="#uart-scope">«линия UART»</a>, под VMOT.</p>
+    <p>VDD/VIO у TMC2209 питает только сами цифровые выводы (даташит про VCC_IO: «3.3V to 5V IO supply voltage for all digital pins (does not supply IC logic part)»), а логику чипа кормит внутренний 5В-стабилизатор от VMOT. Без силового 12В чип не работает вовсе, и линия UART в принципе не будет «оживать» — это нормально и ничего не говорит об исправности. То же самое пишет и документация Klipper: драйверу нужно силовое питание, прежде чем он сможет общаться с MCU. Полноценный тест UART возможен только в разделе <a href="#uart-scope">«линия UART»</a>, под VMOT.</p>
   </div>
 </section>
 
@@ -1303,16 +1303,9 @@
 </section>
 
 <section id="uart-scope">
-  <h2>TMC2209 — линия UART осциллографом</h2>
-  <span class="tag scope">осциллограф · под напряжением · только TMC2209</span>
-  <p class="section-intro">Проверяется отдельно от STEP/DIR/ENABLE — подключение однопроводное полудуплексное, поэтому TX и RX идут по одной линии PDN_UART.</p>
-
-  <div class="callout danger">
-    <span class="ctitle">Предусловие: линии сначала должно физически существовать</span>
-    <p>Стандартный RAMPS 1.4 <strong>не разводит PDN_UART к Меге вообще</strong> — в гнезде драйвера на этом месте сидят RESET/SLEEP для A4988, закороченные прямо на плате. Линию заводят вручную: провод с вывода PDN_UART каждого из драйверов X/Y/Z на штырёк AUX (<code>D53</code> и <code>D49</code> на AUX-3, <code>D40</code> на AUX-2 — это <code>PB0</code>/<code>PL0</code>/<code>PG1</code> в <code>uart_pin</code> у Klipper). Гребёнки AUX — обычные 2.54мм, соединение разъёмное (dupont), паять на плате ничего не нужно.</p>
-    <p><strong>Пока провода не воткнуты, этот раздел применять бессмысленно:</strong> тишина на линии тогда — не диагноз, а ожидаемое следствие, ровно как и <code>Unable to read tmc uart register …</code> в логе Klipper. Сначала монтаж, потом осциллограф.</p>
-    <p>Полная таблица разводки, реальные подписи выводов конкретного модуля (у него <code>PDN_UART</code> продублирован на двух соседних пинах, а на месте MS3/RESET/SLEEP стоят <code>SPREAD</code> и <code>PDN_UART</code>) и текущее состояние монтажа — в <code>printer-status.md</code>, разделы «UART для TMC2209» и «Реальный пиноут TMC2209-модуля». Здесь таблица намеренно не продублирована: две копии одной распиновки рано или поздно разъедутся, и вторая начнёт врать.</p>
-  </div>
+  <h2>Линия UART к драйверам (драйвер ↔ Mega)</h2>
+  <span class="tag meter">монтаж · мультиметр · осциллограф · только TMC2209</span>
+  <p class="section-intro">Однопроводная полудуплексная линия <span class="pin">PDN_UART</span>: TX и RX идут по одному проводу, поэтому и проверяется она отдельно от STEP/DIR/ENABLE. <strong>Линия целиком между модулем драйвера и ATmega2560 на плате Меги — оба конца на одной плате.</strong> Orange Pi управляет Мегой по уже существующему USB-кабелю и к этому проводу не подключается ни одним концом; <code>D53</code>/<code>D49</code>/<code>D40</code> — ардуиновские номера ног самой ATmega2560 (в Klipper они пишутся как <code>PB0</code>/<code>PL0</code>/<code>PG1</code>), а не GPIO Orange Pi.</p>
 
   <div class="callout key">
     <span class="ctitle">Зачем UART нужен именно на этой машине (не «приятная опция»)</span>
@@ -1324,6 +1317,144 @@
     </ul>
     <p>Обоснование целиком и порядок работ — пункт <strong>B10</strong> в <code>printer-status.md</code>. Оттуда же важная оговорка: запись про снятую перемычку SPREAD сделана 2026-07-27 и глазами с тех пор не перепроверялась — при монтаже проводов заодно посмотрите на сами модули.</p>
   </div>
+
+  <div class="callout danger">
+    <span class="ctitle">Предусловие: линии сначала должно физически существовать</span>
+    <p>Стандартный RAMPS 1.4 <strong>не разводит PDN_UART к Меге вообще</strong> — в гнезде драйвера на этом месте сидят RESET/SLEEP для A4988, закороченные прямо на плате. Линию заводят вручную, проводом с вывода PDN_UART каждого из драйверов X/Y/Z на штырёк AUX. Гребёнки AUX — обычные 2.54мм, соединение разъёмное (dupont), паять на плате ничего не нужно.</p>
+    <p><strong>Пока провода не воткнуты, осциллографическая часть этого раздела бессмысленна:</strong> тишина на линии тогда — не диагноз, а ожидаемое следствие, ровно как и <code>Unable to read tmc uart register …</code> в логе Klipper. Сначала монтаж и перемычки, потом осциллограф.</p>
+  </div>
+
+  <h3>Разводка PDN_UART → Mega</h3>
+
+  <div class="callout info">
+    <span class="ctitle">Канонический источник этой таблицы — <code>printer-status.md</code></span>
+    <p>Здесь таблица продублирована сознательно (по решению пользователя), чтобы при монтаже не приходилось прыгать между документами. <strong>При любом расхождении верить <code>printer-status.md</code></strong>, раздел «UART для TMC2209» — там же живёт актуальное состояние монтажа (смонтировано / не смонтировано). Цифры ниже сверены с официальной схемой RAMPS 1.4 и с ардуиновской таблицей пинов Меги, см. «Источники» в конце раздела.</p>
+  </div>
+
+  <div class="scroll-x">
+  <table>
+    <caption>Оба конца провода — на одной плате: вывод модуля драйвера → гребёнка AUX той же RAMPS. Orange Pi не участвует.</caption>
+    <thead><tr><th>Ось</th><th>Откуда: вывод модуля TMC2209</th><th>Куда: штырёк на RAMPS</th><th>Нога ATmega2560</th><th><code>uart_pin</code> в Klipper</th></tr></thead>
+    <tbody>
+      <tr><td>X</td><td><span class="pin">PDN_UART</span> (любой из двух соседних — на модуле это один сигнал)</td><td>AUX-3, контакт подписан <strong>D53</strong> (пин 6 гребёнки)</td><td><span class="pin">PB0</span></td><td><code>PB0</code></td></tr>
+      <tr><td>Y</td><td><span class="pin">PDN_UART</span></td><td>AUX-3, контакт подписан <strong>D49</strong> (пин 2 гребёнки)</td><td><span class="pin">PL0</span></td><td><code>PL0</code></td></tr>
+      <tr><td>Z</td><td><span class="pin">PDN_UART</span></td><td>AUX-2, контакт подписан <strong>D40</strong> (пин 6 гребёнки)</td><td><span class="pin">PG1</span></td><td><code>PG1</code></td></tr>
+      <tr><td>E0</td><td class="bad">нет — драйвер A4988</td><td class="bad">не подключается</td><td>—</td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="diagram-caption">Нумерация контактов гребёнок по схеме RAMPS 1.4: AUX-3 (8 контактов) — 1&nbsp;=&nbsp;VCC, 2&nbsp;=&nbsp;D49, 3&nbsp;=&nbsp;MISO, 4&nbsp;=&nbsp;MOSI, 5&nbsp;=&nbsp;SCK, 6&nbsp;=&nbsp;D53, 7&nbsp;=&nbsp;GND. AUX-2 (10 контактов) — 1&nbsp;=&nbsp;VCC, 2&nbsp;=&nbsp;GND, 3&nbsp;=&nbsp;A5, 4&nbsp;=&nbsp;A9, 5&nbsp;=&nbsp;A10, 6&nbsp;=&nbsp;D40, 7&nbsp;=&nbsp;D44, 8&nbsp;=&nbsp;D42, 9&nbsp;=&nbsp;A12, 10&nbsp;=&nbsp;A11. Ориентируйтесь в первую очередь по шёлкографии на своей плате, номер контакта — для контроля.</p>
+
+  <h3>Перемычки под драйвером: что делают MS1/MS2 и SPREAD в UART-режиме</h3>
+
+  <div class="callout key">
+    <span class="ctitle">Главное: MS1/MS2 у TMC2209 задают не только микрошаг, но и АДРЕС на шине UART</span>
+    <p>Это не «или-или»: пины делают обе вещи сразу, и таблица в даташите — одна на оба смысла. В UART-режиме микрошаг с них снимается (Klipper выставляет <code>GCONF.mstep_reg_select = 1</code>, после чего разрешение берётся из регистра MRES, то есть из параметра <code>microsteps</code> в секции <code>[stepper_…]</code>), а <strong>адрес остаётся за пинами всегда</strong>.</p>
+    <div class="scroll-x">
+    <table>
+      <caption>Из даташита TMC2209 Rev. 1.09, «MS1/MS2: configuration of microstep resolution for step input»</caption>
+      <thead><tr><th>MS2</th><th>MS1</th><th>Микрошаг (standalone)</th><th>Адрес UART</th></tr></thead>
+      <tbody>
+        <tr><td>GND</td><td>GND</td><td>1/8</td><td>0</td></tr>
+        <tr><td>GND</td><td>VCC_IO</td><td>1/32</td><td>1</td></tr>
+        <tr><td>VCC_IO</td><td>GND</td><td>1/64</td><td>2</td></tr>
+        <tr><td class="good">VCC_IO</td><td class="good">VCC_IO</td><td class="good">1/16</td><td class="good">3</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>На RAMPS 1.4 надетая перемычка соединяет соответствующий MS-пин гнезда с <strong>+5В</strong> (по официальной схеме общий ряд контактов гребёнок JP2…JP6 заведён на VCC). Значит на плате, где под драйвером стоят обе первые перемычки, у TMC2209 <strong>MS1 = MS2 = VCC_IO → микрошаг 1/16 <em>и одновременно</em> адрес 3</strong>.</p>
+    <p><strong>Отсюда самая обидная ошибка при переходе на UART:</strong> Klipper по умолчанию обращается к адресу <strong>0</strong> (параметр <code>uart_address</code>, дефолт 0). При полностью исправном монтаже, целом проводе и живом драйвере обмена не будет — чип просто игнорирует чужой адрес. Внешне это неотличимо от обрыва, и именно это ищут осциллографом сутками.</p>
+  </div>
+
+  <div class="callout warn">
+    <span class="ctitle">Два рабочих варианта — выбрать один и записать в конфиг</span>
+    <ul class="checklist">
+      <li><span><strong>Вариант A (рекомендуется на этой машине): перемычки MS1/MS2 оставить на месте, в конфиг добавить <code>uart_address: 3</code></strong> в каждую секцию <code>[tmc2209 …]</code>. Плюс: физический standalone-режим остаётся 1/16 — то есть совпадает с <code>microsteps: 16</code> в <code>[stepper_…]</code>. Если когда-нибудь секции <code>[tmc2209 …]</code> снова закомментируют (а на этой машине так уже делали), машина продолжит ездить правильно.</span></li>
+      <li><span><strong>Вариант B: снять обе перемычки MS1 и MS2</strong> → оба пина уходят вниз внутренними подтяжками драйвера (даташит: MS1/MS2 — <code>DI (pd)</code>, «internal pull-down resistors») → адрес 0 → <code>uart_address</code> писать не надо, дефолт Klipper подходит. Минус — ловушка: в standalone эти же пины теперь означают <strong>1/8</strong>, и при откате на standalone (закомментировать <code>[tmc2209 …]</code>) ось поедет <strong>вдвое дальше</strong> команды при <code>microsteps: 16</code> в конфиге. Молча, без единой ошибки.</span></li>
+    </ul>
+    <p>Пока UART включён, оба варианта эквивалентны по поведению: микрошаг всё равно задаётся регистром. Разница только в том, что произойдёт при откате назад.</p>
+  </div>
+
+  <div class="callout danger">
+    <span class="ctitle">Третья перемычка (SPREAD) — при UART должна быть СНЯТА, иначе логика чоппера инвертируется</span>
+    <p>У TMC2209-модуля на позиции, где у A4988 сидит MS3, стоит вход <span class="pin">SPREAD</span> — выбор режима чоппера (даташит: «Chopper mode selection: Low=StealthChop, High=SpreadCycle (may be left unconnected)»). Микрошаг он не меняет.</p>
+    <p><strong>Неочевидное и важное:</strong> в UART-режиме этот пин не отключается, а <strong>складывается по XOR с регистровым битом</strong>. Даташит, GCONF бит 2 <code>en_SpreadCycle</code>: «A high level on the pin SPREAD inverts this flag to switch between both chopper modes», и там же в разделе про stealthChop: «The input SPREAD is XORed to this flag». То есть если перемычка SPREAD надета (пин на +5В), то <code>stealthchop_threshold</code> в Klipper начнёт работать <em>ровно наоборот</em>: где по конфигу должен быть spreadCycle — будет stealthChop, и обратно. Диагностически это отвратительный симптом: конфиг верный, регистры читаются, DUMP_TMC показывает то, что вы написали, а мотор ведёт себя как в другом режиме.</p>
+    <p>Поэтому: <strong>для UART перемычку SPREAD на X/Y/Z надо держать снятой</strong> (пин на GND через внутреннюю подтяжку) — тогда режим целиком определяется регистром, как и предполагает Klipper. Если она снята — не трогать. Если обнаружится надетой — снять до включения UART.</p>
+    <p><strong>Экструдер (A4988) — не трогать вообще.</strong> Там та же третья позиция гнезда означает MS3, то есть настоящий микрошаг: сняв её, вы измените разрешение оси, а не режим чоппера.</p>
+  </div>
+
+  <h3>Закоротка RESET/SLEEP на RAMPS — почему она здесь не мешает</h3>
+
+  <div class="callout info">
+    <span class="ctitle">Проверено по официальной схеме: цепь изолированная</span>
+    <p>На схеме RAMPS 1.4 выводы гнезда «Reset (inverted)» и «Sleep (inverted)» соединены между собой перемычкой на плате и <strong>больше ни с чем</strong> — ни с +5В, ни с GND, ни с ногой Меги. Это штатный приём для A4988: у него RST не имеет внутренней подтяжки, и производитель платы-носителя прямо советует соединять RST с соседним SLP, чтобы поднять его в высокий уровень.</p>
+    <p><strong>Практический вывод для TMC2209-модуля, у которого на обеих этих позициях выведен один и тот же <span class="pin">PDN_UART</span>:</strong> закоротка RAMPS соединяет PDN_UART сам с собой. Она безвредна, ничего никуда не сажает и не мешает завести линию на Мегу. Более того, именно она делает безопасным приём с отгибанием одного из двух выводов (см. ниже): оставшийся в гнезде вывод электрически «висит» в изолированной цепи.</p>
+    <p><strong>Это верно ровно до тех пор, пока оба вывода действительно PDN_UART.</strong> Разводка TMC2209-модулей у разных производителей отличается; если на второй позиции окажется не PDN_UART, а что-то другое, закоротка соединит сигнал с этим «другим», и план монтажа придётся менять. Проверяется прозвонкой за полминуты — см. ниже.</p>
+  </div>
+
+  <h3>Монтаж: куда физически садиться проводом</h3>
+
+  <div class="callout warn">
+    <span class="ctitle">«Воткнуть три dupont-провода» — это только про конец со стороны Меги</span>
+    <p>Второй конец садиться некуда: оба вывода PDN_UART модуля торчат <em>внутрь гнезда</em>, на посаженный в панельку пин разъём не наденешь. Поэтому шаг, без которого инструкция неполна, — <strong>отогнуть один из двух соседних выводов PDN_UART наружу</strong>, чтобы он не входил в гнездо, и уже на него надеть женский dupont.</p>
+  </div>
+
+  <ol class="step-list">
+    <li>Питание выключено, USB отсоединён. Вынуть модуль X/Y/Z из гнезда.</li>
+    <li>На модуле найти ряд управления и опознать выводы по шёлкографии самого модуля, <strong>не по общей схеме Pololu</strong>: у модулей этого типа ряд выглядит как <span class="pin">EN</span> — <span class="pin">MS1</span> — <span class="pin">MS2</span> — <span class="pin">SPREAD</span> — <span class="pin">PDN_UART</span> — <span class="pin">PDN_UART</span> — <span class="pin">STEP</span> — <span class="pin">DIR</span>. Два PDN_UART подряд — это один сигнал, выведенный дважды.</li>
+    <li>Аккуратно, у самого основания, отогнуть <strong>один</strong> из этих двух выводов наружу примерно на 90°. Гнуть один раз: повторные перегибы ломают вывод у корпуса. Какой именно из двух — не имеет значения, они соединены на модуле.</li>
+    <li>Перемычки под этим гнездом привести к выбранному варианту: SPREAD — снята; MS1/MS2 — по варианту A (обе на месте) или B (обе сняты).</li>
+    <li>Вставить модуль в гнездо, следя, что отогнутый вывод остался снаружи и ни на что не опирается. Проверить, что все остальные семь выводов ряда действительно вошли в панельку.</li>
+    <li>Женский dupont на отогнутый вывод, второй конец — на штырёк AUX по таблице выше.</li>
+    <li>Повторить для трёх осей. Экструдер (A4988) не трогать.</li>
+  </ol>
+
+  <h3>Прозвонка линии мультиметром (питание выключено)</h3>
+
+  <p>Делается до первого включения. Мультиметр в режим прозвонки/сопротивления; питание 12В выключено, USB-кабель Меги отсоединён.</p>
+
+  <ol class="step-list">
+    <li><strong>Модуль вне платы — подтвердить, что PDN_UART действительно продублирован.</strong> Прозвонить между собой два соседних вывода, стоящих на позициях RESET/SLEEP. Должен быть <strong>ноль</strong> (непрерывность). Если не звонятся — вся схема выше неверна для вашего модуля, дальше не идти, сначала разобраться по шёлкографии, какой из выводов настоящий PDN_UART.</li>
+    <li><strong>Пустое гнездо на RAMPS.</strong> Те же два контакта гнезда должны звониться между собой (это и есть заводская закоротка) и <strong>не должны</strong> звониться ни на +5В, ни на GND. Если звонятся на питание или землю — линию на этой плате использовать нельзя.</li>
+    <li><strong>Перемычки.</strong> Сняв перемычку, соответствующий контакт MS не должен звониться на +5В. Это ловит известный дефект клонов: на части плат перемычные пятачки залиты припоем/соединены дорожкой на заводе, и снятие перемычки ничего не меняет. Wiki RepRap прямо предупреждает об этом и советует проверять мультиметром.</li>
+    <li><strong>После монтажа — сам провод.</strong> Между штырьком AUX (<code>D53</code>/<code>D49</code>/<code>D40</code>) и отогнутым выводом PDN_UART — <strong>ноль</strong>. Между этим же штырьком и GND — <strong>не ноль</strong> (нормально видеть сотни кОм и выше: у PDN_UART есть внутренняя подтяжка). Между ним и +5В — <strong>не ноль</strong>.</li>
+    <li><strong>Не задет ли соседний штырёк.</strong> На AUX-3 рядом с <code>D53</code> и <code>D49</code> живут SPI-линии (MOSI/MISO/SCK) и VCC — прозвоните провод на соседние контакты гребёнки: связи быть не должно. Самая частая ошибка монтажа dupont-ами — попасть в соседний ряд.</li>
+    <li>Три провода — три независимые линии, у каждой свой пин Меги. Между собой они звониться <strong>не должны</strong>: если X и Y звонятся друг с другом, где-то замкнуты соседние штырьки.</li>
+  </ol>
+
+  <h3>Конфиг и как убедиться, что заработало</h3>
+
+  <ol class="step-list">
+    <li>В <code>printer-configs/printer.cfg</code> раскомментировать секции <code>[tmc2209 stepper_x/y/z]</code>. Обязательные параметры по документации Klipper — <code>uart_pin</code> и <code>run_current</code>.</li>
+    <li><strong>Если выбран вариант A</strong> (перемычки MS1/MS2 на месте) — в каждую секцию добавить <code>uart_address: 3</code>. Без этой строки связи не будет. Три оси сидят на трёх <em>разных</em> пинах Меги, то есть это три независимые линии, а не общая шина — поэтому адрес у всех трёх может быть одинаковый, различать их не требуется.</li>
+    <li><code>sense_resistor</code> писать не обязательно: дефолт Klipper 0.110 Ом и так совпадает с маркировкой R110 на этих модулях.</li>
+    <li>Выкатить конфиг и перезапустить Klipper штатным способом проекта.</li>
+  </ol>
+
+  <div class="callout key">
+    <span class="ctitle">Порядок диагностики: обрыв виден УЖЕ на старте, а не в <code>DUMP_TMC</code></span>
+    <p>Если линия не работает, Klipper не выйдет в <code>ready</code> — он падает на инициализации драйвера с <code>Unable to read tmc uart 'stepper_x' register IFCNT</code>. То есть первый индикатор — сам факт запуска, а не команда. Молча печатать с неправильными настройками машина при этом не будет.</p>
+    <p><code>DUMP_TMC STEPPER=stepper_x</code> — это уже <em>после</em> того, как всё поднялось. Что смотреть в выводе:</p>
+    <ul class="checklist">
+      <li><span><code>GCONF</code>: <code>pdn_disable=1</code> (даташит требует этого для UART: «Set this bit, when using the UART interface!») и <code>mstep_reg_select=1</code> — подтверждение, что микрошаг теперь из регистра, а не с пинов.</span></li>
+      <li><span><code>CHOPCONF</code>: поле <code>mres</code> должно соответствовать 16 микрошагам — то есть тому, что стоит в <code>microsteps</code> секции <code>[stepper_…]</code>.</span></li>
+      <li><span><code>DRV_STATUS</code>: чисто — без <code>ot</code>/<code>otpw</code> (перегрев), без <code>s2ga</code>/<code>s2gb</code> (КЗ на землю), без <code>ola</code>/<code>olb</code> (обрыв обмотки).</span></li>
+      <li><span>Ток: после успешного старта <code>run_current</code> из конфига реально управляет чипом, а физический триммер Vref перестаёт иметь значение (см. <a href="#vref">раздел про Vref</a>).</span></li>
+    </ul>
+  </div>
+
+  <div class="callout info">
+    <span class="ctitle">Источники по перемычкам и разводке</span>
+    <ul class="checklist">
+      <li><span><a href="https://www.analog.com/media/en/technical-documentation/data-sheets/tmc2209_datasheet_rev1.08.pdf">Даташит TMC2209</a> (проверялось по Rev. 1.09): §2.2 описание выводов MS1_AD0/MS2_AD1/SPREAD/PDN_UART; §3 таблицы «MS1/MS2: configuration of microstep resolution» (микрошаг + адрес одной таблицей) и «SPREAD: selection of chopper mode»; §4 «The node address NODEADDR is selected by MS1 (bit 0) and MS2 (bit 1) in the range 0 to 3»; регистр GCONF, биты 2 <code>en_SpreadCycle</code>, 6 <code>pdn_disable</code>, 7 <code>mstep_reg_select</code>.</span></li>
+      <li><span><a href="https://www.klipper3d.org/Config_Reference.html#tmc2209">Klipper Config_Reference, <code>[tmc2209]</code></a>: «<code>uart_address</code> — the address of the TMC2209 chip for UART messages (an integer between 0 and 3)… The default is zero». Плюс <a href="https://www.klipper3d.org/TMC_Drivers.html">TMC_Drivers.md</a> — про «Unable to read tmc uart…», необходимость силового питания и про то, что в standalone продвинутые функции недоступны.</span></li>
+      <li><span><a href="https://reprap.org/wiki/File:RAMPS1.4schematic.png">Официальная схема RAMPS 1.4</a>: общий ряд контактов гребёнок JP2…JP6 заведён на VCC (перемычка = MSx на +5В); выводы гнезда Reset/Sleep соединены между собой и ни с чем более; распиновка AUX-2 (US10) и AUX-3 (US3). Там же на <a href="https://reprap.org/wiki/RAMPS_1.4">странице RAMPS 1.4</a> — предупреждение про клоны с заводски соединёнными перемычными пятачками.</span></li>
+      <li><span><a href="https://github.com/arduino/ArduinoCore-avr/blob/master/variants/mega/pins_arduino.h">Ардуиновская таблица пинов Mega</a> (<code>variants/mega/pins_arduino.h</code>): D40&nbsp;=&nbsp;PG1, D49&nbsp;=&nbsp;PL0, D53&nbsp;=&nbsp;PB0.</span></li>
+      <li><span><a href="https://www.pololu.com/product/1182">Pololu A4988 carrier</a>: «the RST pin is floating; if you are not using the pin, you can connect it to the adjacent SLP pin on the PCB to bring it high and enable the board» — объясняет, зачем RAMPS вообще закорачивает RESET и SLEEP.</span></li>
+    </ul>
+  </div>
+
+  <h3>Осциллограф на линии</h3>
 
   <ol class="step-list">
     <li>Драйвер TMC2209 в гнезде, <strong>VMOT обязательно присутствует</strong> (см. предупреждение в разделе <a href="#tmc-bench">«TMC2209 на столе»</a> — без силового питания линия молчит независимо от исправности).</li>
@@ -1719,21 +1850,23 @@
   </div>
 
   <h3>Перемычки микрошага у TMC2209 без UART — не то же самое, что у A4988</h3>
-  <p>У модуля TMC2209 третья позиция (там, где у A4988 был MS3) на некоторых модулях — это SPREAD (выбор spreadCycle/stealthChop), не микрошаг. Точная таблица зависит от модуля — на модели с раздельными MS2/MS1/SPREAD типично:</p>
+  <p>У модуля TMC2209 третья позиция (там, где у A4988 был MS3) — это вход SPREAD (выбор spreadCycle/stealthChop), а не микрошаг. Таблица ниже — по даташиту TMC2209 Rev.&nbsp;1.09; «есть» означает надетую перемычку RAMPS, то есть пин подтянут к +5В (VCC_IO), «нет» — снятую, то есть пин на GND через внутреннюю подтяжку драйвера.</p>
   <div class="scroll-x">
   <table>
-    <caption>MS2 / MS1 / SPREAD → микрошаг / режим (пример конкретной платы, сверяйте с шёлкографией своей)</caption>
+    <caption>MS2 / MS1 / SPREAD → микрошаг / режим (по даташиту; шёлкографию своего модуля всё равно сверяйте — порядок выводов у производителей различается)</caption>
     <thead><tr><th>MS2</th><th>MS1</th><th>SPREAD (3-я)</th><th>Микрошаг</th><th>Режим</th></tr></thead>
     <tbody>
       <tr><td>есть</td><td>есть</td><td>есть</td><td class="good">1/16</td><td>spreadCycle (громче)</td></tr>
       <tr><td>есть</td><td>есть</td><td>нет</td><td class="good">1/16</td><td>stealthChop (тише)</td></tr>
       <tr><td>нет</td><td>нет</td><td>любая</td><td>1/8</td><td>—</td></tr>
-      <tr><td>есть</td><td>нет</td><td>любая</td><td>1/32</td><td>—</td></tr>
-      <tr><td>нет</td><td>есть</td><td>любая</td><td>1/64</td><td>—</td></tr>
+      <tr><td>нет</td><td>есть</td><td>любая</td><td>1/32</td><td>—</td></tr>
+      <tr><td>есть</td><td>нет</td><td>любая</td><td>1/64</td><td>—</td></tr>
     </tbody>
   </table>
   </div>
+  <p class="diagram-caption">Исправлено 2026-08-02: до этой даты в двух средних строках 1/32 и 1/64 стояли наоборот. Правильно по даташиту — MS2&nbsp;GND / MS1&nbsp;VCC_IO&nbsp;=&nbsp;1/32, MS2&nbsp;VCC_IO / MS1&nbsp;GND&nbsp;=&nbsp;1/64.</p>
   <p>Без UART Klipper не видит режим чоппера и не может его задать: перемычка — единственный орган управления, а в <code>printer.cfg</code> писать про это <strong>некуда</strong>. Это не «нечего дописывать», а отсутствующая возможность — и у неё есть последствия, см. врезку ниже.</p>
+  <p><strong>Как только UART подключён, эта таблица работает иначе:</strong> микрошаг с MS1/MS2 снимается (его задаёт регистр, то есть <code>microsteps</code> в конфиге), но те же два пина продолжают задавать <strong>адрес чипа на шине UART</strong>, а SPREAD складывается по XOR с регистровым битом режима чоппера. Разбор с цитатами из даташита и что из этого следует для монтажа — в разделе <a href="#uart-scope">«Линия UART к драйверам»</a>.</p>
 
   <div class="callout warn">
     <span class="ctitle">stealthChop против момента на высокой скорости — и почему это лечится только UART</span>
@@ -1881,9 +2014,22 @@
   <p class="content-group-desc">Сеть, USB, UART — то, что вокруг принтера, но влияет на его стабильность.</p>
 
 <section id="uart-direct">
-  <h2>Прямой UART Orange Pi ↔ Mega (без USB/хаба)</h2>
-  <span class="tag warn">физическая пайка/монтаж · есть риск повредить Orange Pi при ошибке</span>
-  <p class="section-intro">Цель — убрать зависимость связи с MCU от нестабильного USB-хаба: соединить UART Orange Pi напрямую с Мегой, освободив единственный USB-порт под камеру.</p>
+  <h2>Замена USB на прямой UART (Orange Pi ↔ Mega) — рассмотрено и ОТВЕРГНУТО</h2>
+  <span class="tag warn">не делаем · раздел сохранён как prior art</span>
+  <p class="section-intro">Цель была — убрать зависимость связи с MCU от нестабильного USB-хаба: соединить UART Orange Pi напрямую с Мегой, освободив единственный USB-порт под камеру.</p>
+
+  <div class="callout danger">
+    <span class="ctitle">Решение принято: не делаем. Связь с Мегой идёт по USB и такой останется</span>
+    <p>Это <strong>другая тема</strong>, чем UART к драйверам TMC2209: там линия целиком между модулем драйвера и Мегой на одной плате, и Orange Pi в ней не участвует вообще. Здесь речь о замене USB-кабеля между Orange Pi и Мегой на аппаратный UART — <strong>к управлению драйверами это отношения не имеет и для него не требуется</strong>.</p>
+    <p>Почему отвергнуто (всё уже зафиксировано в <code>printer-status.md</code>):</p>
+    <ul class="checklist">
+      <li><span><strong>USB работает штатно.</strong> Мега подключена обычным кабелем через стабильный путь <code>/dev/serial/by-id/…</code>, который не переезжает при смене <code>ttyUSB0/1</code>. Исходная причина затеи — нестабильный USB-хаб — закрыта архитектурно: Мега переехала на microUSB-OTG, камера осталась на USB-A, хаба в топологии больше нет.</span></li>
+      <li><span><strong>Понадобился бы внешний преобразователь уровней</strong> на две сигнальные линии: GPIO Orange Pi — 3.3В и не толерантны к 5В, логика Меги — 5В.</span></li>
+      <li><span><strong>Штатный переключатель платы на 3.3В использовать нельзя — проверено эмпирически.</strong> После переключения термисторы стола и хотэнда одновременно ушли на −109.28&nbsp;°C, Klipper остановился по <code>not in range</code>; лечится обратным переключением на 5В, что и было сделано. Почему именно так — вывод из наблюдаемого поведения, а не из документации (схемы платы найти не удалось), см. врезку ниже по разделу.</span></li>
+      <li><span><strong>Конфликт пинов.</strong> На Allwinner H3 UART3 сидит на пинах 8/10 (PA13/PA14), которые делит с SPI1 — занять их значит закрыть SPI1 под другое.</span></li>
+    </ul>
+    <p>Раздел не удалён намеренно: в этом репозитории отвергнутые варианты сохраняются вместе с обоснованием, чтобы их не изобретали заново. Читайте как историю решения, а не как план работ.</p>
+  </div>
 
   <div class="callout info">
     <span class="ctitle">Альтернатива без пайки — microUSB-OTG (на этой машине сработала, весь раздел ниже стал необязательным)</span>
