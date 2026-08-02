@@ -48,7 +48,11 @@ HOST="${PRINTER_HOST:-ultra@192.168.11.160}"
 API="${PRINTER_API:-http://192.168.11.160:7125}"
 REMOTE_DIR="printer_data/config"
 LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../printer-configs" && pwd)"
-FILES=(printer.cfg moonraker.conf crowsnest.conf autotune_tmc.cfg KlipperScreen.conf mainsail.cfg)
+# smoke-alarm.cfg добавлен 2026-08-02: printer.cfg его [include]-ит, значит без
+# него Klipper не поднимется. Файла на принтере пока нет — цикл диффа ниже это
+# переживает (пустой remote_content => файл считается изменённым и заливается,
+# бэкап делается через `cp ... || true`).
+FILES=(printer.cfg smoke-alarm.cfg moonraker.conf crowsnest.conf autotune_tmc.cfg KlipperScreen.conf mainsail.cfg)
 
 ASSUME_YES=0
 DRY_RUN=0
