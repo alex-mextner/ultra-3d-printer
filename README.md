@@ -49,7 +49,8 @@
 ## Структура репозитория
 
 - [`docs/printer-status.md`](docs/printer-status.md) — статус проекта: что сделано и проверено, что в работе, история решений. Читать первым.
-- [`docs/ramps-diagnostics.html`](docs/ramps-diagnostics.html) — методология: диагностика RAMPS/драйверов, подбор тока и скорости, безопасность 220В. Открыть через `docs/serve-ramps.sh` или напрямую файлом.
+- [`docs/index.html`](docs/index.html) — входная страница HTML-портала документации. Портал = методология, применимая к любой машине на RAMPS/Klipper: [`ramps-diagnostics.html`](docs/ramps-diagnostics.html) (диагностика платы и драйверов, подбор тока и скорости, безопасность 220В, UART к TMC2209) и [`reference.html`](docs/reference.html) (схемы и пиноуты). Конкретики этой машины в портале нет — она вся в `printer-status.md`.
 - [`printer-configs/`](printer-configs/) — живые конфиги Klipper/Moonraker/crowsnest, источник истины (правится только тут, см. `CLAUDE.md`).
 - [`scripts/deploy.sh`](scripts/deploy.sh) — выкатка конфигов на принтер.
+- [`scripts/serve-docs.sh`](scripts/serve-docs.sh) — публикация портала `docs/` на принтер → `http://192.168.11.160:8001/` (без `?v=`, сервер отдаёт `no-store`).
 - Отдельно в `docs/` — заметки по попутному проекту миграции домашнего роутера на OpenWrt (не относится к принтеру).

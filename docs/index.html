@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Портал документации: RAMPS 1.4 + Klipper</title>
+<link rel="stylesheet" href="portal.css">
+
+<header class="topbar">
+  <a class="brand" href="./">RAMPS · Klipper — портал</a>
+  <nav>
+    <a href="./" aria-current="page">Индекс</a>
+    <a href="ramps-diagnostics.html">Диагностика</a>
+    <a href="reference.html">Схемы и пиноуты</a>
+  </nav>
+</header>
+
+<div class="hero">
+  <div class="eyebrow">Документация у станка · читается с планшета</div>
+  <h1>Портал документации: RAMPS 1.4 + Klipper</h1>
+  <p class="lede">Это методическая часть документации самосборного принтера: как устроена связка «одноплатник + Klipper + Mega2560 + RAMPS 1.4», как её диагностировать приборами, как считать ток и как не убиться о 220 В. Всё здесь применимо к <strong>любой</strong> машине на этой связке — состояния и настроек конкретного принтера тут намеренно нет.</p>
+  <div class="context-strip">
+    <div><span class="k">Что здесь</span><span class="v">Методика: как проверять, как считать, почему так</span></div>
+    <div><span class="k">Чего здесь нет</span><span class="v">Пинов, токов и «сделано/не сделано» конкретной машины</span></div>
+    <div><span class="k">Где состояние машины</span><span class="v"><code>docs/printer-status.md</code> в репозитории</span></div>
+    <div><span class="k">Обновление</span><span class="v"><code>bash scripts/serve-docs.sh</code></span></div>
+  </div>
+</div>
+
+<div class="wrap single">
+<main>
+
+<div class="content-group">
+  <div class="content-group-title">Разделы портала</div>
+  <p class="content-group-desc">Две страницы: одна читается, вторая — на неё смотрят.</p>
+
+<section id="sections">
+  <div class="card-grid">
+    <a class="card" href="ramps-diagnostics.html">
+      <span class="card-kicker">Основной документ · ~300 КБ, одна страница</span>
+      <h3>Диагностика RAMPS 1.4, A4988 и TMC2209</h3>
+      <p>Пошаговая методика: от визуального осмотра платы до захвата сигналов осциллографом и подбора тока. Сюда же — безопасность 220 В, UART к драйверам TMC2209, режимы чоппера, координаты и направления осей, prior art каждой самодельной техники.</p>
+      <span class="card-more">Открыть гайд →</span>
+    </a>
+    <a class="card" href="reference.html">
+      <span class="card-kicker">Картинки · открывать при монтаже</span>
+      <h3>Схемы и пиноуты</h3>
+      <p>Плата RAMPS 1.4, пиноут Arduino Mega 2560 (картинкой и PDF), выводы модуля TMC2209, выбор режима UART на модуле, гребёнка Orange Pi One. Всё, во что тыкают пальцем, стоя у станка.</p>
+      <span class="card-more">Открыть схемы →</span>
+    </a>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Куда идти по задаче</div>
+  <p class="content-group-desc">Оглавление гайда целиком — чтобы не листать его сверху, если уже знаете, что ищете.</p>
+
+<section id="jump">
+  <h2>Оглавление гайда</h2>
+
+  <h3>Начало работы</h3>
+  <ul class="jump-list">
+    <li><a href="ramps-diagnostics.html#safety">Безопасность — читать до того, как взять в руки щуп</a></li>
+    <li><a href="ramps-diagnostics.html#hypothesis">Приоритетная гипотеза: пропала шина VMOT</a></li>
+    <li><a href="ramps-diagnostics.html#order">Итоговый порядок действий при диагностике с нуля</a></li>
+  </ul>
+
+  <h3>Установка и первый запуск</h3>
+  <ul class="jump-list">
+    <li><a href="ramps-diagnostics.html#install-stack">ОС и стек Klipper + Moonraker + Mainsail</a></li>
+    <li><a href="ramps-diagnostics.html#firmware-flash">Сборка и заливка прошивки ATmega2560</a></li>
+    <li><a href="ramps-diagnostics.html#preflight">Чеклист перед первым включением</a></li>
+    <li><a href="ramps-diagnostics.html#first-run">Первый запуск без хоминга</a></li>
+    <li><a href="ramps-diagnostics.html#first-heat">Первый нагрев хотэнда</a></li>
+    <li><a href="ramps-diagnostics.html#mains-bed">Стол на 220 В через SSR — отдельная зона риска</a></li>
+  </ul>
+
+  <h3>Диагностика платы</h3>
+  <ul class="jump-list">
+    <li><a href="ramps-diagnostics.html#ramps-visual">Визуальный осмотр: что искать глазами и носом</a></li>
+    <li><a href="ramps-diagnostics.html#ramps-cold">Без драйверов, без питания — прозвонка</a></li>
+    <li><a href="ramps-diagnostics.html#ramps-hot">Без драйверов, под напряжением — где мерить VMOT</a></li>
+    <li><a href="ramps-diagnostics.html#pinout">Пиноут гнезда драйвера</a></li>
+  </ul>
+
+  <h3>Диагностика драйверов</h3>
+  <ul class="jump-list">
+    <li><a href="ramps-diagnostics.html#a4988-bench">A4988 на столе, изолированно</a></li>
+    <li><a href="ramps-diagnostics.html#tmc-bench">TMC2209 на столе, изолированно</a></li>
+    <li><a href="ramps-diagnostics.html#scope-live">В гнезде + осциллограф: STEP, DIR, ENABLE, обмотки</a></li>
+    <li><a href="ramps-diagnostics.html#uart-scope">Линия UART к драйверам: монтаж, перемычки, адрес</a></li>
+    <li><a href="ramps-diagnostics.html#uart-scope-protocol">↳ Осциллограф на линии UART — протокол с цифрами</a></li>
+    <li><a href="ramps-diagnostics.html#uart-no-link">↳ UART подключён, но связи нет — дерево решений</a></li>
+    <li><a href="ramps-diagnostics.html#swap">Протокол перестановки (swap test)</a></li>
+    <li><a href="ramps-diagnostics.html#tree">Общее дерево решений</a></li>
+  </ul>
+
+  <h3>Ток, режимы, движение</h3>
+  <ul class="jump-list">
+    <li><a href="ramps-diagnostics.html#vref">Vref: формулы, калькулятор, журнал измерений</a></li>
+    <li><a href="ramps-diagnostics.html#chopper-modes">spreadCycle и stealthChop — чем режимы платят друг за друга</a></li>
+    <li><a href="ramps-diagnostics.html#diy-hints">Координаты, MIN/MAX, разводка мотора, подбор скоростей</a></li>
+  </ul>
+
+  <h3>Прочее</h3>
+  <ul class="jump-list">
+    <li><a href="ramps-diagnostics.html#uart-direct">Замена USB на прямой UART между хостом и Mega</a></li>
+    <li><a href="ramps-diagnostics.html#hotend-thermal">Термопаста и тепловой барьер хотэнда</a></li>
+    <li><a href="ramps-diagnostics.html#methodology">Prior art использованных техник</a></li>
+    <li><a href="ramps-diagnostics.html#cheatsheet">Шпаргалка по командам Klipper</a></li>
+  </ul>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Не на портале</div>
+  <p class="content-group-desc">Эти документы живут в git как markdown и туда же правятся — в портал они намеренно не конвертируются.</p>
+
+<section id="repo-docs">
+  <h2>Что лежит в репозитории, а не здесь</h2>
+  <div class="callout key">
+    <span class="ctitle"><code>docs/printer-status.md</code> — состояние конкретной машины</span>
+    <p>Единственная точка входа по этому принтеру: что физически сделано и проверено, конкретные пины и токи, история отказов этой сборки, что осталось сделать («Три корзины»). <strong>Если вы искали «а как оно у нас настроено» — это туда, а не в гайд.</strong> Формат оставлен markdown сознательно: документ читают и правят в git, вместе с конфигами, и он меняется почти каждую сессию.</p>
+  </div>
+  <div class="card-grid">
+    <div class="card card-static">
+      <span class="card-kicker">markdown, в репозитории</span>
+      <h3><code>docs/print-head-mount.md</code></h3>
+      <p>Конструкция каретки печатающей головы: геометрия детали, ориентация при печати, выбор материала, канал под ремень GT2, крепление к крышке.</p>
+    </div>
+    <div class="card card-static">
+      <span class="card-kicker">исполняемое, в репозитории</span>
+      <h3><code>scripts/serve-docs.sh</code></h3>
+      <p>Публикует этот портал: заливает страницы на принтер и перезапускает сервер. Запускать после любой правки в <code>docs/</code> — иначе у станка останется старая версия.</p>
+    </div>
+  </div>
+</section>
+</div>
+
+</main>
+</div>
+
+<footer>
+  <div class="mono">Портал собирается из <code>docs/</code> и публикуется скриптом <code>scripts/serve-docs.sh</code>. Правки — в репозитории, не на принтере.</div>
+</footer>
+</html>

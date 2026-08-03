@@ -1,33 +1,28 @@
 #!/usr/bin/env bash
-# Универсальный статический сервер для docs/ (диагностический HTML-гайд и его ассеты).
-# Использует python3/python -m http.server — работает одинаково на Linux/Mac/Windows(Git Bash).
-set -uo pipefail
+# УСТАРЕЛ. Тонкая обёртка над scripts/serve-docs.sh — оставлена только затем,
+# чтобы старая команда (из чьей-то памяти, из README прошлой версии или из
+# старого коммита) не молчала, а сказала, куда всё переехало, и сделала
+# правильную вещь.
+#
+# Что было: python3 -m http.server на порту 8000 в docs/, на РАБОЧЕЙ машине,
+# открывали по http://localhost:8000/ramps-diagnostics.html.
+# Что стало: портал целиком (индекс + гайд + схемы) отдаётся С ПРИНТЕРА на
+# http://192.168.11.160:8001/ — голым адресом, без ?v=, потому что сервер шлёт
+# Cache-Control: no-store. Публикует его scripts/serve-docs.sh.
+#
+# Почему переехало: документацию читают с планшета у станка, а не с той машины,
+# где её пишут — localhost планшету недоступен. Плюс локальный сервер не
+# переживал перезапуск песочницы между заходами, а принтер и так включён.
+set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT="${PORT:-8000}"
-LOG="$ROOT/serve-ramps.log"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-log() {
-    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >>"$LOG"
-}
+cat >&2 <<'MSG'
+docs/serve-ramps.sh устарел: порт 8000 на рабочей машине больше не используется.
+Портал публикуется на принтер скриптом scripts/serve-docs.sh
+  → http://192.168.11.160:8001/
 
-PY=""
-if command -v python3 >/dev/null 2>&1; then
-    PY=python3
-elif command -v python >/dev/null 2>&1; then
-    PY=python
-fi
+Запускаю его вместо себя...
+MSG
 
-if [ -z "$PY" ]; then
-    echo "Нужен python3 или python в PATH — ни то ни другое не найдено." >&2
-    exit 1
-fi
-
-log "=== server script starting, pid=$$ ==="
-log "using $PY -m http.server on port $PORT, root=$ROOT"
-cd "$ROOT" || exit 1
-while true; do
-    "$PY" -m http.server "$PORT" >>"$LOG" 2>&1
-    log "http.server exited - restarting in 2s"
-    sleep 2
-done
+exec bash "$REPO/scripts/serve-docs.sh" "$@"

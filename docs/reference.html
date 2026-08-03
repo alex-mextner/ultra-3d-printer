@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Схемы и пиноуты — RAMPS 1.4, Mega 2560, TMC2209</title>
+<link rel="stylesheet" href="portal.css">
+
+<header class="topbar">
+  <a class="brand" href="./">RAMPS · Klipper — портал</a>
+  <nav>
+    <a href="./">Индекс</a>
+    <a href="ramps-diagnostics.html">Диагностика</a>
+    <a href="reference.html" aria-current="page">Схемы и пиноуты</a>
+  </nav>
+</header>
+
+<div class="hero">
+  <div class="eyebrow">Справочник · открывать при монтаже</div>
+  <h1>Схемы и пиноуты</h1>
+  <p class="lede">Картинки, во время работы с которыми держат палец на плате. Все — про типовое железо, а не про конкретную сборку: сверяйтесь в первую очередь с шёлкографией на своей плате, картинка нужна, чтобы понимать, что именно на ней написано.</p>
+</div>
+
+<div class="wrap single">
+<main>
+
+<div class="content-group">
+  <div class="content-group-title">Плата и контроллер</div>
+  <p class="content-group-desc">Куда что воткнуто и как называется на схеме.</p>
+
+<section id="ramps">
+  <h2>RAMPS 1.4 — расположение разъёмов</h2>
+  <figure class="plate">
+    <img src="ramps-v1.4.png" alt="Плата RAMPS 1.4 с подписанными разъёмами" loading="lazy">
+    <figcaption><b>RAMPS 1.4.</b> Гнёзда драйверов X/Y/Z/E0/E1, разъёмы концевиков MIN/MAX по каждой оси, силовые клеммы, гребёнки AUX-1…AUX-4, разъёмы термисторов. Разбор того, что здесь искать при осмотре, — в разделе <a href="ramps-diagnostics.html#ramps-visual">«Визуальный осмотр»</a>; пиноут самого гнезда драйвера — <a href="ramps-diagnostics.html#pinout">«Пиноут гнезда драйвера»</a>.</figcaption>
+  </figure>
+</section>
+
+<section id="mega">
+  <h2>Arduino Mega 2560 — пиноут</h2>
+  <figure class="plate">
+    <img src="Arduino-Mega-2560-Pinout.png" alt="Пиноут Arduino Mega 2560: соответствие номеров D-пинов портам AVR" loading="lazy">
+    <figcaption><b>ATmega2560.</b> Главное, зачем сюда лезут: перевод ардуиновского номера (<code>D40</code>, <code>D49</code>, <code>D53</code>) в имя порта AVR (<code>PG1</code>, <code>PL0</code>, <code>PB0</code>), потому что Klipper в <code>uart_pin</code> хочет именно второе. Подробнее — <a href="ramps-diagnostics.html#uart-scope">«Линия UART к драйверам»</a>. Полная версия в векторе: <a href="arduino-mega-2560-pinout.pdf">arduino-mega-2560-pinout.pdf</a> (масштабируется без потери, удобнее на планшете).</figcaption>
+  </figure>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Модули драйверов</div>
+  <p class="content-group-desc">Разводка модулей отличается между производителями — эти картинки нужны, чтобы знать, что вообще бывает.</p>
+
+<section id="tmc2209">
+  <h2>TMC2209 — выводы модуля</h2>
+  <figure class="plate">
+    <img src="tmc2209%20pinout.webp" alt="Пиноут модуля TMC2209: ряд EN, MS1, MS2, SPREAD, PDN_UART, STEP, DIR" loading="lazy">
+    <figcaption><b>Модуль TMC2209.</b> Ряд управления, положение <span class="pin">PDN_UART</span> и выводы <span class="pin">MS1</span>/<span class="pin">MS2</span>, которые задают одновременно микрошаг в standalone и <strong>адрес чипа на шине UART</strong>. Таблица «MS1/MS2 → микрошаг и адрес» и разбор — в разделе <a href="ramps-diagnostics.html#uart-scope">«Линия UART»</a>.</figcaption>
+  </figure>
+</section>
+
+<section id="tmc2209-uart-select">
+  <h2>TMC2209 — выбор режима UART на модуле</h2>
+  <figure class="plate">
+    <img src="tmc2209-uart-mode-select.png" alt="Выбор режима UART на модуле TMC2209: перемычка PDN и связанные площадки" loading="lazy">
+    <figcaption><b>Как модуль выбирает, какой вывод является PDN_UART.</b> На части модулей это не «один сигнал, выведенный дважды», а <em>джампер, выбирающий один из выводов</em> — и провод, припаянный не к тому, даёт ровно ту же картину, что обрыв: молчание на всех четырёх адресах. Прежде чем брать осциллограф, сверьтесь с этой картинкой и со своей платой. Дерево решений — <a href="ramps-diagnostics.html#uart-no-link">«UART подключён, но связи нет»</a>.</figcaption>
+  </figure>
+</section>
+</div>
+
+<div class="content-group">
+  <div class="content-group-title">Хост</div>
+  <p class="content-group-desc">Одноплатник участвует в схеме одним USB-кабелем — но если лезть в его гребёнку, лучше знать, куда.</p>
+
+<section id="orangepi">
+  <h2>Orange Pi One — гребёнка GPIO</h2>
+  <figure class="plate">
+    <img src="orange-pi-one-pinout.png" alt="Пиноут гребёнки Orange Pi One (Allwinner H3)" loading="lazy">
+    <figcaption><b>Orange Pi One (Allwinner H3).</b> Пины 8/10 — это одновременно TX3/RX3 и SPI1: занять их под UART значит закрыть SPI1 подо что-то другое. Обоснование, почему прямой UART между хостом и Мегой обычно не нужен, — <a href="ramps-diagnostics.html#uart-direct">«Замена USB на прямой UART»</a>.</figcaption>
+  </figure>
+</section>
+</div>
+
+</main>
+</div>
+
+<footer>
+  <div class="mono"><a href="./">← к индексу портала</a> · <a href="ramps-diagnostics.html">гайд по диагностике</a> · схемы типового железа, не конкретной сборки</div>
+</footer>
+</html>

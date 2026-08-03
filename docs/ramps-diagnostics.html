@@ -1,629 +1,30 @@
 <!DOCTYPE html>
 <html lang="ru">
 <meta charset="utf-8">
-<title>RAMPS 1.4 / A4988 / TMC2209 — методика диагностики</title>
-<style>
-  :root{
-    --bg:#f4f1ea;
-    --paper:#ffffff;
-    --paper-2:#faf8f3;
-    --border:#ddd6c7;
-    --text:#211f1a;
-    --text-dim:#5c574c;
-    --text-faint:#8a8474;
-    --accent:#1f6e46;
-    --accent-2:#155c3a;
-    --accent-bg:rgba(31,110,70,0.08);
-    --warn:#a15c00;
-    --warn-bg:rgba(161,92,0,0.10);
-    --warn-border:#d8a24a;
-    --info:#1c5f8a;
-    --info-bg:rgba(28,95,138,0.08);
-    --danger:#a3271f;
-    --danger-bg:rgba(163,39,31,0.08);
-    --scope-bg:#0d1512;
-    --scope-grid:#1d3a2c;
-    --scope-trace:#5eeb9c;
-    --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
-    color-scheme: light;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      --bg:#12151a;
-      --paper:#181d24;
-      --paper-2:#1e242c;
-      --border:#2b323c;
-      --text:#e7ecf2;
-      --text-dim:#a7b1bd;
-      --text-faint:#6b7684;
-      --accent:#5eeb9c;
-      --accent-2:#8ff5b8;
-      --accent-bg:rgba(94,235,156,0.09);
-      --warn:#f0ac4e;
-      --warn-bg:rgba(240,172,78,0.10);
-      --warn-border:#7a5a26;
-      --info:#6fb3e6;
-      --info-bg:rgba(111,179,230,0.08);
-      --danger:#f2837a;
-      --danger-bg:rgba(242,131,122,0.10);
-      --scope-bg:#060a08;
-      --scope-grid:#173226;
-      --scope-trace:#7bffb6;
-      color-scheme: dark;
-    }
-  }
-  :root[data-theme="dark"]{
-    --bg:#12151a; --paper:#181d24; --paper-2:#1e242c; --border:#2b323c;
-    --text:#e7ecf2; --text-dim:#a7b1bd; --text-faint:#6b7684;
-    --accent:#5eeb9c; --accent-2:#8ff5b8; --accent-bg:rgba(94,235,156,0.09);
-    --warn:#f0ac4e; --warn-bg:rgba(240,172,78,0.10); --warn-border:#7a5a26;
-    --info:#6fb3e6; --info-bg:rgba(111,179,230,0.08);
-    --danger:#f2837a; --danger-bg:rgba(242,131,122,0.10);
-    --scope-bg:#060a08; --scope-grid:#173226; --scope-trace:#7bffb6;
-    color-scheme: dark;
-  }
-  :root[data-theme="light"]{
-    --bg:#f4f1ea; --paper:#ffffff; --paper-2:#faf8f3; --border:#ddd6c7;
-    --text:#211f1a; --text-dim:#5c574c; --text-faint:#8a8474;
-    --accent:#1f6e46; --accent-2:#155c3a; --accent-bg:rgba(31,110,70,0.08);
-    --warn:#a15c00; --warn-bg:rgba(161,92,0,0.10); --warn-border:#d8a24a;
-    --info:#1c5f8a; --info-bg:rgba(28,95,138,0.08);
-    --danger:#a3271f; --danger-bg:rgba(163,39,31,0.08);
-    --scope-bg:#0d1512; --scope-grid:#1d3a2c; --scope-trace:#5eeb9c;
-    color-scheme: light;
-  }
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Диагностика RAMPS 1.4 / A4988 / TMC2209 — методика</title>
+<link rel="stylesheet" href="portal.css">
 
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;}
-  html{scroll-behavior:smooth;}
-  @media (prefers-reduced-motion: reduce){
-    html{scroll-behavior:auto;}
-  }
-  body{
-    background:var(--bg);
-    color:var(--text);
-    font-family:var(--sans);
-    font-size:16px;
-    line-height:1.55;
-    -webkit-font-smoothing:antialiased;
-  }
-  ::selection{background:var(--accent);color:var(--scope-bg);}
-  a{color:var(--accent-2);}
-  h1,h2,h3,h4{font-family:var(--sans);font-weight:800;letter-spacing:-0.01em;text-wrap:balance;color:var(--text);}
-  code,.mono,kbd,.pin{font-family:var(--mono);}
-  .wrap{
-    max-width:1180px;
-    margin:0 auto;
-    padding:0 clamp(14px,3vw,36px) 80px;
-    display:grid;
-    grid-template-columns:250px minmax(0,1fr);
-    gap:40px;
-  }
-  @media (max-width:900px){
-    .wrap{grid-template-columns:1fr;}
-  }
-
-  /* ---------- Hero ---------- */
-  .hero{
-    grid-column:1/-1;
-    padding:34px clamp(14px,3vw,36px) 22px;
-    border-bottom:1px solid var(--border);
-    margin-bottom:6px;
-  }
-  .hero .eyebrow{
-    font-family:var(--mono);
-    font-size:12.5px;
-    letter-spacing:0.14em;
-    text-transform:uppercase;
-    color:var(--accent);
-    margin-bottom:10px;
-  }
-  .hero h1{
-    font-size:clamp(26px,4vw,38px);
-    margin:0 0 10px;
-    line-height:1.1;
-  }
-  .hero p.lede{
-    color:var(--text-dim);
-    max-width:74ch;
-    font-size:16.5px;
-    margin:0 0 18px;
-  }
-  .context-strip{
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
-    gap:1px;
-    background:var(--border);
-    border:1px solid var(--border);
-    border-radius:10px;
-    overflow:hidden;
-    max-width:920px;
-  }
-  .context-strip div{
-    background:var(--paper);
-    padding:12px 14px;
-  }
-  .context-strip .k{
-    display:block;
-    font-family:var(--mono);
-    font-size:10.5px;
-    letter-spacing:0.08em;
-    text-transform:uppercase;
-    color:var(--text-faint);
-    margin-bottom:4px;
-  }
-  .context-strip .v{
-    font-size:14px;
-    color:var(--text);
-    font-weight:600;
-  }
-
-  /* ---------- TOC ---------- */
-  nav.toc{
-    align-self:start;
-    position:sticky;
-    top:20px;
-    max-height:calc(100vh - 40px);
-    overflow-y:auto;
-    padding-right:6px;
-  }
-  nav.toc .toc-group-title{
-    font-family:var(--mono);
-    font-size:11px;
-    letter-spacing:0.1em;
-    text-transform:uppercase;
-    color:var(--accent-2);
-    margin:22px 0 6px;
-    padding-top:14px;
-    border-top:1px solid var(--border);
-  }
-  nav.toc .toc-group-title:first-child{margin-top:0;padding-top:0;border-top:none;}
-  nav.toc ol{
-    list-style:none;
-    margin:0 0 4px;
-    padding:0;
-  }
-  nav.toc li{margin:0;}
-  nav.toc a{
-    display:block;
-    text-decoration:none;
-    color:var(--text-dim);
-    font-size:13.5px;
-    padding:4px 0 4px 2px;
-    border-left:2px solid transparent;
-    border-bottom:1px solid transparent;
-  }
-  nav.toc a:hover{color:var(--accent-2);border-left-color:var(--accent);}
-  @media (max-width:900px){
-    nav.toc{position:static;max-height:none;border-bottom:1px solid var(--border);padding-bottom:10px;}
-  }
-
-  /* ---------- Content ---------- */
-  main{min-width:0;}
-  .content-group{
-    padding:30px 0 6px;
-  }
-  .content-group:first-child{padding-top:0;}
-  .content-group-title{
-    font-family:var(--mono);
-    font-size:12px;
-    letter-spacing:0.12em;
-    text-transform:uppercase;
-    color:var(--accent-2);
-    margin:0 0 4px;
-  }
-  .content-group-desc{
-    color:var(--text-faint);
-    font-size:13.5px;
-    max-width:70ch;
-    margin:0 0 4px;
-  }
-  section{
-    padding:28px 0;
-    border-bottom:1px solid var(--border);
-    scroll-margin-top:16px;
-  }
-  .content-group:last-child section:last-child{border-bottom:none;}
-  .heading-anchor{
-    font-family:var(--mono);
-    font-size:0.7em;
-    font-weight:400;
-    color:var(--text-faint);
-    text-decoration:none;
-    opacity:0.5;
-  }
-  .heading-anchor:hover,
-  .heading-anchor:focus{
-    color:var(--accent-2);
-    opacity:1;
-  }
-  section h2{
-    font-size:clamp(19px,2.4vw,24px);
-    display:flex;
-    align-items:center;
-    gap:12px;
-    margin:0 0 6px;
-  }
-  section h3{font-size:16.5px;margin:26px 0 10px;color:var(--text);}
-  section > p{color:var(--text-dim);max-width:76ch;}
-  .section-intro{color:var(--text-dim);max-width:76ch;margin:6px 0 20px;}
-
-  .tag{
-    display:inline-flex;
-    align-items:center;
-    gap:6px;
-    font-family:var(--mono);
-    font-size:10.5px;
-    letter-spacing:0.08em;
-    text-transform:uppercase;
-    padding:3px 8px;
-    border-radius:999px;
-    border:1px solid currentColor;
-    font-weight:700;
-    margin:0 6px 10px 0;
-  }
-  .tag.visual{color:var(--text-dim);}
-  .tag.meter{color:var(--info);background:var(--info-bg);}
-  .tag.scope{color:var(--accent);background:var(--accent-bg);}
-  .tag.warn{color:var(--warn);background:var(--warn-bg);}
-  .tag.danger{color:var(--danger);background:var(--danger-bg);}
-
-  .callout{
-    border:1px solid var(--border);
-    border-left:4px solid var(--text-faint);
-    background:var(--paper);
-    border-radius:8px;
-    padding:14px 16px;
-    margin:16px 0;
-  }
-  .callout p{margin:6px 0;color:var(--text-dim);}
-  .callout p:first-child{margin-top:0;}
-  .callout .ctitle{
-    font-weight:800;
-    color:var(--text);
-    display:block;
-    margin-bottom:4px;
-  }
-  .callout.warn{border-left-color:var(--warn);background:var(--warn-bg);}
-  .callout.warn .ctitle{color:var(--warn);}
-  .callout.info{border-left-color:var(--info);background:var(--info-bg);}
-  .callout.info .ctitle{color:var(--info);}
-  .callout.key{border-left-color:var(--accent);background:var(--accent-bg);}
-  .callout.key .ctitle{color:var(--accent-2);}
-  .callout.danger{border-left-color:var(--danger);background:var(--danger-bg);}
-  .callout.danger .ctitle{color:var(--danger);}
-
-  .scroll-x{overflow-x:auto;border-radius:10px;}
-  table{
-    border-collapse:collapse;
-    width:100%;
-    min-width:560px;
-    font-size:14px;
-    background:var(--paper);
-    border:1px solid var(--border);
-    border-radius:10px;
-    overflow:hidden;
-  }
-  caption{
-    text-align:left;
-    font-family:var(--mono);
-    font-size:11.5px;
-    color:var(--text-faint);
-    margin-bottom:6px;
-    letter-spacing:0.02em;
-  }
-  th,td{
-    text-align:left;
-    padding:9px 12px;
-    border-bottom:1px solid var(--border);
-    vertical-align:top;
-  }
-  thead th{
-    background:var(--paper-2);
-    font-family:var(--mono);
-    font-size:11px;
-    letter-spacing:0.06em;
-    text-transform:uppercase;
-    color:var(--text-faint);
-    font-weight:700;
-  }
-  tbody tr:last-child td{border-bottom:none;}
-  td.good{color:var(--accent-2);}
-  td.bad{color:var(--danger);}
-  td .pin{
-    background:var(--paper-2);
-    border:1px solid var(--border);
-    border-radius:5px;
-    padding:1px 6px;
-    font-size:12.5px;
-  }
-
-  .diagram-frame{
-    background:var(--paper);
-    border:1px solid var(--border);
-    border-radius:12px;
-    padding:18px;
-    margin:18px 0;
-  }
-  .diagram-frame svg{display:block;width:100%;height:auto;}
-  .diagram-caption{
-    font-size:13px;
-    color:var(--text-faint);
-    margin-top:10px;
-  }
-  ol.legend{
-    margin:12px 0 0;
-    padding:0;
-    list-style:none;
-    display:grid;
-    gap:6px;
-    font-size:13.5px;
-    color:var(--text-dim);
-  }
-  ol.legend li{display:flex;gap:10px;align-items:baseline;}
-  ol.legend .badge{
-    flex:none;
-    width:20px;height:20px;
-    border-radius:50%;
-    background:var(--accent);
-    color:var(--scope-bg);
-    font-family:var(--mono);
-    font-weight:800;
-    font-size:11px;
-    display:flex;align-items:center;justify-content:center;
-  }
-
-  .scope-grid-2{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:16px;
-    margin:16px 0;
-  }
-  @media (max-width:640px){.scope-grid-2{grid-template-columns:1fr;}}
-  .scope-card{
-    background:var(--paper);
-    border:1px solid var(--border);
-    border-radius:12px;
-    overflow:hidden;
-  }
-  .scope-card .scope-head{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    padding:9px 12px;
-    font-family:var(--mono);
-    font-size:11.5px;
-    letter-spacing:0.04em;
-  }
-  .scope-card.ok .scope-head{color:var(--accent-2);}
-  .scope-card.bad .scope-head{color:var(--danger);}
-  .scope-card svg{display:block;width:100%;height:auto;background:var(--scope-bg);}
-  .scope-card .scope-foot{
-    padding:8px 12px 12px;
-    font-size:12.5px;
-    color:var(--text-faint);
-  }
-
-  ul.checklist{list-style:none;margin:14px 0;padding:0;display:grid;gap:8px;}
-  ul.checklist li{
-    display:flex;gap:10px;
-    padding:10px 12px;
-    background:var(--paper);
-    border:1px solid var(--border);
-    border-radius:8px;
-    font-size:14.5px;
-    color:var(--text-dim);
-  }
-  ul.checklist li::before{
-    content:"□";
-    color:var(--accent);
-    font-weight:800;
-    flex:none;
-  }
-
-  .step-list{counter-reset:step;margin:16px 0;padding:0;list-style:none;display:grid;gap:10px;}
-  .step-list li{
-    counter-increment:step;
-    position:relative;
-    padding:12px 14px 12px 46px;
-    background:var(--paper);
-    border:1px solid var(--border);
-    border-radius:8px;
-    color:var(--text-dim);
-    font-size:14.5px;
-  }
-  .step-list li::before{
-    content:counter(step);
-    position:absolute;
-    left:12px;top:12px;
-    width:22px;height:22px;
-    border-radius:50%;
-    background:var(--accent-bg);
-    color:var(--accent-2);
-    border:1px solid var(--accent);
-    font-family:var(--mono);
-    font-weight:800;
-    font-size:12px;
-    display:flex;align-items:center;justify-content:center;
-  }
-  .step-list strong{color:var(--text);}
-
-  .calc-panel{
-    background:var(--paper);
-    border:1px solid var(--border);
-    border-radius:12px;
-    padding:18px 20px;
-    margin:16px 0;
-  }
-  .calc-grid{
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-    gap:14px;
-    margin-top:6px;
-  }
-  .calc-field label{
-    display:block;
-    font-family:var(--mono);
-    font-size:11px;
-    letter-spacing:0.04em;
-    text-transform:uppercase;
-    color:var(--text-faint);
-    margin-bottom:5px;
-  }
-  .calc-field select,
-  .calc-field input{
-    width:100%;
-    box-sizing:border-box;
-    background:var(--paper-2);
-    border:1px solid var(--border);
-    border-radius:7px;
-    padding:8px 10px;
-    font-family:var(--mono);
-    font-size:15px;
-    color:var(--text);
-  }
-  .calc-field input:focus,
-  .calc-field select:focus{
-    outline:2px solid var(--accent);
-    outline-offset:1px;
-  }
-  .calc-field.result input{
-    color:var(--accent-2);
-    font-weight:700;
-    border-color:var(--accent);
-    background:var(--accent-bg);
-  }
-  .calc-eq{
-    font-family:var(--mono);
-    font-size:12.5px;
-    color:var(--text-faint);
-    margin-top:12px;
-  }
-  .calc-eq code{color:var(--text-dim);}
-  .calc-note{
-    font-size:12.5px;
-    color:var(--text-faint);
-    margin-top:8px;
-  }
-
-  .sheet-table{min-width:760px;}
-  .sheet-table input,.sheet-table select{
-    width:100%;
-    box-sizing:border-box;
-    background:var(--paper-2);
-    border:1px solid var(--border);
-    border-radius:6px;
-    padding:6px 8px;
-    font-family:var(--mono);
-    font-size:13.5px;
-    color:var(--text);
-  }
-  .sheet-table input.derived{color:var(--accent-2);font-weight:700;border-color:var(--accent);background:var(--accent-bg);}
-  .sheet-table input.secondary{color:var(--text-faint);}
-  .sheet-table th{white-space:nowrap;}
-  .btn{
-    font-family:var(--sans);
-    font-size:13px;
-    font-weight:700;
-    padding:7px 14px;
-    border-radius:7px;
-    border:1px solid var(--border);
-    background:var(--paper-2);
-    color:var(--text);
-    cursor:pointer;
-  }
-  .btn:hover{border-color:var(--accent);color:var(--accent-2);}
-  .btn.primary{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-2);}
-  .btn.danger:hover{border-color:var(--danger);color:var(--danger);}
-  .btn.small{padding:4px 9px;font-size:12px;}
-  .sheet-actions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;}
-  .sheet-empty{color:var(--text-faint);font-size:13px;padding:10px 0;}
-
-  .flow{margin:18px 0;}
-  .flow-node{
-    border:1px solid var(--border);
-    background:var(--paper);
-    border-radius:8px;
-    padding:11px 14px;
-    margin:10px 0;
-    font-weight:700;
-    color:var(--text);
-    font-size:14.5px;
-  }
-  .flow-children{
-    margin-left:14px;
-    padding-left:16px;
-    border-left:2px dashed var(--border);
-  }
-  .flow-branch-label{
-    display:inline-flex;
-    align-items:center;
-    gap:4px;
-    font-family:var(--mono);
-    font-size:11px;
-    font-weight:700;
-    text-transform:uppercase;
-    letter-spacing:0.06em;
-    padding:2px 9px;
-    border-radius:999px;
-    margin:6px 0 4px;
-  }
-  .flow-branch-label.yes{color:var(--accent-2);background:var(--accent-bg);border:1px solid var(--accent);}
-  .flow-branch-label.no{color:var(--danger);background:var(--danger-bg);border:1px solid var(--danger);}
-  .flow-outcome{
-    border-radius:8px;
-    padding:10px 14px;
-    margin:4px 0 10px;
-    font-size:14px;
-    line-height:1.45;
-    border:1px solid;
-    color:var(--text-dim);
-  }
-  .flow-outcome.ok{background:var(--accent-bg);border-color:var(--accent);}
-  .flow-outcome.warn{background:var(--warn-bg);border-color:var(--warn);}
-  .flow-outcome.bad{background:var(--danger-bg);border-color:var(--danger);}
-
-  .prior-art{
-    display:flex;
-    gap:8px;
-    align-items:baseline;
-    font-size:13px;
-    color:var(--text-faint);
-    margin-top:8px;
-    flex-wrap:wrap;
-  }
-  .prior-art .plabel{
-    font-family:var(--mono);
-    font-size:10.5px;
-    letter-spacing:0.06em;
-    text-transform:uppercase;
-    color:var(--accent-2);
-    flex:none;
-  }
-
-  footer{
-    grid-column:1/-1;
-    padding:26px clamp(14px,3vw,36px) 10px;
-    color:var(--text-faint);
-    font-size:13px;
-    border-top:1px solid var(--border);
-  }
-  footer .mono{font-size:12.5px;}
-</style>
+<header class="topbar">
+  <a class="brand" href="./">RAMPS · Klipper — портал</a>
+  <nav>
+    <a href="./">Индекс</a>
+    <a href="ramps-diagnostics.html" aria-current="page">Диагностика</a>
+    <a href="reference.html">Схемы и пиноуты</a>
+  </nav>
+</header>
 
 <div class="hero">
-  <div class="eyebrow">mbot · Orange Pi One + RAMPS 1.4 + Freaduino Mega2560</div>
+  <div class="eyebrow">Методика · RAMPS 1.4 + ATmega2560 + A4988 / TMC2209</div>
   <h1>Диагностика RAMPS 1.4, A4988 и TMC2209</h1>
-  <p class="lede">Пошаговая методика проверки платы и драйверов мультиметром и осциллографом — от простого визуального осмотра до захвата сигналов под напряжением и настройки тока. Собрана под конкретную ситуацию этого принтера, организована по темам как справочник — используйте оглавление, не обязательно читать по порядку.</p>
+  <p class="lede">Пошаговая методика проверки платы и драйверов мультиметром и осциллографом — от визуального осмотра до захвата сигналов под напряжением и настройки тока. Написана как справочник для любой самосборной машины на связке «одноплатник + Klipper + Mega2560 + RAMPS 1.4»: читать по оглавлению, не обязательно по порядку.</p>
   <div class="context-strip">
-    <div><span class="k">Было</span><span class="v">X/Y/Z/E — ноль движения при BUZZ после переполюсовки 12В</span></div>
-    <div><span class="k">Стало</span><span class="v">RAMPS реабилитирована, все оси двигаются, настраивается ток</span></div>
-    <div><span class="k">Сейчас в гнёздах</span><span class="v">A4988/TMC2209 стандэлон, без UART (подключение — приоритет)</span></div>
-    <div><span class="k">Живой конфиг/статус</span><span class="v">printer-status.md рядом</span></div>
+    <div><span class="k">Что это</span><span class="v">Методика, применимая к любой такой машине</span></div>
+    <div><span class="k">Чего здесь нет</span><span class="v">Состояния конкретного принтера — оно в printer-status.md</span></div>
+    <div><span class="k">Минимум приборов</span><span class="v">Мультиметр; осциллограф — для UART и обмоток</span></div>
+    <div><span class="k">Порядок</span><span class="v">Сначала «холодные» проверки, потом под напряжением</span></div>
   </div>
 </div>
-
 <div class="wrap">
 <nav class="toc">
   <div class="toc-group-title">Начало работы</div>
@@ -676,7 +77,7 @@
 
   <div class="toc-group-title">Инфраструктура</div>
   <ol>
-    <li><a href="#uart-direct">Замена USB на прямой UART (отвергнуто)</a></li>
+    <li><a href="#uart-direct">Замена USB на прямой UART</a></li>
   </ol>
 
   <div class="toc-group-title">Хотэнд</div>
@@ -705,12 +106,12 @@
   <h2>Безопасность</h2>
   <div class="callout warn">
     <span class="ctitle">Прочитать перед началом</span>
-    <p>Плата уже пережила переполюсовку питания. Это не «работает или нет» — где-то в цепи мог остаться повреждённый, но частично работоспособный компонент (диод, полифьюз, H-мост), который при повторном включении под нагрузкой ведёт себя непредсказуемо. Работайте по шагам ниже, не пропуская «холодные» проверки ради того, чтобы быстрее добраться до осциллографа.</p>
+    <p>Если плата уже пережила аварию питания (переполюсовку, короткое, скачок), исходите из худшего: это не «работает или нет» — где-то в цепи мог остаться повреждённый, но частично работоспособный компонент (диод, полифьюз, H-мост), который при повторном включении под нагрузкой ведёт себя непредсказуемо. Работайте по шагам ниже, не пропуская «холодные» проверки ради того, чтобы быстрее добраться до осциллографа.</p>
   </div>
   <ul class="checklist">
     <li>Сопротивление и диодный режим — только при полностью отключённом питании (12В блок питания физически выключен или отсоединён, USB можно оставить).</li>
     <li>Никогда не отключайте разъём мотора, пока на драйвер подано VMOT — обратная ЭДС обмотки может пробить выходные ключи мгновенно.</li>
-    <li>Щуп осциллографа заземляйте один раз на GND платы RAMPS. Не цепляйте землю осциллографа одновременно к другой точке (например, отдельно к минусу БП) — это создаёт паразитный контур земли между БП, осциллографом и Orange Pi через общий USB.</li>
+    <li>Щуп осциллографа заземляйте один раз на GND платы RAMPS. Не цепляйте землю осциллографа одновременно к другой точке (например, отдельно к минусу БП) — это создаёт паразитный контур земли между БП, осциллографом и одноплатником-хостом через общий USB.</li>
     <li>Перед первой подачей питания на новую комбинацию (например, «драйвер в другом гнезде») убедитесь, что установлены все 3 перемычки микрошага и подключён провод VMOT/GND от блока питания в правильной полярности — проверьте мультиметром сам разъём БП <em>до</em> подключения к RAMPS.</li>
     <li>Перед любым BUZZ-тестом ток (Vref) должен быть выставлен на безопасно низкое значение — см. раздел <a href="#vref">«Vref»</a>. Осциллограф не защитит драйвер от превышения тока.</li>
   </ul>
@@ -725,11 +126,10 @@
     <p>Иначе говоря: <strong>«молчат все 4 мотора» + «TMC2209 не отвечает по UART»</strong> одновременно и без единого повреждённого драйвера объясняются одним отказом — обрывом цепи VMOT где-то между входной клеммой RAMPS и гнёздами драйверов (перегоревший полифьюз, пробитый диод D1/D2, обгоревшая дорожка).</p>
   </div>
   <p>Это проверяется за одну минуту мультиметром, без снятия единого драйвера — раздел <a href="#ramps-hot">«Без драйверов, под напряжением»</a>. Если VMOT на гнёздах присутствует и равен напряжению блока питания — гипотеза отклонена, переходите к проверке драйверов по отдельности.</p>
-  <p class="section-intro">На этом принтере гипотеза впоследствии была отклонена (VMOT оказался в норме на всех гнёздах) — проблема оказалась ниже по цепочке, в самих драйверах/сигналах. Раздел остаётся как быстрая первая проверка для похожих случаев.</p>
   <div class="callout warn">
-    <span class="ctitle">Чем эта история закончилась — и почему «одна причина на оба симптома» тут не сработала</span>
-    <p>У второго симптома оказалась своя, куда более скучная причина: <strong>провода PDN_UART к драйверам никогда не были подключены</strong> — секции <code>[tmc2209 …]</code> с <code>uart_pin</code> в конфиге были, а физической линии не было вообще, отсюда и <code>Unable to read tmc uart register …</code>. Красивая единая гипотеза объединила два симптома, из которых один был настоящей неисправностью, а второй — ненастроенным железом.</p>
-    <p>Общий вывод на будущее: <strong>прежде чем объяснять молчание интерфейса неисправностью, убедитесь, что интерфейс физически существует.</strong> Проверка стоит одного взгляда на плату и отсекает целый ветвистый кусок диагностики.</p>
+    <span class="ctitle">Почему «одна причина на оба симптома» часто не срабатывает именно здесь</span>
+    <p>Красивая единая гипотеза легко объединяет два симптома, из которых настоящей неисправностью является только один. Типичный разбор: моторы действительно не крутились из-за железа, а <code>Unable to read tmc uart register …</code> имел куда более скучную причину — <strong>провода PDN_UART к драйверам не были подключены вообще</strong>. Секции <code>[tmc2209 …]</code> с <code>uart_pin</code> в конфиге были, а физической линии не было.</p>
+    <p>Общий вывод: <strong>прежде чем объяснять молчание интерфейса неисправностью, убедитесь, что интерфейс физически существует.</strong> Проверка стоит одного взгляда на плату и отсекает целый ветвистый кусок диагностики.</p>
   </div>
 </section>
 
@@ -960,7 +360,7 @@
 
       <!-- Mega block -->
       <rect x="30" y="240" width="330" height="34" rx="4" fill="none" stroke="var(--border)" stroke-dasharray="4 4"/>
-      <text x="195" y="261" text-anchor="middle" fill="var(--text-faint)" font-size="10.5" font-family="var(--mono)">Freaduino Mega2560 (снизу)</text>
+      <text x="195" y="261" text-anchor="middle" fill="var(--text-faint)" font-size="10.5" font-family="var(--mono)">Mega2560 (снизу)</text>
 
       <!-- AUX header -->
       <rect x="330" y="46" width="90" height="46" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)"/>
@@ -990,7 +390,7 @@
       <li><span class="badge">2</span>Вход 12В стола — у вас не подключён и не используется, можно не проверять в первую очередь.</li>
       <li><span class="badge">3</span>Полифьюз основной цепи (обычно маркируется ~5А) — самовосстанавливающийся, но после сильного превышения может деградировать и держать заниженный ток или не восстановиться.</li>
       <li><span class="badge">4</span>D1 — защитный диод, через который запитывается Mega (VIN) от основного входа. При обратной полярности он первым принимает удар «на себя».</li>
-      <li><span class="badge">5</span><span>AUX-2/AUX-3 — гребёнки 2.54мм, через которые PDN_UART драйверов TMC2209 заводится на Мегу. <strong>На этой машине три провода PDN_UART смонтированы 2026-08-02, но связь не работает</strong> (состояние — в <code>printer-status.md</code>, раздел «UART для TMC2209»). Смотреть: не погнуты ли штырьки, не расшатана ли гребёнка, плотно ли сидят три dupont-разъёма и не задели ли они соседние контакты.</span></li>
+      <li><span class="badge">5</span><span>AUX-2/AUX-3 — гребёнки 2.54мм, через которые PDN_UART драйверов TMC2209 заводится на Мегу (если UART смонтирован — см. <a href="#uart-scope">«Линия UART к драйверам»</a>). Смотреть: не погнуты ли штырьки, не расшатана ли гребёнка, плотно ли сидят три dupont-разъёма и не задели ли они соседние контакты.</span></li>
       <li><span class="badge">6</span><span>Гнёзда драйверов X/Y/Z/E0 — по 16 контактов, распиновка одинакова для A4988 и TMC2209 (см. <a href="#pinout">пиноут</a>).</span></li>
       <li><span class="badge">7</span>Крайнее гнездо E0 — сюда штатно стоит A4988 экструдера.</li>
     </ol>
@@ -1139,7 +539,7 @@
   <span class="tag meter">мультиметр (авто, без диодного режима) + осциллограф · вне RAMPS · без USB</span>
   <div class="callout warn">
     <span class="ctitle">Условие чистоты теста</span>
-    <p>Модуль должен лежать сам по себе на столе: не в гнезде RAMPS, USB-кабель Orange Pi отсоединён, никакого внешнего питания. Иначе вы снова измеряете наведённый эффект от работающей логики Mega/RAMPS через один из пинов гнезда, а не собственное состояние чипа.</p>
+    <p>Модуль должен лежать сам по себе на столе: не в гнезде RAMPS, USB-кабель хоста отсоединён, никакого внешнего питания. Иначе вы снова измеряете наведённый эффект от работающей логики Mega/RAMPS через один из пинов гнезда, а не собственное состояние чипа.</p>
   </div>
 
   <p>Проверка <span class="pin">VMOT</span>–<span class="pin">GND</span> на обрыв — стандартный первый шаг, но сама по себе <strong>не доказывает исправность</strong>: мёртвый H-мост чаще всего тоже даёт обрыв на этой паре, потому что он «обрывается», а не «замыкается». Самая информативная проверка — пары <span class="pin">1A</span>–<span class="pin">1B</span> и <span class="pin">2A</span>–<span class="pin">2B</span>, они прозванивают именно защитные (flyback) диоды H-моста. Обычно для этого используют диодный режим мультиметра — если его нет, есть равноценная замена своим же осциллографом.</p>
@@ -1308,48 +708,50 @@
 <section id="uart-scope">
   <h2>Линия UART к драйверам (драйвер ↔ Mega)</h2>
   <span class="tag meter">монтаж · мультиметр · осциллограф · только TMC2209</span>
-  <p class="section-intro">Однопроводная полудуплексная линия <span class="pin">PDN_UART</span>: TX и RX идут по одному проводу, поэтому и проверяется она отдельно от STEP/DIR/ENABLE. <strong>Линия целиком между модулем драйвера и ATmega2560 на плате Меги — оба конца на одной плате.</strong> Orange Pi управляет Мегой по уже существующему USB-кабелю и к этому проводу не подключается ни одним концом; <code>D53</code>/<code>D49</code>/<code>D40</code> — ардуиновские номера ног самой ATmega2560 (в Klipper они пишутся как <code>PB0</code>/<code>PL0</code>/<code>PG1</code>), а не GPIO Orange Pi.</p>
+  <p class="section-intro">Однопроводная полудуплексная линия <span class="pin">PDN_UART</span>: TX и RX идут по одному проводу, поэтому и проверяется она отдельно от STEP/DIR/ENABLE. <strong>Линия целиком между модулем драйвера и ATmega2560 на плате Меги — оба конца на одной плате.</strong> Одноплатник-хост управляет Мегой по уже существующему USB-кабелю и к этому проводу не подключается ни одним концом. Обратите внимание на систему обозначений: <code>D40</code>/<code>D49</code>/<code>D53</code> на шёлкографии RAMPS — это ардуиновские номера ног самой ATmega2560, а Klipper хочет имена портов AVR (<code>PG1</code>/<code>PL0</code>/<code>PB0</code> соответственно). Ни то, ни другое не имеет отношения к GPIO одноплатника.</p>
 
   <div class="callout key">
-    <span class="ctitle">Зачем UART нужен именно на этой машине (не «приятная опция»)</span>
-    <p>Долгое время UART тут откладывали сознательно: standalone-режим по триммерам работает, ничего не блокирует. С 2026-08-02 это больше не так — по трём причинам, и третья самая сильная:</p>
+    <span class="ctitle">Зачем вообще уходить со standalone на UART</span>
+    <p>Standalone по триммерам работает и ничего не блокирует, поэтому переход часто откладывают. Три причины, по которым его в итоге всё равно делают, — последняя самая сильная:</p>
     <ul class="checklist">
-      <li><span><strong>Ток нигде не измерен.</strong> Он выставлен подстроечниками вслепую — мультиметра, читающего доли вольта Vref с нужной точностью, в проекте нет. UART превращает ток в число в конфиге (<code>run_current</code>) с обратным чтением через <code>DUMP_TMC</code>.</span></li>
-      <li><span><strong>Есть подозрение на потерю хода на рабочих скоростях</strong> (замеры по каретке; см. оговорку в <code>printer-status.md</code> — это подозрение, а не доказанный факт). Самый частый источник срыва шагов при исправной механике — как раз нехватка тока.</span></li>
-      <li><span><strong>Режим чоппера физически неустраним без UART.</strong> Вход SPREAD на X/Y/Z низкий (измерено 2026-08-03: <code>IOIN.spread_en = 0</code>; задаётся он не перемычкой гребёнки, а паяльным джампером <code>SPRE</code> на модуле), то есть в standalone драйверы работают в stealthChop — режиме, заметно более слабом по моменту на высоких оборотах. Переключить их на spreadCycle при разгоне можно <em>только</em> регистром через UART (<code>stealthchop_threshold</code> в Klipper → <code>TPWMTHRS</code> в чипе); в standalone это записать некуда. Механика обоих режимов, таблица XOR и разбор <code>stealthchop_threshold</code> — в разделе <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</span></li>
+      <li><span><strong>Ток нигде не измерен.</strong> В standalone он выставлен подстроечниками, и без вольтметра, читающего доли вольта Vref с нужной точностью, его фактическое значение неизвестно. UART превращает ток в число в конфиге (<code>run_current</code>) с обратным чтением через <code>DUMP_TMC</code>.</span></li>
+      <li><span><strong>Подозрение на потерю шагов на рабочих скоростях.</strong> Самый частый источник срыва шагов при исправной механике — нехватка тока, а проверять её, крутя триммер вслепую, дорого.</span></li>
+      <li><span><strong>Режим чоппера физически неустраним без UART.</strong> Если вход SPREAD модуля низкий (а это состояние по умолчанию на большинстве модулей: <code>IOIN.spread_en = 0</code>), в standalone драйвер работает в stealthChop — режиме, заметно более слабом по моменту на высоких оборотах. Переключить его на spreadCycle при разгоне можно <em>только</em> регистром через UART (<code>stealthchop_threshold</code> в Klipper → <code>TPWMTHRS</code> в чипе); в standalone это записать некуда. Механика обоих режимов, таблица XOR и разбор <code>stealthchop_threshold</code> — в разделе <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</span></li>
     </ul>
-    <p>Обоснование целиком и порядок работ — пункт <strong>B10</strong> в <code>printer-status.md</code>. <strong>Положение перемычек подтверждено пользователем 2026-08-02:</strong> MS1 и MS2 надеты, SPREAD не надета («1 и 2 не снимал, а 3 не надевал»). То есть адрес по таблице ниже действительно <strong>3</strong>, и SPREAD стоит правильно — эта оговорка закрыта.</p>
   </div>
 
   <div class="callout danger">
     <span class="ctitle">Предусловие: линии сначала должно физически существовать</span>
     <p>Стандартный RAMPS 1.4 <strong>не разводит PDN_UART к Меге вообще</strong> — в гнезде драйвера на этом месте сидят RESET/SLEEP для A4988, закороченные прямо на плате. Линию заводят вручную, проводом с вывода PDN_UART каждого из драйверов X/Y/Z на штырёк AUX.</p>
     <p><strong>Два конца — две разные технологии, и их постоянно путают.</strong> Со стороны <em>Меги</em> гребёнки AUX — обычные штырьки 2.54мм, туда садится женский dupont, паять на плате не нужно. Со стороны <em>драйвера</em> паять как раз чаще всего приходится: выводы PDN_UART модуля торчат внутрь панельки, разъём на них не наденешь. Есть два способа (оба ниже): припаять провод к выводу/площадке модуля, либо отогнуть вывод наружу и надеть на него dupont.</p>
-    <p><strong>На этой конкретной машине соединение со стороны драйвера — ПАЯНОЕ</strong> (подтверждено пользователем 2026-08-02). Провода припаяны к выводам PDN_UART модулей ещё до того, как в этом гайде появился вариант с отгибанием. Значит на ней при поиске неисправности надо искать <strong>непропай и отслоившуюся площадку</strong>, а не плохой контакт разъёма — порядок осмотра ниже.</p>
-    <p><strong>Пока провода не воткнуты, осциллографическая часть этого раздела бессмысленна:</strong> тишина на линии тогда — не диагноз, а ожидаемое следствие, ровно как и <code>Unable to read tmc uart register …</code> в логе Klipper. Сначала монтаж и перемычки, потом осциллограф.</p>
-    <p><strong>Статус этой машины на 2026-08-02: предусловие выполнено — три провода смонтированы, 12 В и 5 В поданы, секции <code>[tmc2209 …]</code> задеплоены, все четыре <code>uart_address</code> перебраны, связи нет ни на одной оси.</strong> То есть осциллограф теперь как раз уместен: см. <a href="#uart-scope-protocol">протокол с цифрами</a> и <a href="#uart-no-link">дерево решений</a> ниже.</p>
+    <p><strong>Запишите, каким способом смонтированы именно ваши провода</strong> — от этого зависит, что искать при поиске неисправности. Паяное соединение отказывает как <strong>непропай или отслоившаяся площадка</strong>, разъёмное — как плохой контакт dupont-а или попадание в соседний ряд. Осматривать надо то, что у вас реально сделано, а не то, что описано в первой попавшейся инструкции.</p>
+    <p><strong>Пока провода не воткнуты, осциллографическая часть этого раздела бессмысленна:</strong> тишина на линии тогда — не диагноз, а ожидаемое следствие, ровно как и <code>Unable to read tmc uart register …</code> в логе Klipper. Сначала монтаж и перемычки, потом осциллограф — <a href="#uart-scope-protocol">протокол с цифрами</a> и <a href="#uart-no-link">дерево решений</a> ниже.</p>
   </div>
 
   <h3>Разводка PDN_UART → Mega</h3>
 
   <div class="callout info">
-    <span class="ctitle">Канонический источник этой таблицы — <code>printer-status.md</code></span>
-    <p>Здесь таблица продублирована сознательно (по решению пользователя), чтобы при монтаже не приходилось прыгать между документами. <strong>При любом расхождении верить <code>printer-status.md</code></strong>, раздел «UART для TMC2209» — там же живёт актуальное состояние монтажа (смонтировано / не смонтировано). Цифры ниже сверены с официальной схемой RAMPS 1.4 и с ардуиновской таблицей пинов Меги, см. «Источники» в конце раздела.</p>
+    <span class="ctitle">Разводка на КОНКРЕТНОЙ машине здесь не хранится</span>
+    <p>Ниже — только то, что верно для любой RAMPS 1.4: какие контакты AUX свободны, как они называются на плате и как эти имена переводятся в <code>uart_pin</code>. <strong>Какая ось на какой штырёк заведена на вашей машине — записывайте в свой статус-документ</strong> (в этом репозитории — <code>docs/printer-status.md</code>, раздел «UART для TMC2209»): это состояние монтажа, оно меняется и не должно жить в методичке. Цифры ниже сверены с официальной схемой RAMPS 1.4 и с ардуиновской таблицей пинов Меги, см. «Источники» в конце раздела.</p>
   </div>
 
   <div class="scroll-x">
   <table>
-    <caption>Оба конца провода — на одной плате: вывод модуля драйвера → гребёнка AUX той же RAMPS. Orange Pi не участвует.</caption>
-    <thead><tr><th>Ось</th><th>Откуда: вывод модуля TMC2209</th><th>Куда: штырёк на RAMPS</th><th>Нога ATmega2560</th><th><code>uart_pin</code> в Klipper</th></tr></thead>
+    <caption>Свободные цифровые пины на гребёнках AUX RAMPS 1.4 — кандидаты под <code>uart_pin</code>. Оба конца провода на одной плате: вывод модуля драйвера → штырёк AUX той же RAMPS.</caption>
+    <thead><tr><th>Штырёк на RAMPS</th><th>Ардуиновский номер</th><th>Нога ATmega2560</th><th><code>uart_pin</code> в Klipper</th></tr></thead>
     <tbody>
-      <tr><td>X</td><td><span class="pin">PDN_UART</span> (любой из двух соседних — на модуле это один сигнал)</td><td>AUX-3, контакт подписан <strong>D53</strong> (пин 6 гребёнки)</td><td><span class="pin">PB0</span></td><td><code>PB0</code></td></tr>
-      <tr><td>Y</td><td><span class="pin">PDN_UART</span></td><td>AUX-3, контакт подписан <strong>D49</strong> (пин 2 гребёнки)</td><td><span class="pin">PL0</span></td><td><code>PL0</code></td></tr>
-      <tr><td>Z</td><td><span class="pin">PDN_UART</span></td><td>AUX-2, контакт подписан <strong>D40</strong> (пин 6 гребёнки)</td><td><span class="pin">PG1</span></td><td><code>PG1</code></td></tr>
-      <tr><td>E0</td><td class="bad">нет — драйвер A4988</td><td class="bad">не подключается</td><td>—</td><td>—</td></tr>
+      <tr><td>AUX-3, пин 6</td><td><strong>D53</strong></td><td><span class="pin">PB0</span></td><td><code>PB0</code></td></tr>
+      <tr><td>AUX-3, пин 2</td><td><strong>D49</strong></td><td><span class="pin">PL0</span></td><td><code>PL0</code></td></tr>
+      <tr><td>AUX-2, пин 6</td><td><strong>D40</strong></td><td><span class="pin">PG1</span></td><td><code>PG1</code></td></tr>
+      <tr><td>AUX-2, пин 7 / 8</td><td>D44 / D42</td><td><span class="pin">PL5</span> / <span class="pin">PL7</span></td><td><code>PL5</code> / <code>PL7</code></td></tr>
     </tbody>
   </table>
   </div>
-  <p class="diagram-caption">Нумерация контактов гребёнок по схеме RAMPS 1.4: AUX-3 (8 контактов) — 1&nbsp;=&nbsp;VCC, 2&nbsp;=&nbsp;D49, 3&nbsp;=&nbsp;MISO, 4&nbsp;=&nbsp;MOSI, 5&nbsp;=&nbsp;SCK, 6&nbsp;=&nbsp;D53, 7&nbsp;=&nbsp;GND. AUX-2 (10 контактов) — 1&nbsp;=&nbsp;VCC, 2&nbsp;=&nbsp;GND, 3&nbsp;=&nbsp;A5, 4&nbsp;=&nbsp;A9, 5&nbsp;=&nbsp;A10, 6&nbsp;=&nbsp;D40, 7&nbsp;=&nbsp;D44, 8&nbsp;=&nbsp;D42, 9&nbsp;=&nbsp;A12, 10&nbsp;=&nbsp;A11. Ориентируйтесь в первую очередь по шёлкографии на своей плате, номер контакта — для контроля.</p>
+  <p class="diagram-caption">Со стороны драйвера берётся вывод <span class="pin">PDN_UART</span> модуля TMC2209. Драйверу A4988 (обычно экструдер) UART не положен — линию к нему не тянут. Нумерация контактов гребёнок по схеме RAMPS 1.4: AUX-3 (8 контактов) — 1&nbsp;=&nbsp;VCC, 2&nbsp;=&nbsp;D49, 3&nbsp;=&nbsp;MISO, 4&nbsp;=&nbsp;MOSI, 5&nbsp;=&nbsp;SCK, 6&nbsp;=&nbsp;D53, 7&nbsp;=&nbsp;GND. AUX-2 (10 контактов) — 1&nbsp;=&nbsp;VCC, 2&nbsp;=&nbsp;GND, 3&nbsp;=&nbsp;A5, 4&nbsp;=&nbsp;A9, 5&nbsp;=&nbsp;A10, 6&nbsp;=&nbsp;D40, 7&nbsp;=&nbsp;D44, 8&nbsp;=&nbsp;D42, 9&nbsp;=&nbsp;A12, 10&nbsp;=&nbsp;A11. Ориентируйтесь в первую очередь по шёлкографии на своей плате, номер контакта — для контроля.</p>
+  <div class="callout warn">
+    <span class="ctitle">Три оси на трёх РАЗНЫХ пинах — это три независимые линии, а не шина</span>
+    <p>Так делают чаще всего, и у этого есть следствие: адрес (<code>uart_address</code>) у всех трёх драйверов может быть <em>одинаковым</em>, различать их не требуется — Klipper и так знает, на какую ногу слать. Документация Klipper говорит это прямым текстом: «<code>uart_address</code> … typically used when multiple TMC2209 chips are connected to the <strong>same</strong> UART pin». Требования уникальности нет — адрес обязан лишь совпадать с тем, что задано перемычками на железе.</p>
+  </div>
 
   <h3>Перемычки под драйвером: что делают MS1/MS2 и SPREAD в UART-режиме</h3>
 
@@ -1375,7 +777,7 @@
   <div class="callout warn">
     <span class="ctitle">Два рабочих варианта — выбрать один и записать в конфиг</span>
     <ul class="checklist">
-      <li><span><strong>Вариант A (рекомендуется на этой машине): перемычки MS1/MS2 оставить на месте, в конфиг добавить <code>uart_address: 3</code></strong> в каждую секцию <code>[tmc2209 …]</code>. Плюс: физический standalone-режим остаётся 1/16 — то есть совпадает с <code>microsteps: 16</code> в <code>[stepper_…]</code>. Если когда-нибудь секции <code>[tmc2209 …]</code> снова закомментируют (а на этой машине так уже делали), машина продолжит ездить правильно.</span></li>
+      <li><span><strong>Вариант A (рекомендуется): перемычки MS1/MS2 оставить на месте, в конфиг добавить <code>uart_address: 3</code></strong> в каждую секцию <code>[tmc2209 …]</code>. Плюс: физический standalone-режим остаётся 1/16 — то есть совпадает с <code>microsteps: 16</code> в <code>[stepper_…]</code>. Если когда-нибудь секции <code>[tmc2209 …]</code> снова закомментируют (а это делают чаще, чем кажется — при откате, при отладке), машина продолжит ездить правильно.</span></li>
       <li><span><strong>Вариант B: снять обе перемычки MS1 и MS2</strong> → оба пина уходят вниз внутренними подтяжками драйвера (даташит: MS1/MS2 — <code>DI (pd)</code>, «internal pull-down resistors») → адрес 0 → <code>uart_address</code> писать не надо, дефолт Klipper подходит. Минус — ловушка: в standalone эти же пины теперь означают <strong>1/8</strong>, и при откате на standalone (закомментировать <code>[tmc2209 …]</code>) ось поедет <strong>вдвое дальше</strong> команды при <code>microsteps: 16</code> в конфиге. Молча, без единой ошибки.</span></li>
     </ul>
     <p>Пока UART включён, оба варианта эквивалентны по поведению: микрошаг всё равно задаётся регистром. Разница только в том, что произойдёт при откате назад.</p>
@@ -1386,7 +788,7 @@
     <p>У TMC2209-модуля на позиции, где у A4988 сидит MS3, стоит вход <span class="pin">SPREAD</span> — выбор режима чоппера (даташит: «Chopper mode selection: Low=StealthChop, High=SpreadCycle (may be left unconnected)»). Микрошаг он не меняет.</p>
     <p><strong>Неочевидное и важное:</strong> в UART-режиме этот пин не отключается, а <strong>складывается по XOR с регистровым битом</strong>. Даташит, GCONF бит 2 <code>en_SpreadCycle</code>: «A high level on the pin SPREAD inverts this flag to switch between both chopper modes», и там же в разделе про stealthChop: «The input SPREAD is XORed to this flag». То есть если перемычка SPREAD надета (пин на +5В), то <code>stealthchop_threshold</code> в Klipper начнёт работать <em>ровно наоборот</em>: где по конфигу должен быть spreadCycle — будет stealthChop, и обратно. Диагностически это отвратительный симптом: конфиг верный, регистры читаются, DUMP_TMC показывает то, что вы написали, а мотор ведёт себя как в другом режиме.</p>
     <p>Поэтому: <strong>вход SPREAD при UART надо держать низким</strong> — тогда режим целиком определяется регистром, как и предполагает Klipper.</p>
-    <p><strong>Исправлено 2026-08-03: на модулях этой машины SPREAD на гребёнку вообще не выведен</strong> — третья позиция гнезда занята другим сигналом, а вход SPREAD задаётся отдельным паяльным джампером <code>SPRE</code> на плате драйвера. Прежняя запись «на этой машине перемычка снята, подтверждено пользователем 2026-08-02» описывала не тот орган управления. Вопрос закрыт измерением, а не осмотром: <code>IOIN.spread_en = 0</code> в живом дампе → джампер не запаян, вывод низкий, XOR прозрачен. Разбор и таблица XOR — в разделе <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</p>
+    <p><strong>Осторожно: «третья перемычка» и «вход SPREAD» — не всегда один и тот же орган управления.</strong> На части модулей TMC2209 SPREAD на гребёнку не выведен вообще: третья позиция гнезда занята другим сигналом, а вход SPREAD задаётся отдельным паяльным джампером (маркировка вроде <code>SPRE</code>) на самой плате драйвера. Осмотр перемычек в таком случае отвечает не на тот вопрос. <strong>Закрывать этот вопрос надо измерением, а не осмотром:</strong> <code>IOIN.spread_en</code> в живом дампе <code>DUMP_TMC</code> — это фактический уровень на выводе. <code>0</code> → вывод низкий, XOR прозрачен, режим целиком определяется регистром. Разбор и таблица XOR — в разделе <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</p>
     <p><strong>Экструдер (A4988) — не трогать вообще.</strong> Там та же третья позиция гнезда означает MS3, то есть настоящий микрошаг: сняв её, вы измените разрешение оси, а не режим чоппера.</p>
   </div>
 
@@ -1405,7 +807,7 @@
     <span class="ctitle">«Воткнуть три dupont-провода» — это только про конец со стороны Меги</span>
     <p>Второй конец садиться некуда: оба вывода PDN_UART модуля торчат <em>внутрь гнезда</em>, на посаженный в панельку пин разъём не наденешь. Есть два равноправных способа закрыть этот шаг:</p>
     <ul class="checklist">
-      <li><span><strong>Способ 1 — пайка (то, что сделано на этой машине).</strong> Припаять провод прямо к выводу PDN_UART модуля (к торчащему хвостику пина снизу платки либо к самой площадке). Плюс: соединение механически надёжнее dupont-а и не требует, чтобы пин торчал наружу. Минус: греется тонкая площадка рядом с корпусом чипа — легко отслоить пятачок или перегреть вход, и потом это же место придётся осматривать первым при поиске неисправности.</span></li>
+      <li><span><strong>Способ 1 — пайка.</strong> Припаять провод прямо к выводу PDN_UART модуля (к торчащему хвостику пина снизу платки либо к самой площадке). Плюс: соединение механически надёжнее dupont-а и не требует, чтобы пин торчал наружу. Минус: греется тонкая площадка рядом с корпусом чипа — легко отслоить пятачок или перегреть вход, и потом это же место придётся осматривать первым при поиске неисправности.</span></li>
       <li><span><strong>Способ 2 — отогнуть вывод.</strong> <strong>Отогнуть один из двух соседних выводов PDN_UART наружу</strong>, чтобы он не входил в гнездо, и уже на него надеть женский dupont. Паяльник не нужен, соединение разъёмное. Подходит тем, кто ещё <em>не</em> паял; если провод уже припаян — перепаивать ради этого нечего.</span></li>
     </ul>
     <p>Шаги ниже написаны под способ 2; для способа 1 всё то же самое, только вместо «отогнуть вывод + dupont» — «припаять провод к выводу PDN_UART», и модуль ставится в гнездо как обычно, всеми восемью выводами.</p>
@@ -1435,7 +837,7 @@
     <li><strong>Пустое гнездо на RAMPS.</strong> Те же два контакта гнезда должны звониться между собой (это и есть заводская закоротка) и <strong>не должны</strong> звониться ни на +5В, ни на GND. Если звонятся на питание или землю — линию на этой плате использовать нельзя.</li>
     <li><strong>Перемычки MS1/MS2 — проверить, что они ДЕЙСТВИТЕЛЬНО НА МЕСТЕ.</strong> От этого зависит адрес чипа, а значит и строка <code>uart_address</code> в конфиге. Глазами: обе перемычки надеты. Прибором: с надетой перемычкой контакт MS гнезда звонится на +5В. Обе на +5В → адрес 3. Если одна снята — адрес не 3, а 1 или 2 (см. таблицу выше), и <code>uart_address</code> надо ставить соответствующий, иначе получите ровно то самое «молчание при исправном проводе».</li>
     <li><strong>Обратная проверка (дефект клонов).</strong> Сняв перемычку, соответствующий контакт MS не должен звониться на +5В. Это ловит известный дефект: на части плат перемычные пятачки залиты припоем/соединены дорожкой на заводе, и снятие перемычки ничего не меняет — тогда пин остаётся высоким, и адрес не тот, который вы думаете. Wiki RepRap прямо предупреждает об этом и советует проверять мультиметром.</li>
-    <li><strong>После монтажа — сам провод.</strong> Между штырьком AUX (<code>D53</code>/<code>D49</code>/<code>D40</code>) и отогнутым выводом PDN_UART — <strong>ноль</strong>. Между этим же штырьком и GND — <strong>не ноль</strong> (нормально видеть сотни кОм и выше: у PDN_UART есть внутренняя подтяжка). Между ним и +5В — <strong>не ноль</strong>.</li>
+    <li><strong>После монтажа — сам провод.</strong> Между выбранным штырьком AUX и отогнутым выводом PDN_UART — <strong>ноль</strong>. Между этим же штырьком и GND — <strong>не ноль</strong> (нормально видеть сотни кОм и выше: у PDN_UART есть внутренняя подтяжка). Между ним и +5В — <strong>не ноль</strong>.</li>
     <li><strong>Не задет ли соседний штырёк.</strong> На AUX-3 рядом с <code>D53</code> и <code>D49</code> живут SPI-линии (MOSI/MISO/SCK) и VCC — прозвоните провод на соседние контакты гребёнки: связи быть не должно. Самая частая ошибка монтажа dupont-ами — попасть в соседний ряд.</li>
     <li>Три провода — три независимые линии, у каждой свой пин Меги. Между собой они звониться <strong>не должны</strong>: если X и Y звонятся друг с другом, где-то замкнуты соседние штырьки.</li>
   </ol>
@@ -1470,30 +872,30 @@
   <div class="callout key">
     <span class="ctitle">Нужен ли последовательный резистор 1 кОм, если на модуле его нет? — НЕТ</span>
     <p>Эту цифру часто встречают в описаниях SilentStepStick и переносят на Klipper по ошибке. Уточнение: 1 кОм у Watterott относится к <strong>двухпроводному</strong> подключению, когда PDN_UART сажают одновременно на RX и TX аппаратного UART микроконтроллера — резистор ставят в линию TX, чтобы передатчик МК не «боролся» с выходом драйвера, когда тот отвечает.</p>
-    <p><strong>У Klipper этой схемы нет.</strong> В <code>[tmc2209]</code> указывается один-единственный <code>uart_pin</code>, и <code>src/tmcuart.c</code> переключает эту одну ногу между выходом (<code>gpio_out_reset</code>) и входом (<code>gpio_in_reset</code>) — конфликта двух передатчиков не возникает в принципе. Отдельный <code>tx_pin</code> в конфиге есть, но это опция для двухпроводных схем, и на этой машине она не используется. В документации Klipper (<code>Config_Reference.md</code> → <code>[tmc2209]</code>/<code>[tmc2208]</code> и <code>TMC_Drivers.md</code>) <strong>слова «резистор» нет вообще</strong> — проверено по файлам, лежащим на самом принтере.</p>
+    <p><strong>У Klipper этой схемы нет.</strong> В <code>[tmc2209]</code> указывается один-единственный <code>uart_pin</code>, и <code>src/tmcuart.c</code> переключает эту одну ногу между выходом (<code>gpio_out_reset</code>) и входом (<code>gpio_in_reset</code>) — конфликта двух передатчиков не возникает в принципе. Отдельный <code>tx_pin</code> в конфиге есть, но это опция для двухпроводных схем и для описанной здесь однопроводной разводки не нужна. В документации Klipper (<code>Config_Reference.md</code> → <code>[tmc2209]</code>/<code>[tmc2208]</code> и <code>TMC_Drivers.md</code>) <strong>слова «резистор» нет вообще</strong> — проверено по файлам самой установки Klipper, а не по статьям.</p>
     <p><strong>Практический вывод: паять резистор в разрыв провода — не лечение, и на диагностику это время тратить не надо.</strong> Более того, лишний резистор в однопроводной схеме только добавляет постоянную времени на ёмкость линии.</p>
   </div>
 
   <h3>Конфиг и как убедиться, что заработало</h3>
 
   <ol class="step-list">
-    <li>В <code>printer-configs/printer.cfg</code> раскомментировать секции <code>[tmc2209 stepper_x/y/z]</code>. Обязательные параметры по документации Klipper — <code>uart_pin</code> и <code>run_current</code>; на этой машине тело секций уже заполнено целиком, достаточно снять <code>#</code>.</li>
-    <li><strong>Если выбран вариант A</strong> (перемычки MS1/MS2 на месте) — в каждую секцию добавить <code>uart_address: 3</code>. Без этой строки связи не будет. ⚠️ Цифра 3 верна только если <strong>обе</strong> перемычки действительно надеты — это надо подтвердить глазами и прибором по чеклисту выше, а не принять на веру: одна снятая перемычка даёт адрес 1 или 2. Три оси сидят на трёх <em>разных</em> пинах Меги, то есть это три независимые линии, а не общая шина — поэтому адрес у всех трёх может быть одинаковый, различать их не требуется. Документация Klipper говорит это прямым текстом: «<code>uart_address</code> … typically used when multiple TMC2209 chips are connected to the <strong>same</strong> UART pin». Требования уникальности нет — адрес обязан лишь совпадать с железом.</li>
-    <li><code>sense_resistor</code> писать не обязательно: дефолт Klipper 0.110 Ом и так совпадает с маркировкой R110 на этих модулях. Прописать явно всё же стоит — тогда замена модуля на другой не изменит масштаб тока молча.</li>
+    <li>В <code>printer.cfg</code> добавить (или раскомментировать) секции <code>[tmc2209 stepper_x/y/z]</code>. Обязательные параметры по документации Klipper — <code>uart_pin</code> и <code>run_current</code>.</li>
+    <li><strong>Если выбран вариант A</strong> (перемычки MS1/MS2 на месте) — в каждую секцию добавить <code>uart_address: 3</code>. Без этой строки связи не будет. ⚠️ Цифра 3 верна только если <strong>обе</strong> перемычки действительно надеты — это надо подтвердить глазами и прибором по чеклисту выше, а не принять на веру: одна снятая перемычка даёт адрес 1 или 2.</li>
+    <li><code>sense_resistor</code> писать не обязательно: дефолт Klipper — 0.110 Ом, и он совпадает с маркировкой R110 на большинстве модулей. Прописать явно всё же стоит — тогда замена модуля на другой (например с R150) не изменит масштаб тока молча.</li>
     <li>Выкатить конфиг и перезапустить Klipper штатным способом проекта.</li>
   </ol>
 
   <div class="callout warn">
-    <span class="ctitle">⚠️ ИСПРАВЛЕНО 2026-08-02: <code>ready</code> НЕ доказывает, что линия работает</span>
-    <p>До 2026-08-02 здесь было написано, что при мёртвой линии Klipper не выйдет в <code>ready</code>. <strong>Это неверно</strong>, и проверено на живой машине: <code>/printer/info</code> отдавал <code>"state":"ready"</code>, а все три драйвера молчали. Первоисточник — <code>klippy/extras/tmc.py</code>: инициализация драйвера обёрнута в <code>try/except</code>, ошибка только пишется в лог строкой <code>TMC &lt;name&gt; failed to init: ...</code>, и запуск продолжается.</p>
+    <span class="ctitle">⚠️ <code>ready</code> НЕ доказывает, что линия работает</span>
+    <p>Распространённое заблуждение: «при мёртвой линии Klipper не выйдет в <code>ready</code>». <strong>Это неверно</strong>, и проверено на живой машине: <code>/printer/info</code> отдавал <code>"state":"ready"</code>, а все три драйвера молчали. Первоисточник — <code>klippy/extras/tmc.py</code>: инициализация драйвера обёрнута в <code>try/except</code>, ошибка только пишется в лог строкой <code>TMC &lt;name&gt; failed to init: ...</code>, и запуск продолжается.</p>
     <p><strong>Отсюда следствие, из-за которого нельзя оставлять секции включёнными «на всякий случай»:</strong> повторная инициализация происходит при <em>включении мотора</em>, и там исключение уже не проглатывается — <code>tmc.py</code> вызывает <code>invoke_shutdown()</code>. Машина выглядит здоровой и падает в shutdown на первом <code>G28</code>/<code>FORCE_MOVE</code> с <code>Unable to write tmc uart …</code>. Пока связь не поднята, секции <code>[tmc2209 …]</code> должны быть закомментированы: тогда драйверы в standalone и оси ездят.</p>
     <p><strong>Правильная проверка — по логу:</strong> <code>grep "failed to init" ~/printer_data/logs/klippy.log</code>. Для текущего запуска должно быть пусто.</p>
   </div>
 
   <div class="callout key">
     <span class="ctitle">Порядок диагностики: сначала лог, потом адрес, и только потом осциллограф</span>
-    <p><strong>Не поднялось, а прозвонка прошла — сначала переберите адрес, потом берите осциллограф.</strong> Неверный адрес и оборванный провод для Klipper выглядят абсолютно одинаково, но адрес проверяется одной правкой конфига, а линия — щупом. Адресов всего четыре: попробуйте <code>uart_address</code> = 0, 1, 2 (3 уже пробовали) — по одной правке и перезапуску на каждый. Если заработало на другом значении, значит перемычки MS1/MS2 стоят не так, как вы думали: сверьтесь с таблицей адресов выше и запишите фактическое положение. Осциллограф имеет смысл только после того, как все четыре адреса не дали ответа.</p>
-    <p><strong>На этой машине перебор уже выполнен 2026-08-02 и результата не дал</strong> — пять перезапусков, адреса 3/0/1/2/3, все три оси молчат. Повторять не нужно. Обратное тоже важно: раз молчат все четыре адреса, провал на адресе 3 <em>не является</em> уликой против записи «обе перемычки надеты» — перебор в этой ситуации не различает ничего. И ещё: одинаковый отказ сразу по трём осям указывает на одно общее неверное допущение, а не на три независимые ошибки монтажа; на этой машине единственное такое непроверенное допущение — что позиции гнезда RESET/SLEEP на модуле обе являются <code>PDN_UART</code>.</p>
+    <p><strong>Не поднялось, а прозвонка прошла — сначала переберите адрес, потом берите осциллограф.</strong> Неверный адрес и оборванный провод для Klipper выглядят абсолютно одинаково, но адрес проверяется одной правкой конфига, а линия — щупом. Адресов всего четыре: переберите <code>uart_address</code> = 0, 1, 2, 3 — по одной правке и перезапуску на каждый. Если заработало на другом значении, значит перемычки MS1/MS2 стоят не так, как вы думали: сверьтесь с таблицей адресов выше и запишите фактическое положение. Осциллограф имеет смысл только после того, как все четыре адреса не дали ответа.</p>
+    <p><strong>Два следствия, которые стоит осознать до того, как тратить на это дни.</strong> Первое: если молчат все четыре адреса, провал на «правильном» адресе <em>не является</em> уликой против вашей записи о положении перемычек — перебор в этой ситуации не различает ничего. Второе: одинаковый отказ сразу по трём осям указывает на <strong>одно общее неверное допущение</strong>, а не на три независимые ошибки монтажа. Выпишите все допущения, принятые на веру для всех трёх осей сразу (какой вывод модуля считается PDN_UART, куда садится провод, что означает перемычка), и проверяйте именно их.</p>
     <p><code>DUMP_TMC STEPPER=stepper_x</code> — это уже <em>после</em> того, как всё поднялось; он подтверждает <em>содержимое регистров</em>, а не наличие связи. Что смотреть в выводе:</p>
     <ul class="checklist">
       <li><span><code>GCONF</code>: <code>pdn_disable=1</code> (даташит требует этого для UART: «Set this bit, when using the UART interface!») и <code>mstep_reg_select=1</code> — подтверждение, что микрошаг теперь из регистра, а не с пинов.</span></li>
@@ -1520,10 +922,10 @@
 
   <div class="callout key">
     <span class="ctitle">Главное число: на ATmega этот UART идёт на 9000 бод, а не на 115200 и не на 40000</span>
-    <p>В <code>klippy/extras/tmc_uart.py</code> объявлены две константы — <code>TMC_BAUD_RATE = 40000</code> и <code>TMC_BAUD_RATE_AVR = 9000</code> — и в <code>build_config()</code> выбор такой: <code>if mcu_type.startswith("atmega") or mcu_type.startswith("at90usb"): baud = TMC_BAUD_RATE_AVR</code>. Наш MCU по логу Klipper — <code>MCU=atmega2560</code>, <code>CLOCK_FREQ=16000000</code>, значит <strong>9000 бод</strong>. Дальше Klipper считает длительность бита в тиках: <code>bit_ticks = seconds_to_clock(1/9000) = int(16000000/9000) = 1777</code> тика.</p>
+    <p>В <code>klippy/extras/tmc_uart.py</code> объявлены две константы — <code>TMC_BAUD_RATE = 40000</code> и <code>TMC_BAUD_RATE_AVR = 9000</code> — и в <code>build_config()</code> выбор такой: <code>if mcu_type.startswith("atmega") or mcu_type.startswith("at90usb"): baud = TMC_BAUD_RATE_AVR</code>. Если в логе Klipper стоит <code>MCU=atmega2560</code> и <code>CLOCK_FREQ=16000000</code> (а на Mega+RAMPS это всегда так), значит <strong>9000 бод</strong>. Дальше Klipper считает длительность бита в тиках: <code>bit_ticks = seconds_to_clock(1/9000) = int(16000000/9000) = 1777</code> тика.</p>
     <div class="scroll-x">
     <table>
-      <caption>Расчётные величины для этой машины (Mega2560, 16 МГц)</caption>
+      <caption>Расчётные величины для ATmega2560 @ 16 МГц</caption>
       <thead><tr><th>Величина</th><th>Значение</th><th>Откуда</th></tr></thead>
       <tbody>
         <tr><td>Реальный бодрейт</td><td class="good">9004 бод</td><td>16 000 000 / 1777</td></tr>
@@ -1570,7 +972,7 @@
   <ol class="step-list">
     <li><strong>Канал:</strong> связь по постоянному току (<strong>DC</strong>, не AC), делитель щупа <strong>×10</strong>, вертикально <strong>1 В/дел</strong> (сигнал 0–5 В займёт 5 клеток) или 2 В/дел, если хочется запас. Ноль (уровень земли канала) увести на 1–2 клетки от нижнего края, чтобы «низ» посылки было видно.</li>
     <li><strong>Земля щупа — обязательно на GND платы</strong>, и лучше на ближайший: контакт GND той же гребёнки AUX (AUX-3 контакт 7, AUX-2 контакт 2) либо любой винтовой минус питания RAMPS. <em>Не</em> на корпус/раму принтера.</li>
-    <li><strong>Щуп — на штырёк AUX</strong>, куда воткнут dupont: X → <code>D53</code> (AUX-3), Y → <code>D49</code> (AUX-3), Z → <code>D40</code> (AUX-2). Линия однопроводная, поэтому одной точки хватает и для запроса, и для ответа.</li>
+    <li><strong>Щуп — на тот штырёк AUX</strong>, куда воткнут dupont проверяемой оси (он же <code>uart_pin</code> в её секции <code>[tmc2209 …]</code>). Линия однопроводная, поэтому одной точки хватает и для запроса, и для ответа.</li>
     <li><strong>Синхронизация:</strong> режим <strong>Normal</strong> или <strong>Single</strong> (однократный), <strong>не Auto</strong>. Auto сам перерисовывает экран каждые несколько миллисекунд и посылку вы просто не поймаете. Источник — тот же канал, фронт <strong>спадающий (falling)</strong>, уровень <strong>≈ 2.5 В</strong> (середина между 0 и 5 В). Спадающий — потому что линия в покое высокая, и первое событие обмена — стартовый бит, то есть спад.</li>
     <li><strong>Развёртка, шаг 1 — «поймать факт посылки»:</strong> <strong>5 мс/дел</strong> (при 10 клетках это 50 мс на экран). Один запрос 4.44 мс займёт примерно одну клетку, а все 5 повторов Klipper-а (≈ 60 мс суммарно) видны почти целиком. На этой развёртке отвечают на вопрос «есть обмен или нет».</li>
     <li><strong>Развёртка, шаг 2 — «разглядеть биты»:</strong> <strong>500 мкс/дел</strong> (бит = 111 мкс, то есть примерно 4.5 бита на клетку, 45 бит на экран — весь запрос целиком). Для счёта отдельных битов можно уйти на <strong>200 мкс/дел</strong>. Задержку (horizontal position) сдвинуть так, чтобы точка синхронизации была у левого края.</li>
@@ -1675,7 +1077,7 @@
 
   <ol class="step-list">
     <li><strong>Сначала исключить ошибку измерения.</strong> Синхронизация должна быть <strong>Single/Normal, спадающий фронт, уровень ~2.5 В</strong>. В режиме Auto 4-миллисекундная пачка раз в несколько секунд просто не попадает на экран. Проверьте прибор на заведомо живом сигнале — например, щуп на ногу вентилятора или на STEP при <code>FORCE_MOVE</code>.</li>
-    <li><strong>Секция действительно живая в том конфиге, который сейчас исполняется.</strong> Не в репозитории, а на принтере и в текущем запуске: <code>ssh ultra@… 'grep -A4 "\[tmc2209 stepper_x\]" printer_data/config/printer.cfg'</code> и дамп конфига в начале <code>klippy.log</code>. Заодно убедиться, что там тот <code>uart_pin</code>, который вы щупаете.</li>
+    <li><strong>Секция действительно живая в том конфиге, который сейчас исполняется.</strong> Не в репозитории, а на принтере и в текущем запуске: <code>grep -A4 '\[tmc2209 stepper_x\]' ~/printer_data/config/printer.cfg</code> на самой машине плюс дамп конфига в начале <code>klippy.log</code>. Заодно убедиться, что там тот <code>uart_pin</code>, который вы щупаете.</li>
     <li><strong>Щуп на ноге самой Меги, а не на AUX.</strong> Перенести щуп на контакт цифровой гребёнки Меги (<code>D53</code>/<code>D49</code>/<code>D40</code>) под платой RAMPS. Есть пачка там, но нет на AUX → обрыв в дорожке RAMPS или в стековом разъёме между платами. Нет ни там, ни там → Мега действительно не передаёт, смотреть конфиг и прошивку.</li>
     <li><strong>Не тот штырёк AUX.</strong> Пройтись щупом по соседним контактам гребёнки: если пачка нашлась на соседнем — вы просто считали контакты не с того края, и провод надо переставить. Нумерация: AUX-3 — 1=VCC, 2=D49, 3=MISO, 4=MOSI, 5=SCK, 6=D53, 7=GND; AUX-2 — 1=VCC, 2=GND, 3=A5, 4=A9, 5=A10, 6=D40, 7=D44, 8=D42, 9=A12, 10=A11.</li>
     <li><strong>Линия залипла на 0 В</strong> — это не «нет посылки», а КЗ на землю: Мега пытается тянуть вверх, но не может. Искать замыкание провода на GND-штырёк гребёнки или на корпус.</li>
@@ -1796,16 +1198,16 @@
 
   <div class="callout warn">
     <span class="ctitle">Когда мерить</span>
-    <p>Vref-делитель на триммере запитан от логики (VDD), а не от VMOT — мерить и крутить можно при питании только через USB (Orange Pi → Mega), 12В на RAMPS ещё не подавая. Это самый безопасный момент для настройки: даже если ошибётесь и выставите слишком много, силового тока через мотор ещё физически нет.</p>
+    <p>Vref-делитель на триммере запитан от логики (VDD), а не от VMOT — мерить и крутить можно при питании только через USB (хост → Mega), 12В на RAMPS ещё не подавая. Это самый безопасный момент для настройки: даже если ошибётесь и выставите слишком много, силового тока через мотор ещё физически нет.</p>
   </div>
 
   <h3>Формула — она разная у A4988 и TMC2209</h3>
   <div class="scroll-x">
   <table>
-    <thead><tr><th>Драйвер</th><th>Формула</th><th>Rsense в этом проекте</th></tr></thead>
+    <thead><tr><th>Драйвер</th><th>Формула</th><th>Типичный Rsense (сверить со своим модулем!)</th></tr></thead>
     <tbody>
       <tr><td>A4988</td><td><code>Vref = run_current × 8 × Rsense</code></td><td class="good">0.100 Ом (маркировка "S1 R100"/"S2 R100" на модуле — Sense1/Sense2, R100 = 0.100 Ом)</td></tr>
-      <tr><td>TMC2209 (standalone/без UART)</td><td><code>Vref = run_current × 2.5 × Rsense</code></td><td class="good">0.110 Ом (маркировка R110 на модуле, подтверждено визуально)</td></tr>
+      <tr><td>TMC2209 (standalone/без UART)</td><td><code>Vref = run_current × 2.5 × Rsense</code></td><td class="good">0.110 Ом (маркировка R110 на модуле; встречается и R150 = 0.150 Ом)</td></tr>
     </tbody>
   </table>
   </div>
@@ -1980,14 +1382,14 @@
   })();
   </script>
 
-  <h3>Rsense A4988 в этом проекте — подтверждён</h3>
+  <h3>Как опознать Rsense своего модуля A4988 по маркировке</h3>
   <div class="callout key">
-    <span class="ctitle">0.100 Ом — по маркировке "S1 R100" / "S2 R100"</span>
+    <span class="ctitle">Пример: 0.100 Ом — по маркировке "S1 R100" / "S2 R100"</span>
     <p>"S1"/"S2" — это подпись самого производителя "Sense1"/"Sense2", то есть прямо указывает, что это и есть токовые шунты (не догадка по коду резистора без подписи) — уверенность выше обычного. "R100" по стандартному SMD-соглашению (R заменяет десятичную точку) = 0.100 Ом.</p>
   </div>
   <div class="scroll-x">
   <table>
-    <caption>Готовые Vref под подтверждённый Rsense = 0.100 Ом (A4988, формула ×8)</caption>
+    <caption>Готовые Vref при Rsense = 0.100 Ом (A4988, формула ×8) — пересчитайте, если у вашего модуля другой шунт</caption>
     <thead><tr><th>run_current</th><th>Vref (расчёт)</th></tr></thead>
     <tbody>
       <tr><td>0.3А</td><td class="good">0.24В</td></tr>
@@ -2005,7 +1407,7 @@
   </div>
 
   <h3>Сколько тока задавать, если у моторов нет даташита</h3>
-  <p>Безымянные моторы без публичного даташита — читаемая маркировка (Z: <code>17HD2008-200</code>, X/E: похоже на <code>MT-1702HS170AW</code>, 1.8°), паспортный ток не найден гуглежом. Протокол:</p>
+  <p>У безымянных моторов паспортный ток часто не находится вообще: маркировка вида <code>17HD2008-200</code> или <code>MT-1702HS170AW</code> ничего не даёт. Тогда ток подбирается эмпирически, снизу вверх:</p>
   <ol class="step-list">
     <li>Стартуйте с заниженного <strong>0.4А</strong>.</li>
     <li>После каждого шага — <code>STEPPER_BUZZ</code> на этой оси. Пропуски шагов ("щелчок"/скрежет вместо ровного вращения) означают ток занижен — безопасно, просто поднимайте.</li>
@@ -2016,7 +1418,7 @@
 
   <h3>Измерение и подстройка — пошагово</h3>
   <ol class="step-list">
-    <li>Питание RAMPS 12В выключено. Только USB на Orange Pi/Mega включено.</li>
+    <li>Питание RAMPS 12В выключено. Включён только USB хост → Mega.</li>
     <li>Чёрный щуп мультиметра — на любой GND-пин гнезда драйвера. Красный щуп — точно на металлический винт/площадку триммера (не на соседние пины).</li>
     <li>Режим мультиметра — постоянное напряжение (DCV), предел на пару вольт (обычно есть предел 2В или 20В).</li>
     <li>Считаете целевой Vref по формуле выше (с уже узнанным Rsense) под желаемый <code>run_current</code> на этом шаге протокола (0.4А → 0.5А → ...).</li>
@@ -2066,15 +1468,15 @@
     </tbody>
   </table>
   </div>
-  <p class="diagram-caption">Исправлено 2026-08-02: до этой даты в двух средних строках 1/32 и 1/64 стояли наоборот. Правильно по даташиту — MS2&nbsp;GND / MS1&nbsp;VCC_IO&nbsp;=&nbsp;1/32, MS2&nbsp;VCC_IO / MS1&nbsp;GND&nbsp;=&nbsp;1/64.</p>
-  <p class="diagram-caption"><strong>Уточнено 2026-08-03:</strong> колонка «SPREAD (3-я)» описывает <em>вход SPREAD чипа</em>, а не третью перемычку гребёнки — совпадают они не на всех модулях. На модулях этой машины третья позиция гнезда занята другим сигналом, а SPREAD задаётся паяльным джампером <code>SPRE</code> на самой плате драйвера. Читайте колонку как «уровень на входе SPREAD: высокий / низкий», и сверяйтесь с шёлкографией своего модуля. Подробнее — <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</p>
+  <p class="diagram-caption">Частая опечатка в чужих таблицах — переставленные местами 1/32 и 1/64. Правильно по даташиту: MS2&nbsp;GND / MS1&nbsp;VCC_IO&nbsp;=&nbsp;1/32, MS2&nbsp;VCC_IO / MS1&nbsp;GND&nbsp;=&nbsp;1/64.</p>
+  <p class="diagram-caption"><strong>Важно:</strong> колонка «SPREAD (3-я)» описывает <em>вход SPREAD чипа</em>, а не третью перемычку гребёнки — совпадают они не на всех модулях. Встречаются модули, где третья позиция гнезда занята другим сигналом, а SPREAD задаётся отдельным паяльным джампером (<code>SPRE</code>) на самой плате драйвера. Читайте колонку как «уровень на входе SPREAD: высокий / низкий», и сверяйтесь с шёлкографией своего модуля. Подробнее — <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</p>
   <p>Без UART Klipper не видит режим чоппера и не может его задать: перемычка — единственный орган управления, а в <code>printer.cfg</code> писать про это <strong>некуда</strong>. Это не «нечего дописывать», а отсутствующая возможность — и у неё есть последствия, см. врезку ниже.</p>
   <p><strong>Как только UART подключён, эта таблица работает иначе:</strong> микрошаг с MS1/MS2 снимается (его задаёт регистр, то есть <code>microsteps</code> в конфиге), но те же два пина продолжают задавать <strong>адрес чипа на шине UART</strong>, а SPREAD складывается по XOR с регистровым битом режима чоппера. Разбор с цитатами из даташита и что из этого следует для монтажа — в разделе <a href="#uart-scope">«Линия UART к драйверам»</a>.</p>
 
   <div class="callout warn">
     <span class="ctitle">stealthChop против момента на высокой скорости — и почему это лечится только UART</span>
     <p>stealthChop тише, но заметно слабее по моменту на высоких оборотах: именно поэтому штатный приём — держать stealthChop на малых скоростях и автоматически переключаться на spreadCycle выше порога. Порог этот живёт в регистре чипа (<code>TPWMTHRS</code>, в Klipper — параметр <code>stealthchop_threshold</code> секции <code>[tmc2209 …]</code>), а регистры пишутся <strong>только по UART</strong>. В standalone-режиме драйвер остаётся в том режиме, который задан перемычкой, на всех скоростях без исключения.</p>
-    <p>Практический вывод для диагностики «теряет шаги на скорости»: если перемычка SPREAD снята (stealthChop) и UART не подключён, то один из самых правдоподобных механизмов срыва вы <em>не можете ни проверить, ни устранить</em> — сколько ни крути триммер. Прежде чем ловить механический потолок скорости, имеет смысл сначала завести UART: см. раздел <a href="#uart-scope">«линия UART»</a> и пункт B10 в <code>printer-status.md</code>.</p>
+    <p>Практический вывод для диагностики «теряет шаги на скорости»: если перемычка SPREAD снята (stealthChop) и UART не подключён, то один из самых правдоподобных механизмов срыва вы <em>не можете ни проверить, ни устранить</em> — сколько ни крути триммер. Прежде чем ловить механический потолок скорости, имеет смысл сначала завести UART — см. раздел <a href="#uart-scope">«линия UART»</a>.</p>
     <p>Оговорка: семантика третьей перемычки различается между производителями модулей — прежде чем делать из неё вывод, сверьтесь с шёлкографией конкретно своей платы, а не с общей таблицей выше.</p>
     <p><strong>Почему момент падает именно на разгонах, что такое фаза обучения stealthChop и как прочитать фактический режим битом <code>stealth</code> вместо гадания по джамперу</strong> — отдельный разбор в разделе <a href="#chopper-modes">«spreadCycle и stealthChop»</a>. Там же — грабли с <code>stealthchop_threshold: 0</code>, который делает <em>не</em> то, что кажется.</p>
   </div>
@@ -2101,10 +1503,10 @@
   <p>Второе: <strong>микрошаг — это не механика, а задание тока</strong>. Драйвер гонит по двум обмоткам синус и косинус, и положение ротора определяется отношением двух токов. Значит <em>ровность микрошага буквально равна точности удержания токовой цели</em>: промахнулись по току на четверти синуса — получили неравномерный шаг, а не «просто шум». Даташит показывает это прямо: при слишком малом гистерезисе на форме тока около нуля видна ступенька («a small ledge between both half waves»), и это уже потеря точности микрошага (§7.1).</p>
 
   <h3>Для контраста — constant off-time у A4988</h3>
-  <p>A4988 (на этой машине — экструдер) регулирует ток по схеме <strong>фиксированного времени выключения</strong>. Даташит Allegro: «The internal PWM current control circuitry uses a one-shot circuit to control the duration of time that the DMOS FETs remain off. The off-time, t<sub>OFF</sub>, is determined by the ROSC terminal.» При <span class="pin">ROSC</span>, посаженном на землю, t<sub>OFF</sub> внутренне равно <strong>30 мкс</strong>, а спад — mixed decay для нарастающего и спадающего тока во всех режимах шага; в mixed decay первые <strong>31.25 % от t<sub>OFF</sub></strong> идёт быстрый спад, остальное — медленный.</p>
+  <p>A4988 (на RAMPS обычно остаётся на экструдере) регулирует ток по схеме <strong>фиксированного времени выключения</strong>. Даташит Allegro: «The internal PWM current control circuitry uses a one-shot circuit to control the duration of time that the DMOS FETs remain off. The off-time, t<sub>OFF</sub>, is determined by the ROSC terminal.» При <span class="pin">ROSC</span>, посаженном на землю, t<sub>OFF</sub> внутренне равно <strong>30 мкс</strong>, а спад — mixed decay для нарастающего и спадающего тока во всех режимах шага; в mixed decay первые <strong>31.25 % от t<sub>OFF</sub></strong> идёт быстрый спад, остальное — медленный.</p>
   <div class="callout info">
     <span class="ctitle">Оговорка про 30 мкс на конкретно вашем модуле</span>
-    <p>Число 30 мкс — это <em>условие даташита</em> «ROSC притянут к земле (или к VDD)», а не измеренный факт вашего носителя. Pololu на странице своего носителя A4988 пишет только «Configured for mixed decay mode» и вывод ROSC не документирует; на клонах его положение тем более не гарантировано. <strong>Не проверено на модулях этой машины.</strong> Механика ниже от точного значения не зависит.</p>
+    <p>Число 30 мкс — это <em>условие даташита</em> «ROSC притянут к земле (или к VDD)», а не измеренный факт вашего носителя. Pololu на странице своего носителя A4988 пишет только «Configured for mixed decay mode» и вывод ROSC не документирует; на клонах его положение тем более не гарантировано. <strong>Проверять по своим модулям, если число важно.</strong> Механика ниже от точного значения не зависит.</p>
   </div>
   <p><strong>Почему это даёт «плавающий» писк.</strong> Пауза фиксирована по времени, а вот <em>насколько за неё упадёт ток</em> — нет: скорость спада задаётся напряжением на обмотке, которое складывается из питания, падения на ключах и <strong>противо-ЭДС, растущей со скоростью</strong>. Значит на разной скорости и в разных точках синуса за одни и те же 30 мкс ток проваливается на разную глубину, а время обратного набора до порога получается разным — и амплитуда пульсации, и эффективная частота чоппера гуляют. Отсюда характерный меняющийся по тону вой у A4988, который на слух ползёт вместе со скоростью каретки. Плюс на спадающей части синуса, где цель уходит вниз быстрее, чем ток успевает спадать, регулятор просто не догоняет цель — это классический источник неровного микрошага у этой схемы.</p>
 
@@ -2230,7 +1632,7 @@
     <p><strong>1. Нулевые поля в выводе не печатаются.</strong> <code>FieldHelper.pretty_format</code> в <code>klippy/extras/tmc.py</code> добавляет поле в строку только при <code>sval and sval != "0"</code>. Значит <em>отсутствие</em> имени поля в дампе означает, что оно равно нулю, — на этом строится вся расшифровка ниже.</p>
     <p><strong>2. Бит показывает режим В МОМЕНТ ЧТЕНИЯ.</strong> Дамп, снятый на стоянке, ничего не говорит о режиме в движении: на стоянке <code>TSTEP</code> насыщен в <code>0xFFFFF</code>, и сравнение с порогом даёт stealthChop при любом ненулевом <code>TPWMTHRS</code>. Читайте бит в том состоянии, о котором хотите узнать, — иначе вы измеряете стоянку, а выводы делаете про печать.</p>
   </div>
-  <p>Разбор реального дампа с этой машины (<code>DUMP_TMC STEPPER=stepper_y</code>, снят <strong>2026-08-03</strong>, конфиг того момента: <code>stealthchop_threshold: 0</code>, <code>run_current: 0.6</code>, <code>sense_resistor: 0.110</code>):</p>
+  <p>Разбор реального дампа TMC2209 (<code>DUMP_TMC</code> по одной оси, мотор в покое; конфиг на момент снятия: <code>stealthchop_threshold: 0</code>, <code>run_current: 0.6</code>, <code>sense_resistor: 0.110</code>). Пять выводов ниже — образец того, как такой вывод читается вообще; подставляйте свои числа:</p>
   <p><code>IOIN: 2100004d enn=1 ms1=1 ms2=1 pdn_uart=1 version=0x21</code><br>
   <code>GCONF: 000001c0 pdn_disable=1 mstep_reg_select=1 multistep_filt=1</code><br>
   <code>DRV_STATUS: c0130000 cs_actual=19 stealth=1 stst=1</code><br>
@@ -2240,7 +1642,7 @@
   <ol class="step-list">
     <li><strong>Вывод SPREAD физически низкий — это измерение, а не догадка.</strong> В <code>IOIN</code> у TMC2209 бит 8 называется <code>spread_en</code> (<code>tmc2209.py</code>, <code>Fields["IOIN"]</code>) и отражает уровень на выводе. В дампе его нет, а нулевые поля не печатаются (см. условие 1) → <code>spread_en=0</code>. Сходится и с байтом: <code>0x2100004d</code>, бит 8 = 0. <strong>Значит XOR прозрачен и режим определяется только регистром.</strong> Так закрывается вопрос, который нельзя было закрыть осмотром платы.</li>
     <li><strong>Режим просили spreadCycle, чип отвечает <code>stealth=1</code> — и это не противоречие.</strong> В <code>GCONF</code> нет <code>en_spreadcycle</code> (значит 0), <code>tpwmthrs=1048575=0xFFFFF</code>, и рядом стоит <code>stst=1</code> — <strong>мотор стоял</strong>. На стоянке <code>TSTEP</code> насыщен в <code>0xFFFFF</code>, условие <code>TSTEP ≥ TPWMTHRS</code> выполняется, драйвер в stealthChop. <strong>Этот дамп не доказывает, что stealthChop работает и в движении</strong> — на стоянке обе гипотезы дают одинаковый бит. Чтобы различить их, бит надо читать на ходу.</li>
-    <li><strong>Ток сходится с конфигом.</strong> <code>cs_actual=19</code>, <code>vsense=1</code>. По формуле Klipper (<code>tmc2130.py</code>, <code>_calc_current_from_bits</code>): <code>I<sub>RMS</sub> = (CS+1)·V<sub>FS</sub> / (32·(R<sub>sense</sub>+0.020)·√2)</code>, при <code>vsense=1</code> берётся <code>V<sub>FS</sub> = 0.18 В</code>. Подставляем: <code>20·0.18/(32·0.130·1.4142) = 0.61 А</code> — то есть заданные <code>run_current: 0.6</code> легли в ближайшую ступеньку CS. Это и есть смысл UART: ток стал проверяемым числом, а не положением триммера. <em>Дамп снят до перехода на токи X 0.8 / Y 0.7 / Z 0.6 — после него <code>cs_actual</code> будет другим.</em></li>
+    <li><strong>Ток сходится с конфигом.</strong> <code>cs_actual=19</code>, <code>vsense=1</code>. По формуле Klipper (<code>tmc2130.py</code>, <code>_calc_current_from_bits</code>): <code>I<sub>RMS</sub> = (CS+1)·V<sub>FS</sub> / (32·(R<sub>sense</sub>+0.020)·√2)</code>, при <code>vsense=1</code> берётся <code>V<sub>FS</sub> = 0.18 В</code>. Подставляем: <code>20·0.18/(32·0.130·1.4142) = 0.61 А</code> — то есть заданные <code>run_current: 0.6</code> легли в ближайшую ступеньку CS. Это и есть смысл UART: ток стал проверяемым числом, а не положением триммера. <em>Соответственно, при любой правке <code>run_current</code> <code>cs_actual</code> обязан измениться — если не изменился, конфиг до чипа не доехал.</em></li>
     <li><strong>А вот чего дамп НЕ доказывает: что автонастройка stealthChop отработала.</strong> <code>pwm_ofs_auto=36</code> и <code>pwm_grad_auto=14</code> совпадают одновременно с заводскими значениями (у <code>PWM_OFS</code> «Reset default=36», у <code>PWM_GRAD</code> OTP-дефолт 14) и с затравками, которые пишет сам Klipper (<code>set_config_field(config, "pwm_ofs", 36)</code> и <code>"pwm_grad", 14</code> в <code>tmc2208.py</code>). <code>PWM_GRAD_AUTO</code> сдвигается только при движении в stealthChop, по 8 полных шагов на единицу — <strong>значение, оставшееся ровно на 14, скорее говорит, что AT#2 не отрабатывал</strong> (что согласуется с пунктом 2: в движении машина была не в stealthChop). Живая величина здесь только <code>pwm_scale_sum=22</code> — текущая скважность регулятора. Не выдавайте совпадение с дефолтом за доказательство обучения.</li>
     <li><strong><code>toff=3 hstrt=5 tbl=2</code> — это дефолты Klipper, а не чипа.</strong> Они приходят из <code>tmc2208.py</code> (<code>set_config_field(config, "toff", 3)</code>, <code>"hstrt", 5</code>, <code>"hend", 0</code>, <code>"tbl", 2</code>) и переопределяются параметрами <code>driver_TOFF</code>/<code>driver_HSTRT</code>/… в секции. Не читайте их как «OTP-настройки этого экземпляра».</li>
   </ol>
@@ -2260,10 +1662,8 @@
   </div>
 
   <div class="callout info">
-    <span class="ctitle">Применительно к этой машине</span>
-    <p>На модулях TMC2209 этой сборки <span class="pin">SPREAD</span> <strong>не выведен на гребёнку</strong> — третья позиция гнезда занята другим сигналом, а сам вход задаётся отдельным <strong>паяльным джампером <code>SPRE</code> на плате драйвера</strong>, который глазами под установленным модулем не читается. Поэтому вопрос закрыт не осмотром, а измерением: <code>IOIN.spread_en = 0</code> в дампе выше → джампер не запаян, вывод низкий, XOR прозрачен, режим определяется одним лишь регистром.</p>
-    <p>В конфиге на момент этого дампа стоял <code>stealthchop_threshold: 0</code> — и, как разобрано выше, это не «всегда spreadCycle», а «spreadCycle в движении, stealthChop на стоянке». Для чистого всегда-spreadCycle параметр из секций <code>[tmc2209 …]</code> нужно <strong>убрать целиком</strong>; в репозитории это уже сделано, но <strong>на принтер не выкачено</strong> — значит машина по-прежнему едет со старым поведением, и приведённый дамп остаётся актуальным.</p>
-    <p><strong>Проверка после деплоя (её ещё предстоит выполнить, это не отчёт о результате):</strong> тот же <code>DUMP_TMC</code> в покое должен показать в <code>GCONF</code> появившийся <code>en_spreadcycle=1</code> и <strong>исчезнувший</strong> <code>stealth</code> — то есть <code>stealth=0</code> уже на стоянке. Если бит остался единицей, ищите причину не в конфиге, а на входе SPREAD.</p>
+    <span class="ctitle">Как проверить, что переход на чистый spreadCycle реально состоялся</span>
+    <p>Если вы убрали <code>stealthchop_threshold</code> из секций <code>[tmc2209 …]</code> целиком (именно убрали, а не поставили в 0 — разбор выше), то после деплоя тот же <code>DUMP_TMC</code> <strong>в покое</strong> должен показать в <code>GCONF</code> появившийся <code>en_spreadcycle=1</code> и <strong>исчезнувший</strong> <code>stealth</code>, то есть <code>stealth=0</code> уже на стоянке. Если бит остался единицей — причина не в конфиге, а на входе SPREAD: смотрите <code>IOIN.spread_en</code> и врезку про XOR выше.</p>
   </div>
 </section>
 </div>
@@ -2279,8 +1679,8 @@
   <h3>Откуда берётся (0,0,0)</h3>
   <p>Общепринято (хотя не универсальный закон физики, а просто самая частая договорённость среди прошивок/слайсеров): <strong>X0/Y0</strong> — передний левый угол стола, если смотреть на принтер спереди; <strong>Z0</strong> — сопло касается стола (минимальный зазор сопло-стол). Всё остальное — куда физически едет каретка при росте координаты — зависит от конкретной механики, единого стандарта тут нет, только соглашение.</p>
   <div class="callout key">
-    <span class="ctitle">Для этого mbot — подтверждено</span>
-    <p>Начало координат (0,0,0) — <strong>спереди, слева, сверху</strong>. "Сверху" для Z здесь означает то же самое, что "стол максимально поднят/ближе к соплу" из таблицы ниже — на этой машине именно стол едет по Z, а не гантри.</p>
+    <span class="ctitle">Запишите свой ответ, а не запоминайте</span>
+    <p>«Спереди, слева, сверху» или «спереди, слева, снизу» — зависит от того, что у вас едет по Z: стол или гантри (таблица ниже). Это <strong>факт конкретной машины</strong>: определите его один раз глазами и занесите в свой статус-документ — в этом репозитории такие вещи живут в <code>docs/printer-status.md</code>. Гадать по памяти в третий раз дороже, чем записать.</p>
   </div>
 
   <div class="scroll-x">
@@ -2358,20 +1758,21 @@
   <p>На DIY-раме с безымянными моторами нет проверенного эталона скорости — единственный надёжный путь: гонять <code>FORCE_MOVE</code> с растущей <code>VELOCITY</code> при текущем токе, пока не поймаете срыв шагов, затем взять значение на 25-30% ниже порога срыва как практичный потолок для <code>max_velocity</code>/<code>max_z_velocity</code>. Не пытайтесь работать впритык к порогу — нужен запас на реальную нагрузку при печати, которой в тесте нет. Ток и скорость напрямую связаны: у степпера момент падает с ростом скорости (противо-ЭДС), больше тока — выше порог срыва, так что подъём тока — это и есть механизм расширения диапазона скоростей. Автоматизированная версия той же идеи — модуль <code>klipper_auto_speed</code>, см. <a href="#methodology">методологию</a>.</p>
 
   <div class="callout key">
-    <span class="ctitle">Результаты для этого mbot (2026-07-27)</span>
-    <p><strong>X/Y:</strong> стабильно 200мм/с под ручной нагрузкой (мешали рукой во время движения, пропусков нет) — в конфиг записано <code>max_velocity: 175</code> (margin ~12% вниз от подтверждённого чистого значения — реальная печать добавляет одновременные повороты/ускорения, которых нет в прямолинейном тесте).</p>
-    <p><strong>Z:</strong> уткнулось в 20мм/с и дальше не сдвинулось ни при повышении, ни при понижении тока — характерная сигнатура НЕ токового/момента-ограничения (будь то нехватка момента, рост тока или его снижение сдвигали бы порог), а механического потолка (резонанс винта/муфты) или предела по противо-ЭДС при доступном напряжении VMOT. Микрошаг тут не поможет: мм/с = обороты мотора × шаг винта, от делителя микрошага физически не зависит — <code>16→32</code> микрошагов не расширит потолок скорости, если ограничение именно в этом. Что реально может сдвинуть порог (если хочется побороться) — переключение chopper-режима (spreadCycle↔stealthChop, перемычка SPREAD) или снижение <code>max_z_accel</code>. Но 20мм/с уже с большим запасом выше того, что реально требуется по Z (5-15мм/с — типичный диапазон Z-скоростей у любого слайсера, Z двигается только между слоями) — в конфиге поставлено <code>max_z_velocity: 18</code>, гнаться за большим смысла нет.</p>
-    <p><strong>Экструдер:</strong> уверенно докручивает до 50мм/с подачи филамента под пальцевой нагрузкой — это неформальный качественный тест (не строгий FORCE_MOVE-до-срыва свип), поэтому в конфиг заложен запас пониже: <code>max_extrude_only_velocity: 35</code>.</p>
+    <span class="ctitle">Как читать результат такого свипа — важный диагностический признак</span>
+    <p><strong>Если потолок скорости оси не сдвигается ни при повышении, ни при понижении тока</strong> — это характерная сигнатура <em>не</em> токового ограничения. Будь дело в нехватке момента, рост тока сдвигал бы порог вверх, а снижение — вниз. Неподвижный порог означает механический потолок (резонанс винта/муфты, тугая направляющая) либо предел по противо-ЭДС при доступном напряжении VMOT.</p>
+    <p><strong>Микрошаг здесь не поможет в принципе:</strong> мм/с = обороты мотора × шаг винта, от делителя микрошага эта величина физически не зависит — <code>16→32</code> микрошага не расширят потолок скорости. Что реально может его сдвинуть: смена режима чоппера (см. <a href="#chopper-modes">spreadCycle / stealthChop</a>) или снижение ускорения по этой оси.</p>
+    <p><strong>И трезвость про Z:</strong> прежде чем бороться за скорость Z, посмотрите, сколько её реально нужно. Типичный диапазон Z-скоростей у слайсеров — 5–15 мм/с, Z двигается только между слоями. Потолок в 20 мм/с закрывает потребность с запасом, и гнаться за большим смысла нет.</p>
+    <p>Результаты своих свипов (числа по каждой оси и что в итоге записано в <code>[printer]</code>) — в статус-документ машины, не сюда.</p>
   </div>
 
   <h3>Ускорение (max_accel) и Square Corner Velocity — как подбирать дальше</h3>
-  <p class="section-intro">Оба параметра управляют не столько «может ли мотор физически», сколько качеством печати (резонанс/ringing на стенках, сглаживание углов) — поэтому в отличие от скорости их нельзя честно подобрать через <code>FORCE_MOVE</code> на одной оси, нужен реальный тестовый принт. Хронологически имеет смысл делать это ПОСЛЕ того, как хоуминг подтверждённо надёжен на всех осях (см. завтрашний план по концевикам ниже) — <code>G28</code> должен быть доверенным, прежде чем печатать тестовые башни.</p>
+  <p class="section-intro">Оба параметра управляют не столько «может ли мотор физически», сколько качеством печати (резонанс/ringing на стенках, сглаживание углов) — поэтому в отличие от скорости их нельзя честно подобрать через <code>FORCE_MOVE</code> на одной оси, нужен реальный тестовый принт. Хронологически имеет смысл делать это ПОСЛЕ того, как хоуминг подтверждённо надёжен на всех осях: <code>G28</code> должен быть доверенным, прежде чем печатать тестовые башни.</p>
 
   <h4 style="margin:20px 0 8px;font-size:15px;color:var(--text);">Square Corner Velocity</h4>
   <p>Klipper использует SCV вместо привычного по Marlin «jerk» — это скорость (мм/с), с которой тулхед проходит воображаемый прямой угол 90°, не притормаживая. Для других углов скорость в повороте выводится из этого значения автоматически (более острый угол → медленнее, более тупой → быстрее) — крутить нужно только одно число, не таблицу jerk по осям. Дефолт в Klipper — <strong>5 мм/с</strong>, и на самодельной раме без accelerometer-калибровки это, по сути, честный ответ: поднимать стоит осторожно и понемногу (проверяя на тестовом квадрате/звезде на явные пропуски шагов в углах), разумный потолок для такой рамы — ориентировочно 8-10 мм/с, выше — уже требует уверенности в жёсткости всей конструкции.</p>
 
   <h4 style="margin:20px 0 8px;font-size:15px;color:var(--text);">max_accel — без акселерометра</h4>
-  <p>Официальный быстрый путь в Klipper — <code>SHAPER_CALIBRATE</code>/<code>TEST_RESONANCES</code>, но оба требуют акселерометр (обычно ADXL345), физически прикрученный к тулхеду — на этой раме его пока нет. Без акселерометра у Klipper есть свой штатный, задокументированный ручной метод — не самодельный, а прямо из `docs/Resonance_Compensation.md`:</p>
+  <p>Официальный быстрый путь в Klipper — <code>SHAPER_CALIBRATE</code>/<code>TEST_RESONANCES</code>, но оба требуют акселерометр (обычно ADXL345), физически прикрученный к тулхеду. Без акселерометра у Klipper есть свой штатный, задокументированный ручной метод — не самодельный, а прямо из `docs/Resonance_Compensation.md`:</p>
   <ol class="step-list">
     <li>Печатается тестовая модель <code>docs/prints/ringing_tower.stl</code> (штатная модель из репозитория Klipper) — башня со ступенчатым резким изменением направления по высоте, слой 0.2-0.25мм, 1-2 периметра, внешний периметр на скорости 80-100мм/с.</li>
     <li>На стенках башни появляется характерная рябь («ringing»/«ghosting») от резонанса рамы — по мере роста высоты (и, соответственно, ускорения, если печать через <code>TUNING_TOWER</code>) рябь усиливается или ослабевает.</li>
@@ -2394,38 +1795,37 @@
   <p class="content-group-desc">Сеть, USB, UART — то, что вокруг принтера, но влияет на его стабильность.</p>
 
 <section id="uart-direct">
-  <h2>Замена USB на прямой UART (Orange Pi ↔ Mega) — рассмотрено и ОТВЕРГНУТО</h2>
-  <span class="tag warn">не делаем · раздел сохранён как prior art</span>
-  <p class="section-intro">Цель была — убрать зависимость связи с MCU от нестабильного USB-хаба: соединить UART Orange Pi напрямую с Мегой, освободив единственный USB-порт под камеру.</p>
+  <h2>Замена USB на прямой UART (одноплатник ↔ Mega)</h2>
+  <span class="tag warn">чаще всего не нужно · сначала прочитайте, почему</span>
+  <p class="section-intro">Типичная мотивация — убрать зависимость связи с MCU от нестабильного USB-хаба: соединить аппаратный UART одноплатника напрямую с Мегой, освободив единственный USB-порт под камеру.</p>
 
   <div class="callout danger">
-    <span class="ctitle">Решение принято: не делаем. Связь с Мегой идёт по USB и такой останется</span>
-    <p>Это <strong>другая тема</strong>, чем UART к драйверам TMC2209: там линия целиком между модулем драйвера и Мегой на одной плате, и Orange Pi в ней не участвует вообще. Здесь речь о замене USB-кабеля между Orange Pi и Мегой на аппаратный UART — <strong>к управлению драйверами это отношения не имеет и для него не требуется</strong>.</p>
-    <p>Почему отвергнуто (всё уже зафиксировано в <code>printer-status.md</code>):</p>
+    <span class="ctitle">Сначала: это НЕ та же тема, что UART к драйверам TMC2209</span>
+    <p>UART к драйверам — линия целиком между модулем драйвера и Мегой на одной плате, одноплатник в ней не участвует вообще. Здесь речь о замене USB-кабеля между одноплатником и Мегой на аппаратный UART — <strong>к управлению драйверами это отношения не имеет и для него не требуется.</strong> Их постоянно путают.</p>
+    <p>Четыре причины, по которым эту затею обычно закрывают, не начав:</p>
     <ul class="checklist">
-      <li><span><strong>USB работает штатно.</strong> Мега подключена обычным кабелем через стабильный путь <code>/dev/serial/by-id/…</code>, который не переезжает при смене <code>ttyUSB0/1</code>. Исходная причина затеи — нестабильный USB-хаб — закрыта архитектурно: Мега переехала на microUSB-OTG, камера осталась на USB-A, хаба в топологии больше нет.</span></li>
-      <li><span><strong>Понадобился бы внешний преобразователь уровней</strong> на две сигнальные линии: GPIO Orange Pi — 3.3В и не толерантны к 5В, логика Меги — 5В.</span></li>
-      <li><span><strong>Штатный переключатель платы на 3.3В использовать нельзя — проверено эмпирически.</strong> После переключения термисторы стола и хотэнда одновременно ушли на −109.28&nbsp;°C, Klipper остановился по <code>not in range</code>; лечится обратным переключением на 5В, что и было сделано. Почему именно так — вывод из наблюдаемого поведения, а не из документации (схемы платы найти не удалось), см. врезку ниже по разделу.</span></li>
-      <li><span><strong>Конфликт пинов.</strong> На Allwinner H3 UART3 сидит на пинах 8/10 (PA13/PA14), которые делит с SPI1 — занять их значит закрыть SPI1 под другое.</span></li>
+      <li><span><strong>USB и так работает.</strong> Мега подключается обычным кабелем через стабильный путь <code>/dev/serial/by-id/…</code>, который не переезжает при смене <code>ttyUSB0/1</code>. Если проблема была в хабе, её решает OTG (врезка ниже), а не пайка.</span></li>
+      <li><span><strong>Понадобится внешний преобразователь уровней</strong> на две сигнальные линии: GPIO большинства одноплатников — 3.3В и не толерантны к 5В, логика Меги — 5В.</span></li>
+      <li><span><strong>Штатный переключатель платы на 3.3В использовать нельзя</strong> — проверено эмпирически, разбор во врезке ниже по разделу.</span></li>
+      <li><span><strong>Конфликт пинов.</strong> Аппаратный UART на одноплатнике обычно делит выводы с другой периферией (на Allwinner H3 UART3 сидит на пинах 8/10 и делит их с SPI1) — занять их значит закрыть SPI подо что-то другое.</span></li>
     </ul>
-    <p>Раздел не удалён намеренно: в этом репозитории отвергнутые варианты сохраняются вместе с обоснованием, чтобы их не изобретали заново. Читайте как историю решения, а не как план работ.</p>
+    <p>Раздел оставлен как методика: если OTG на вашей плате не поднимается, а USB действительно нестабилен, ниже — безопасный порядок работ.</p>
   </div>
 
   <div class="callout info">
-    <span class="ctitle">Альтернатива без пайки — microUSB-OTG (на этой машине сработала, весь раздел ниже стал необязательным)</span>
-    <p>Если на Orange Pi есть microUSB с поддержкой OTG host-режима — он решает ту же задачу (два независимых USB-порта вместо одного, делённого хабом) вообще без уровневого шифтера и пайки. См. раздел про <a href="#methodology">prior art</a> ниже — на Orange Pi Lite это задокументированный приём.</p>
-    <p><strong>Проверено на этом принтере 2026-07-27:</strong> кабель Меги переехал на microUSB-OTG через переходник, камера осталась на основном USB-A — в <code>lsusb -t</code> хаба в топологии больше нет вообще, оба устройства работают одновременно. То есть исходная причина всей затеи с прямым UART (нестабильный хаб) закрыта архитектурно. <strong>Проверяйте OTG в первую очередь</strong> — раздел ниже остаётся как методика на случай, если OTG на вашей плате не поднимается.</p>
+    <span class="ctitle">Альтернатива без пайки — microUSB-OTG. Проверять её в первую очередь</span>
+    <p>Если на одноплатнике есть microUSB с поддержкой OTG host-режима — он решает ту же задачу (два независимых USB-порта вместо одного, делённого хабом) вообще без уровневого шифтера и пайки: кабель Меги переезжает на microUSB-OTG через переходник, камера остаётся на основном USB-A, и в <code>lsusb -t</code> хаба в топологии больше нет. См. раздел про <a href="#methodology">prior art</a> ниже — на Orange Pi Lite это задокументированный приём с готовым overlay.</p>
   </div>
 
   <div class="callout danger">
     <span class="ctitle">Единственное реально опасное место (если всё же паять UART)</span>
-    <p>GPIO Orange Pi — 3.3В, НЕ толерантны к 5В. Mega — логика 5В. TX/RX сами по себе перепутать не страшно (просто не заработает, ничего не сгорит) — страшно перепутать питание уровневого шифтера (HV/LV) или подать 5В прямо на 3.3В-рельс Orange Pi в обход шифтера. Протокол ниже специально устроен так, чтобы поймать такую ошибку мультиметром до подключения сигнальных проводов.</p>
+    <p>GPIO одноплатника — 3.3В, НЕ толерантны к 5В. Mega — логика 5В. TX/RX сами по себе перепутать не страшно (просто не заработает, ничего не сгорит) — страшно перепутать питание уровневого шифтера (HV/LV) или подать 5В прямо на 3.3В-рельс одноплатника в обход шифтера. Протокол ниже специально устроен так, чтобы поймать такую ошибку мультиметром до подключения сигнальных проводов.</p>
   </div>
 
   <div class="callout danger">
     <span class="ctitle">Тупик, проверенный на практике: не переключайте всю плату на 3.3В вместо шифтера</span>
-    <p>У Freaduino Mega2560 (и у ряда других клонов) есть штатный переключатель I/O 3.3В/5В на всю плату — соблазн очевидный: щёлкнул, и уровневый шифтер вроде бы не нужен. <strong>На этой машине это попробовали 2026-07-27, и оно сломало не только цифровые уровни.</strong></p>
-    <p>После переключения на 3.3В термисторы <code>heater_bed</code> и <code>extruder</code> одновременно показали <code>-109.28°C</code> — это не погрешность, а сигнатура полностью нерабочего АЦП-измерения; Klipper встал по <code>not in range</code>. То есть переключатель, судя по всему, сажает питание (как минимум аналоговой части) самого чипа, а не транслирует внешние I/O отдельной микросхемой — точной схемы платы найти не удалось, так что это вывод из наблюдаемого поведения, а не из документации. Лечится <strong>обратным переключением на 5В</strong>, а не правкой конфига термисторов — что и было сделано, показания вернулись в норму.</p>
+    <p>У Freaduino Mega2560 (и у ряда других клонов Mega) есть штатный переключатель I/O 3.3В/5В на всю плату — соблазн очевидный: щёлкнул, и уровневый шифтер вроде бы не нужен. <strong>Так делать нельзя, и ломается при этом не только цифровая логика.</strong></p>
+    <p>После переключения на 3.3В термисторы <code>heater_bed</code> и <code>extruder</code> одновременно показали <code>-109.28°C</code> — это не погрешность, а сигнатура полностью нерабочего АЦП-измерения; Klipper встал по <code>not in range</code>. То есть переключатель, судя по всему, сажает питание (как минимум аналоговой части) самого чипа, а не транслирует внешние I/O отдельной микросхемой — точной схемы платы найти не удалось, так что это вывод из наблюдаемого поведения, а не из документации. Лечится <strong>обратным переключением на 5В</strong>, а не правкой конфига термисторов: показания возвращаются в норму сами.</p>
     <p>Побочно он же ломает всё остальное, что уже настроено на 5В-логике: интерфейс с RAMPS, полярности концевиков, и Vref всех драйверов (делитель питается от VDD, при 3.3В ток уезжает примерно ×0.66). Вывод: для UART нужен <strong>внешний шифтер ровно на две сигнальные линии</strong>, как в таблице ниже — не общий переключатель платы.</p>
   </div>
 
@@ -2439,13 +1839,13 @@
   <h3>Точки подключения</h3>
   <div class="scroll-x">
   <table>
-    <thead><tr><th>Сигнал</th><th>Orange Pi One (гребёнка)</th><th>Mega2560</th><th>Шифтер</th></tr></thead>
+    <thead><tr><th>Сигнал</th><th>Одноплатник (гребёнка; пример — Orange Pi One)</th><th>Mega2560</th><th>Шифтер</th></tr></thead>
     <tbody>
       <tr><td>GND</td><td>пин 6</td><td>любой GND</td><td>GND (обе стороны, HV и LV)</td></tr>
       <tr><td>3.3В (питание LV-стороны)</td><td>пин 1</td><td>—</td><td>LV</td></tr>
       <tr><td>5В (питание HV-стороны)</td><td>—</td><td>5V пин</td><td>HV</td></tr>
-      <tr><td>TX Меги → RX Orange Pi</td><td>пин 10 (RX3) через LV-канал</td><td>TX0 (D1)</td><td>канал 1: HV1↔LV1</td></tr>
-      <tr><td>TX Orange Pi → RX Меги</td><td>пин 8 (TX3) через LV-канал</td><td>RX0 (D0)</td><td>канал 2: LV2↔HV2</td></tr>
+      <tr><td>TX Меги → RX одноплатника</td><td>пин 10 (RX3) через LV-канал</td><td>TX0 (D1)</td><td>канал 1: HV1↔LV1</td></tr>
+      <tr><td>TX одноплатника → RX Меги</td><td>пин 8 (TX3) через LV-канал</td><td>RX0 (D0)</td><td>канал 2: LV2↔HV2</td></tr>
     </tbody>
   </table>
   </div>
@@ -2464,7 +1864,7 @@
   </ol>
   <div class="callout info">
     <span class="ctitle">Пины 8/10 конкурентные — проверьте, кто ещё на них претендует</span>
-    <p>На H3 (Orange Pi One/Lite) пины 8/10 — это одновременно TX3/RX3 и SPI1. Занять их под UART3 — значит закрыть SPI1 для чего-то другого, и наоборот: если на плату вешается SPI-экран, его надо сажать на SPI0 (пины 19/21/23/24), иначе дорога к UART3 закрывается. На этой машине такой SPI-экран уже в планах — см. <code>printer-status.md</code>.</p>
+    <p>На H3 (Orange Pi One/Lite) пины 8/10 — это одновременно TX3/RX3 и SPI1. Занять их под UART3 — значит закрыть SPI1 для чего-то другого, и наоборот: если на плату вешается SPI-экран, его надо сажать на SPI0 (пины 19/21/23/24), иначе дорога к UART3 закрывается. Если в планах SPI-экран — решайте этот конфликт до, а не после монтажа.</p>
   </div>
 </section>
 </div>
@@ -2597,7 +1997,7 @@
 
 <div class="content-group">
   <div class="content-group-title">Методология</div>
-  <p class="content-group-desc">Откуда взялись нестандартные приёмы в этом гайде — и что о них известно за пределами этого проекта.</p>
+  <p class="content-group-desc">Откуда взялись нестандартные приёмы в этом гайде — и что о них известно за его пределами.</p>
 
 <section id="methodology">
   <h2>Prior art использованных техник</h2>
@@ -2625,7 +2025,7 @@
   </div>
 
   <h3>microUSB-OTG как второй независимый USB-хост-порт</h3>
-  <p>Раздел <a href="#uart-direct">«Прямой UART»</a> (врезка-алтернатива): вместо общего хаба под камеру и MCU — развести их по двум физически разным портам Orange Pi.</p>
+  <p>Раздел <a href="#uart-direct">«Прямой UART»</a> (врезка-альтернатива): вместо общего хаба под камеру и MCU — развести их по двум физически разным USB-портам одноплатника.</p>
   <div class="prior-art">
     <span class="plabel">Prior art</span>
     <span>Форум Armbian и отдельный GitHub-репозиторий (<em>carl1961/Orange-PI-Lite-Usb-OTG-to-Host</em>) описывают ровно этот приём именно для Orange Pi Lite — родственная плата на том же H3 SoC: подключить USB-камеру через microUSB-OTG, освободив основной USB-порт. На части моделей/образов нужен явный device-tree overlay (<code>usbotg2host.dts</code>) — если host-режим не поднимается автоматически, это первое, что стоит проверить.</span>
@@ -2645,14 +2045,14 @@
     <span>Это не самодельная методика, а штатная — прямо из документации Klipper (<code>docs/Resonance_Compensation.md</code>, модель <code>docs/prints/ringing_tower.stl</code>). Единственное, что можно назвать местной адаптацией — применение той же логики «поднимать параметр, пока не станет видно проблему, затем отступить» уже знакомой по подбору скорости и тока в этом гайде, только здесь критерий — качество печати, а не срыв шагов.</span>
   </div>
 
-  <h3>Баг самого этого файла: он не объявлял кодировку (исправлено 2026-08-02)</h3>
-  <p>Сюда же — методический урок, потому что ошибка ровно того класса, который этот гайд учит ловить: симптом видели, но не в том окружении, где он проявляется.</p>
-  <p>Файл сохранён в UTF-8, но <strong>не содержал ни <code>&lt;meta charset&gt;</code>, ни <code>&lt;!DOCTYPE html&gt;</code>, ни <code>&lt;head&gt;</code></strong> — документ начинался прямо с <code>&lt;title&gt;</code>. Пока его открывали двойным кликом (<code>file://</code>), браузер применял свою эвристику определения кодировки и угадывал верно — за неделю с момента создания файл открывали много раз и ничего не заметили. Стоило отдать тот же файл по HTTP (<code>python3 -m http.server</code>, который присылает <code>Content-Type: text/html</code> <em>без</em> параметра charset) — и браузер откатился на локальную кодировку по умолчанию (для русской локали windows-1251), после чего вся кириллица превратилась в мусор.</p>
+  <h3>Локальный HTML без <code>&lt;meta charset&gt;</code> ломается ровно тогда, когда его отдают по HTTP</h3>
+  <p>Не про RAMPS, но ровно того класса ошибка, который этот гайд учит ловить: симптом воспроизводится не в том окружении, где документ обычно смотрят. Если вы держите документацию у станка HTML-файлами (а этот портал — именно такой случай), грабля ваша.</p>
+  <p>Файл сохранён в UTF-8, но <strong>не содержит ни <code>&lt;meta charset&gt;</code>, ни <code>&lt;!DOCTYPE html&gt;</code>, ни <code>&lt;head&gt;</code></strong>. Пока его открывают двойным кликом (<code>file://</code>), браузер применяет свою эвристику определения кодировки и обычно угадывает верно — файл открывают неделями и ничего не замечают. Стоит отдать тот же файл по HTTP (<code>python3 -m http.server</code> присылает <code>Content-Type: text/html</code> <em>без</em> параметра charset) — и браузер откатывается на локальную кодировку по умолчанию (для русской локали windows-1251), после чего вся кириллица превращается в мусор.</p>
   <div class="prior-art">
     <span class="plabel">Prior art</span>
     <span>Требование не самодельное: HTML Standard (WHATWG, §«Specifying the document's character encoding») предписывает объявлять кодировку и требует, чтобы объявление целиком помещалось в <strong>первые 1024 байта</strong> документа. Если объявления нет и транспорт его не даёт, браузер обязан гадать — и гадает по локали пользователя, то есть один и тот же файл выглядит по-разному на разных машинах. Отсюда практическое правило: <code>&lt;meta charset="utf-8"&gt;</code> — первая строка внутри <code>&lt;head&gt;</code>, всегда, даже для «локального файлика для себя».</span>
   </div>
-  <p>Заодно добавлены <code>&lt;!DOCTYPE html&gt;</code> и <code>&lt;html lang="ru"&gt;</code>. Без доктайпа браузер рендерил документ в quirks mode; переключение в стандартный режим проверялось до/после сравнением вычисленных стилей и скриншотов — вся сетка, оглавление, SVG и ширины колонок совпали в точности, изменилась только межстрочная высота в ячейках таблиц (в quirks mode <code>line-height</code> не наследуется в таблицы и они получают <code>normal</code>), то есть таблицы стали ровно такими, какими их и описывал собственный CSS документа.</p>
+  <p>Второй половиной той же грабли идёт <code>&lt;!DOCTYPE html&gt;</code>: без доктайпа браузер рендерит документ в quirks mode. Разница при переключении в стандартный режим на такой странице оказывается маленькой, но не нулевой — сетка, оглавление, SVG и ширины колонок совпадают в точности, а вот межстрочная высота в ячейках таблиц меняется (в quirks mode <code>line-height</code> не наследуется в таблицы, и они получают <code>normal</code>). То есть без доктайпа таблицы выглядят не так, как их описывает собственный CSS документа.</p>
 </section>
 </div>
 
@@ -2682,7 +2082,7 @@
 </div>
 
 <footer>
-  <div class="mono">mbot · Orange Pi One (ultra@192.168.11.160) · см. также printer-status.md для полного состояния проекта</div>
+  <div class="mono"><a href="./">← к индексу портала</a> · <a href="reference.html">схемы и пиноуты</a> · состояние конкретной машины — в <code>docs/printer-status.md</code> в репозитории, не здесь</div>
 </footer>
 
 <script>
