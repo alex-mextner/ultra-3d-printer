@@ -29,7 +29,7 @@
 <section id="ramps">
   <h2>RAMPS 1.4 — расположение разъёмов</h2>
   <figure class="plate">
-    <img src="ramps-v1.4.png" alt="Плата RAMPS 1.4 с подписанными разъёмами" loading="lazy">
+    <img src="ramps-v1.4.png" alt="Плата RAMPS 1.4 с подписанными разъёмами" width="1558" height="1114" loading="lazy">
     <figcaption><b>RAMPS 1.4.</b> Гнёзда драйверов X/Y/Z/E0/E1, разъёмы концевиков MIN/MAX по каждой оси, силовые клеммы, гребёнки AUX-1…AUX-4, разъёмы термисторов. Разбор того, что здесь искать при осмотре, — в разделе <a href="ramps-diagnostics.html#ramps-visual">«Визуальный осмотр»</a>; пиноут самого гнезда драйвера — <a href="ramps-diagnostics.html#pinout">«Пиноут гнезда драйвера»</a>.</figcaption>
   </figure>
 </section>
@@ -37,7 +37,7 @@
 <section id="mega">
   <h2>Arduino Mega 2560 — пиноут</h2>
   <figure class="plate">
-    <img src="Arduino-Mega-2560-Pinout.png" alt="Пиноут Arduino Mega 2560: соответствие номеров D-пинов портам AVR" loading="lazy">
+    <img src="Arduino-Mega-2560-Pinout.png" alt="Пиноут Arduino Mega 2560: соответствие номеров D-пинов портам AVR" width="701" height="1358" loading="lazy">
     <figcaption><b>ATmega2560.</b> Главное, зачем сюда лезут: перевод ардуиновского номера (<code>D40</code>, <code>D49</code>, <code>D53</code>) в имя порта AVR (<code>PG1</code>, <code>PL0</code>, <code>PB0</code>), потому что Klipper в <code>uart_pin</code> хочет именно второе. Подробнее — <a href="ramps-diagnostics.html#uart-scope">«Линия UART к драйверам»</a>. Полная версия в векторе: <a href="arduino-mega-2560-pinout.pdf">arduino-mega-2560-pinout.pdf</a> — масштабируется без потери качества.</figcaption>
   </figure>
 </section>
@@ -59,7 +59,7 @@
   <div class="diagram-frame">
     <svg class="pinout-svg" viewBox="0 0 900 600" role="img" aria-labelledby="tmcsvg-title tmcsvg-desc">
       <title id="tmcsvg-title">Модуль TMC2209, вид сверху: две колонки по восемь выводов и паяльные джамперы PDN и SPRE</title>
-      <desc id="tmcsvg-desc">Схема модуля драйвера TMC2209 сверху. Слева колонка управления, счёт сверху вниз от вывода EN: 1 — EN; 2 — MS1; 3 — MS2; 4 и 5 — две спорные позиции, в разметке A4988 и RAMPS это MS3 и RESET, на одну из них паяльный джампер PDN выводит сигнал PDN_UART, на какую именно — зависит от производителя модуля и определяется прозвонкой; 6 — позиция SLEEP, у модуля TMC2209 вывода здесь нет; 7 — STEP; 8 — DIR. Справа силовая колонка: питание мотора, силовая земля, четыре вывода обмоток, логическое питание и логическая земля. Джампер PDN нарисован тремя площадками: средняя общая, капля припоя соединяет её с одной из двух крайних и тем выбирает вывод гребёнки. Отдельно показан джампер SPRE, задающий вход SPREAD на модулях, где этот вход на гребёнку не выведен.</desc>
+      <desc id="tmcsvg-desc">Схема модуля драйвера TMC2209 сверху. Слева колонка управления, счёт сверху вниз от вывода EN: 1 — EN; 2 — MS1; 3 — MS2; 4 и 5 — две спорные позиции, в разметке A4988 и RAMPS это MS3 и RESET, на одну из них паяльный джампер PDN выводит сигнал PDN_UART, на какую именно — зависит от производителя модуля и определяется прозвонкой; 6 — позиция SLEEP, у модуля TMC2209 вывода здесь, как правило, нет; 7 — STEP; 8 — DIR. Справа силовая колонка: питание мотора, силовая земля, четыре вывода обмоток, логическое питание и логическая земля. Джампер PDN нарисован тремя площадками: средняя общая, капля припоя соединяет её с одной из двух крайних и тем выбирает вывод гребёнки. Отдельно показан джампер SPRE, задающий вход SPREAD на модулях, где этот вход на гребёнку не выведен.</desc>
 
       <defs>
         <marker id="tmcsvg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -115,8 +115,8 @@
       <rect x="276" y="368" width="48" height="24" rx="4" fill="var(--paper-2)" stroke="var(--text-faint)" stroke-width="1.5" stroke-dasharray="5 3"></rect>
       <circle cx="252" cy="380" r="12" fill="var(--paper-2)" stroke="var(--border)"></circle>
       <text class="m t-num" x="252" y="385" text-anchor="middle">6</text>
-      <text class="m t-pin t-dim" x="228" y="378" text-anchor="end">вывода нет</text>
-      <text class="t-sub" x="228" y="394" text-anchor="end">у A4988 это SLEEP</text>
+      <text class="m t-pin t-dim" x="228" y="378" text-anchor="end">обычно вывода нет</text>
+      <text class="t-sub" x="228" y="394" text-anchor="end">у A4988 это SLEEP · сверять по своему модулю</text>
 
       <rect x="276" y="424" width="48" height="24" rx="4" fill="var(--paper)" stroke="var(--text-faint)" stroke-width="1.5"></rect>
       <circle cx="252" cy="436" r="12" fill="var(--paper-2)" stroke="var(--border)"></circle>
@@ -225,7 +225,7 @@
       <tr><td>3</td><td><span class="pin">MS2</span></td><td><span class="pin">MS2</span> — то же</td><td>там же</td></tr>
       <tr><td class="varies">4</td><td><span class="pin">MS3</span></td><td class="varies"><strong>PDN_UART или SPREAD</strong> — зависит от положения джампера <code>PDN</code> и от модели модуля</td><td class="varies">только прозвонкой своего экземпляра, не картинкой</td></tr>
       <tr><td class="varies">5</td><td><span class="pin">RESET</span></td><td class="varies"><strong>PDN_UART или ничего</strong> — зависит от положения джампера <code>PDN</code></td><td class="varies">только прозвонкой своего экземпляра, не картинкой</td></tr>
-      <tr><td>6</td><td><span class="pin">SLEEP</span></td><td>вывода нет</td><td>на RAMPS позиции 5 и 6 закорочены между собой на плате: провод, посаженный на 6-ю, дотягивается до 5-й и там же кончается</td></tr>
+      <tr><td>6</td><td><span class="pin">SLEEP</span></td><td>как правило вывода нет — у TMC2209 просто нет сигнала, которому здесь место; но и это стоит подтвердить прозвонкой своего модуля</td><td>провод, припаянный сюда, доходит через закоротку RAMPS ровно до 5-й позиции и там кончается — разбор в гайде, <a href="ramps-diagnostics.html#pdn-jumper">«Закоротка RESET/SLEEP на RAMPS»</a></td></tr>
       <tr><td>7</td><td><span class="pin">STEP</span></td><td><span class="pin">STEP</span></td><td>совпадает у всех модулей</td></tr>
       <tr><td>8</td><td><span class="pin">DIR</span></td><td><span class="pin">DIR</span></td><td>совпадает у всех модулей</td></tr>
     </tbody>
@@ -237,7 +237,7 @@
 <section id="tmc2209-uart-select">
   <h2>TMC2209 — выбор режима UART на модуле</h2>
   <figure class="plate">
-    <img src="tmc2209-uart-mode-select.png" alt="Выбор режима UART на модуле TMC2209: перемычка PDN и связанные площадки" loading="lazy">
+    <img src="tmc2209-uart-mode-select.png" alt="Выбор режима UART на модуле TMC2209: перемычка PDN и связанные площадки" width="775" height="826" loading="lazy">
     <figcaption><b>Документация производителя модуля — ОДИН вариант, не общее правило.</b> Это лист «UART Mode Pin Select» конкретной серии модулей; на плате другого производителя джампер может стоять на другой позиции, и картинка тогда неверна. Ценность её не в положении капли, а в самом устройстве узла: это не «один сигнал, выведенный дважды», а <em>джампер, выбирающий один из двух выводов</em> — и провод, припаянный не к тому, даёт ровно ту же картину, что обрыв: молчание на всех четырёх адресах. Что относится к любому модулю — <a href="#tmc2209">на схеме выше</a>; как определить положение у себя — прозвонкой, врезка там же. Дерево решений — <a href="ramps-diagnostics.html#uart-no-link">«UART подключён, но связи нет»</a>.</figcaption>
   </figure>
 </section>
@@ -250,7 +250,7 @@
 <section id="orangepi">
   <h2>Orange Pi One — гребёнка GPIO</h2>
   <figure class="plate">
-    <img src="orange-pi-one-pinout.png" alt="Пиноут гребёнки Orange Pi One (Allwinner H3)" loading="lazy">
+    <img src="orange-pi-one-pinout.png" alt="Пиноут гребёнки Orange Pi One (Allwinner H3)" width="586" height="341" loading="lazy">
     <figcaption><b>Orange Pi One (Allwinner H3).</b> Пины 8/10 — это одновременно TX3/RX3 и SPI1: занять их под UART значит закрыть SPI1 подо что-то другое. Обоснование, почему прямой UART между хостом и Мегой обычно не нужен, — <a href="ramps-diagnostics.html#uart-direct">«Замена USB на прямой UART»</a>.</figcaption>
   </figure>
 </section>

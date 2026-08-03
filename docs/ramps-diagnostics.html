@@ -530,10 +530,10 @@
         <line x1="295" y1="205" x2="365" y2="205" stroke="var(--info)"/><line x1="295" y1="230" x2="365" y2="230"/>
       </g>
 
-      <rect x="150" y="238" width="120" height="18" rx="4" fill="none" stroke="var(--warn)" stroke-dasharray="3 3"/>
-      <text x="210" y="251" text-anchor="middle" fill="var(--warn)" font-size="10" font-family="var(--mono)">PDN_UART — доп. вывод (только TMC2209-UART)</text>
+      <rect x="118" y="118" width="26" height="49" rx="4" fill="none" stroke="var(--warn)" stroke-dasharray="3 3"/>
+      <text x="210" y="252" text-anchor="middle" fill="var(--warn)" font-size="10" font-family="var(--mono)">PDN_UART модуля TMC2209 — здесь: на MS3 ИЛИ на RESET</text>
     </svg>
-    <p class="diagram-caption">1A/1B — выход одной обмотки, 2A/2B — второй. На реальных модулях TMC2209 подписи могут отличаться от общей Pololu-схемы (например VIO вместо VDD, SPREAD вместо MS3/RESET/SLEEP) — сверяйтесь с шёлкографией конкретно вашего модуля, эта диаграмма — обобщённая карта позиций, не факсимиле.</p>
+    <p class="diagram-caption">1A/1B — выход одной обмотки, 2A/2B — второй. <strong>Это разметка ГНЕЗДА, а не модуля.</strong> Со стороны модуля TMC2209 те же позиции значат другое: <span class="pin">PDN_UART</span> сидит на одной из двух — MS3 или RESET, — и на какой именно, решает паяльный джампер <code>PDN</code> конкретного экземпляра; отдельного вывода под него нет. Карта модуля со всеми расхождениями — <a href="reference.html#tmc2209">«TMC2209 против A4988 — что на какой позиции гнезда»</a>, разбор джампера — <a href="#pdn-jumper">ниже по гайду</a>. Сверяйтесь с шёлкографией конкретно вашего модуля: эта диаграмма — карта позиций гнезда, не факсимиле модуля.</p>
   </div>
 </section>
 </div>
