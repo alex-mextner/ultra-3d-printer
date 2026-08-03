@@ -15,7 +15,6 @@
 </header>
 
 <div class="hero">
-  <div class="eyebrow">Документация у станка · читается с планшета</div>
   <h1>Портал документации: RAMPS 1.4 + Klipper</h1>
   <p class="lede">Это методическая часть документации самосборного принтера: как устроена связка «одноплатник + Klipper + Mega2560 + RAMPS 1.4», как её диагностировать приборами, как считать ток и как не убиться о 220 В. Всё здесь применимо к <strong>любой</strong> машине на этой связке — состояния и настроек конкретного принтера тут намеренно нет.</p>
   <div class="context-strip">
@@ -31,20 +30,18 @@
 
 <div class="content-group">
   <div class="content-group-title">Разделы портала</div>
-  <p class="content-group-desc">Две страницы: одна читается, вторая — на неё смотрят.</p>
 
 <section id="sections">
   <div class="card-grid">
     <a class="card" href="ramps-diagnostics.html">
-      <span class="card-kicker">Основной документ · одна страница, читать по оглавлению</span>
       <h3>Диагностика RAMPS 1.4, A4988 и TMC2209</h3>
       <p>Пошаговая методика: от визуального осмотра платы до захвата сигналов осциллографом и подбора тока. Сюда же — безопасность 220 В, UART к драйверам TMC2209, режимы чоппера, координаты и направления осей, prior art каждой самодельной техники.</p>
       <span class="card-more">Открыть гайд →</span>
     </a>
     <a class="card" href="reference.html">
-      <span class="card-kicker">Картинки · открывать при монтаже</span>
+      <span class="card-kicker">Картинки и схемы</span>
       <h3>Схемы и пиноуты</h3>
-      <p>Плата RAMPS 1.4, пиноут Arduino Mega 2560 (картинкой и PDF), выводы модуля TMC2209, выбор режима UART на модуле, гребёнка Orange Pi One. Всё, во что тыкают пальцем, стоя у станка.</p>
+      <p>Плата RAMPS 1.4, пиноут Arduino Mega 2560 (картинкой и PDF), гнездо драйвера A4988 против TMC2209 с джампером <code>PDN</code>, выбор режима UART на модуле, гребёнка Orange Pi One.</p>
       <span class="card-more">Открыть схемы →</span>
     </a>
   </div>
@@ -53,7 +50,6 @@
 
 <div class="content-group">
   <div class="content-group-title">Куда идти по задаче</div>
-  <p class="content-group-desc">Оглавление гайда целиком — чтобы не листать его сверху, если уже знаете, что ищете.</p>
 
 <section id="jump">
   <h2>Оглавление гайда</h2>
@@ -99,7 +95,7 @@
   <ul class="jump-list">
     <li><a href="ramps-diagnostics.html#vref">Vref: формулы, калькулятор, журнал измерений</a></li>
     <li><a href="ramps-diagnostics.html#chopper-modes">spreadCycle и stealthChop — чем режимы платят друг за друга</a></li>
-    <li><a href="ramps-diagnostics.html#hybrid-verdict">↳ Гибридный порог <code>stealthchop_threshold</code> — почему его не берут</a></li>
+    <li><a href="ramps-diagnostics.html#hybrid-verdict">↳ Гибридный порог <code>stealthchop_threshold</code> — почему его не берут вслепую</a></li>
     <li><a href="ramps-diagnostics.html#tmc-params">↳ Токи (RMS против peak), <code>interpolate</code>, <code>hold_current</code>, coolStep, StallGuard</a></li>
     <li><a href="ramps-diagnostics.html#diy-hints">Координаты, MIN/MAX, разводка мотора, подбор скоростей</a></li>
   </ul>

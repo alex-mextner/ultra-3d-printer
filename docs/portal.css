@@ -331,6 +331,9 @@
   tbody tr:last-child td{border-bottom:none;}
   td.good{color:var(--accent-2);}
   td.bad{color:var(--danger);}
+  /* «зависит от экземпляра платы, проверять прибором» — тот же жёлтый, что и
+     на схеме распиновки в reference.html, чтобы легенда рисунка читалась и в таблице */
+  td.varies{color:var(--warn);}
   td .pin{
     background:var(--paper-2);
     border:1px solid var(--border);
@@ -347,6 +350,28 @@
     margin:18px 0;
   }
   .diagram-frame svg{display:block;width:100%;height:auto;}
+  /* Схема распиновки модуля драйвера (reference.html): рисунок разметкой, а не
+     растром — правится текстом и не устаревает вместе с чьей-то фотографией.
+     Ширина резиновая по viewBox, но с полом: ниже ~560 px подписи выводов
+     становятся нечитаемыми, и тогда пусть лучше прокручивается сам рисунок
+     внутри .scroll-x, чем вся страница. Шрифты и цвета — классами здесь, а не
+     атрибутами в SVG, чтобы рисунок жил в обеих темах портала. */
+  .pinout-svg{max-width:100%;min-width:560px;font-family:var(--sans);}
+  .pinout-svg .m{font-family:var(--mono);}
+  .pinout-svg text{fill:var(--text);}
+  .pinout-svg .t-head{font-size:15px;font-weight:700;}
+  .pinout-svg .t-note{font-size:11.5px;fill:var(--text-faint);}
+  .pinout-svg .t-col{font-size:10.5px;letter-spacing:0.08em;fill:var(--text-faint);}
+  .pinout-svg .t-chip{font-size:15px;font-weight:700;}
+  .pinout-svg .t-num{font-size:12px;font-weight:700;fill:var(--text-dim);}
+  .pinout-svg .t-pin{font-size:15px;font-weight:700;}
+  .pinout-svg .t-sub{font-size:11px;fill:var(--text-faint);}
+  .pinout-svg .t-ann{font-size:11px;}
+  .pinout-svg .t-jl{font-size:13px;font-weight:700;}
+  .pinout-svg .t-qm{font-size:15px;font-weight:800;fill:var(--warn);}
+  .pinout-svg .t-warn{fill:var(--warn);}
+  .pinout-svg .t-info{fill:var(--info);}
+  .pinout-svg .t-dim{fill:var(--text-dim);}
   .diagram-caption{
     font-size:13px;
     color:var(--text-faint);

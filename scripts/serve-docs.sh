@@ -41,11 +41,14 @@ PAGES=(
     reference.html
     portal.css
 )
+# «tmc2209 pinout.webp» отсюда убран 2026-08-03 вместе с картинкой распиновки
+# модуля на reference.html: она показывала один вариант разводки из нескольких и
+# врала про SPREAD. Заменена инлайновым SVG прямо в reference.html — заливать
+# нечего. Сам файл в репозитории оставлен как исходник претензии.
 ASSETS=(
     "ramps-v1.4.png"
     "Arduino-Mega-2560-Pinout.png"
     "arduino-mega-2560-pinout.pdf"
-    "tmc2209 pinout.webp"
     "tmc2209-uart-mode-select.png"
     "orange-pi-one-pinout.png"
 )
