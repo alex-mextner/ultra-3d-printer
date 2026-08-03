@@ -357,6 +357,9 @@
      внутри .scroll-x, чем вся страница. Шрифты и цвета — классами здесь, а не
      атрибутами в SVG, чтобы рисунок жил в обеих темах портала. */
   .pinout-svg{max-width:100%;min-width:560px;font-family:var(--sans);}
+  /* Рамка вокруг такого рисунка должна расти вместе с ним, иначе на узком
+     экране она обрезается по ширине окна, а рисунок из неё вылезает. */
+  .scroll-x > .diagram-frame{display:inline-block;vertical-align:top;min-width:100%;}
   .pinout-svg .m{font-family:var(--mono);}
   .pinout-svg text{fill:var(--text);}
   .pinout-svg .t-head{font-size:15px;font-weight:700;}
