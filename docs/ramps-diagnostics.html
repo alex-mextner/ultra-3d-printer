@@ -666,6 +666,7 @@
   <div class="toc-group-title">Настройка тока</div>
   <ol>
     <li><a href="#vref">Vref — формулы, калькулятор, журнал</a></li>
+    <li><a href="#chopper-modes">spreadCycle и stealthChop</a></li>
   </ol>
 
   <div class="toc-group-title">Оси и движение</div>
@@ -1315,7 +1316,7 @@
     <ul class="checklist">
       <li><span><strong>Ток нигде не измерен.</strong> Он выставлен подстроечниками вслепую — мультиметра, читающего доли вольта Vref с нужной точностью, в проекте нет. UART превращает ток в число в конфиге (<code>run_current</code>) с обратным чтением через <code>DUMP_TMC</code>.</span></li>
       <li><span><strong>Есть подозрение на потерю хода на рабочих скоростях</strong> (замеры по каретке; см. оговорку в <code>printer-status.md</code> — это подозрение, а не доказанный факт). Самый частый источник срыва шагов при исправной механике — как раз нехватка тока.</span></li>
-      <li><span><strong>Режим чоппера физически неустраним без UART.</strong> На X/Y/Z снята перемычка SPREAD, то есть драйверы работают в stealthChop — режиме, заметно более слабом по моменту на высоких оборотах. Переключить их на spreadCycle при разгоне можно <em>только</em> регистром через UART (<code>stealthchop_threshold</code> в Klipper → <code>TPWMTHRS</code> в чипе); в standalone это записать некуда. См. подробнее в разделе <a href="#vref">«Vref»</a>.</span></li>
+      <li><span><strong>Режим чоппера физически неустраним без UART.</strong> Вход SPREAD на X/Y/Z низкий (измерено 2026-08-03: <code>IOIN.spread_en = 0</code>; задаётся он не перемычкой гребёнки, а паяльным джампером <code>SPRE</code> на модуле), то есть в standalone драйверы работают в stealthChop — режиме, заметно более слабом по моменту на высоких оборотах. Переключить их на spreadCycle при разгоне можно <em>только</em> регистром через UART (<code>stealthchop_threshold</code> в Klipper → <code>TPWMTHRS</code> в чипе); в standalone это записать некуда. Механика обоих режимов, таблица XOR и разбор <code>stealthchop_threshold</code> — в разделе <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</span></li>
     </ul>
     <p>Обоснование целиком и порядок работ — пункт <strong>B10</strong> в <code>printer-status.md</code>. <strong>Положение перемычек подтверждено пользователем 2026-08-02:</strong> MS1 и MS2 надеты, SPREAD не надета («1 и 2 не снимал, а 3 не надевал»). То есть адрес по таблице ниже действительно <strong>3</strong>, и SPREAD стоит правильно — эта оговорка закрыта.</p>
   </div>
@@ -1384,7 +1385,8 @@
     <span class="ctitle">Третья перемычка (SPREAD) — при UART должна быть СНЯТА, иначе логика чоппера инвертируется</span>
     <p>У TMC2209-модуля на позиции, где у A4988 сидит MS3, стоит вход <span class="pin">SPREAD</span> — выбор режима чоппера (даташит: «Chopper mode selection: Low=StealthChop, High=SpreadCycle (may be left unconnected)»). Микрошаг он не меняет.</p>
     <p><strong>Неочевидное и важное:</strong> в UART-режиме этот пин не отключается, а <strong>складывается по XOR с регистровым битом</strong>. Даташит, GCONF бит 2 <code>en_SpreadCycle</code>: «A high level on the pin SPREAD inverts this flag to switch between both chopper modes», и там же в разделе про stealthChop: «The input SPREAD is XORed to this flag». То есть если перемычка SPREAD надета (пин на +5В), то <code>stealthchop_threshold</code> в Klipper начнёт работать <em>ровно наоборот</em>: где по конфигу должен быть spreadCycle — будет stealthChop, и обратно. Диагностически это отвратительный симптом: конфиг верный, регистры читаются, DUMP_TMC показывает то, что вы написали, а мотор ведёт себя как в другом режиме.</p>
-    <p>Поэтому: <strong>для UART перемычку SPREAD на X/Y/Z надо держать снятой</strong> (пин на GND через внутреннюю подтяжку) — тогда режим целиком определяется регистром, как и предполагает Klipper. <strong>На этой машине она снята — подтверждено пользователем 2026-08-02, трогать нечего.</strong></p>
+    <p>Поэтому: <strong>вход SPREAD при UART надо держать низким</strong> — тогда режим целиком определяется регистром, как и предполагает Klipper.</p>
+    <p><strong>Исправлено 2026-08-03: на модулях этой машины SPREAD на гребёнку вообще не выведен</strong> — третья позиция гнезда занята другим сигналом, а вход SPREAD задаётся отдельным паяльным джампером <code>SPRE</code> на плате драйвера. Прежняя запись «на этой машине перемычка снята, подтверждено пользователем 2026-08-02» описывала не тот орган управления. Вопрос закрыт измерением, а не осмотром: <code>IOIN.spread_en = 0</code> в живом дампе → джампер не запаян, вывод низкий, XOR прозрачен. Разбор и таблица XOR — в разделе <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</p>
     <p><strong>Экструдер (A4988) — не трогать вообще.</strong> Там та же третья позиция гнезда означает MS3, то есть настоящий микрошаг: сняв её, вы измените разрешение оси, а не режим чоппера.</p>
   </div>
 
@@ -2065,6 +2067,7 @@
   </table>
   </div>
   <p class="diagram-caption">Исправлено 2026-08-02: до этой даты в двух средних строках 1/32 и 1/64 стояли наоборот. Правильно по даташиту — MS2&nbsp;GND / MS1&nbsp;VCC_IO&nbsp;=&nbsp;1/32, MS2&nbsp;VCC_IO / MS1&nbsp;GND&nbsp;=&nbsp;1/64.</p>
+  <p class="diagram-caption"><strong>Уточнено 2026-08-03:</strong> колонка «SPREAD (3-я)» описывает <em>вход SPREAD чипа</em>, а не третью перемычку гребёнки — совпадают они не на всех модулях. На модулях этой машины третья позиция гнезда занята другим сигналом, а SPREAD задаётся паяльным джампером <code>SPRE</code> на самой плате драйвера. Читайте колонку как «уровень на входе SPREAD: высокий / низкий», и сверяйтесь с шёлкографией своего модуля. Подробнее — <a href="#chopper-modes">«spreadCycle и stealthChop»</a>.</p>
   <p>Без UART Klipper не видит режим чоппера и не может его задать: перемычка — единственный орган управления, а в <code>printer.cfg</code> писать про это <strong>некуда</strong>. Это не «нечего дописывать», а отсутствующая возможность — и у неё есть последствия, см. врезку ниже.</p>
   <p><strong>Как только UART подключён, эта таблица работает иначе:</strong> микрошаг с MS1/MS2 снимается (его задаёт регистр, то есть <code>microsteps</code> в конфиге), но те же два пина продолжают задавать <strong>адрес чипа на шине UART</strong>, а SPREAD складывается по XOR с регистровым битом режима чоппера. Разбор с цитатами из даташита и что из этого следует для монтажа — в разделе <a href="#uart-scope">«Линия UART к драйверам»</a>.</p>
 
@@ -2073,6 +2076,7 @@
     <p>stealthChop тише, но заметно слабее по моменту на высоких оборотах: именно поэтому штатный приём — держать stealthChop на малых скоростях и автоматически переключаться на spreadCycle выше порога. Порог этот живёт в регистре чипа (<code>TPWMTHRS</code>, в Klipper — параметр <code>stealthchop_threshold</code> секции <code>[tmc2209 …]</code>), а регистры пишутся <strong>только по UART</strong>. В standalone-режиме драйвер остаётся в том режиме, который задан перемычкой, на всех скоростях без исключения.</p>
     <p>Практический вывод для диагностики «теряет шаги на скорости»: если перемычка SPREAD снята (stealthChop) и UART не подключён, то один из самых правдоподобных механизмов срыва вы <em>не можете ни проверить, ни устранить</em> — сколько ни крути триммер. Прежде чем ловить механический потолок скорости, имеет смысл сначала завести UART: см. раздел <a href="#uart-scope">«линия UART»</a> и пункт B10 в <code>printer-status.md</code>.</p>
     <p>Оговорка: семантика третьей перемычки различается между производителями модулей — прежде чем делать из неё вывод, сверьтесь с шёлкографией конкретно своей платы, а не с общей таблицей выше.</p>
+    <p><strong>Почему момент падает именно на разгонах, что такое фаза обучения stealthChop и как прочитать фактический режим битом <code>stealth</code> вместо гадания по джамперу</strong> — отдельный разбор в разделе <a href="#chopper-modes">«spreadCycle и stealthChop»</a>. Там же — грабли с <code>stealthchop_threshold: 0</code>, который делает <em>не</em> то, что кажется.</p>
   </div>
 
   <div class="callout danger">
@@ -2084,6 +2088,182 @@
   <div class="callout info">
     <span class="ctitle">hold_current — касается только TMC2209 по UART</span>
     <p>Когда UART заработает, <code>hold_current</code> в конфиге (обычно вполовину от <code>run_current</code>) программно снижает ток в режиме удержания позиции — резко меньше нагрева в простое. У A4988 такой возможности нет вообще: ток всегда равен тому, что выставлено триммером, и в движении, и в простое, одинаково. Учитывайте это при выборе Vref для драйвера на A4988 — что зададите, то и будет греться постоянно, включая долгие паузы.</p>
+  </div>
+</section>
+
+<section id="chopper-modes">
+  <h2>spreadCycle и stealthChop — что делает чоппер и чем режимы платят друг за друга</h2>
+  <p class="section-intro">Раздел методический: как драйвер вообще удерживает ток в обмотке, чем принципиально различаются два режима TMC2209, чем каждый расплачивается, и как узнать <em>фактический</em> режим вместо того, чтобы верить конфигу. Все числа и цитаты — со ссылкой на источник; там, где источник не найден, это сказано прямо.</p>
+  <p>Источники раздела: даташит <strong>TMC2209 Rev. 1.03 / 2019-JUN-26</strong> (цитаты ниже брались именно из него — соседние разделы этого гайда местами ссылаются на Rev. 1.09, не смешивайте), даташит <strong>Allegro A4988</strong>, исходники Klipper (<code>klippy/extras/tmc.py</code>, <code>tmc2208.py</code>, <code>tmc2209.py</code>) и его же <code>docs/TMC_Drivers.md</code> / <code>docs/Config_Reference.md</code>.</p>
+
+  <h3>Зачем чопперу вообще регулировать ток</h3>
+  <p>Обмотка шагового мотора — это индуктивность с активным сопротивлением в единицы ом (у типичного NEMA17 — порядка 1–3 Ом на фазу; смотрите паспорт своего мотора, это не константа). Если такую обмотку просто подключить к 12 В, установившийся ток будет <code>U/R</code> — то есть <strong>единицы, а то и десяток ампер</strong> при номинале мотора порядка 1–2 А. Драйвер поэтому не «подаёт напряжение на мотор», а <strong>рубит его в ключах и удерживает заданный ток</strong>: включил — ток по экспоненте пошёл вверх, выключил — пошёл вниз, и вся разница между чопперами в том, чем именно управляется момент выключения и что происходит в паузе.</p>
+  <p>Второе: <strong>микрошаг — это не механика, а задание тока</strong>. Драйвер гонит по двум обмоткам синус и косинус, и положение ротора определяется отношением двух токов. Значит <em>ровность микрошага буквально равна точности удержания токовой цели</em>: промахнулись по току на четверти синуса — получили неравномерный шаг, а не «просто шум». Даташит показывает это прямо: при слишком малом гистерезисе на форме тока около нуля видна ступенька («a small ledge between both half waves»), и это уже потеря точности микрошага (§7.1).</p>
+
+  <h3>Для контраста — constant off-time у A4988</h3>
+  <p>A4988 (на этой машине — экструдер) регулирует ток по схеме <strong>фиксированного времени выключения</strong>. Даташит Allegro: «The internal PWM current control circuitry uses a one-shot circuit to control the duration of time that the DMOS FETs remain off. The off-time, t<sub>OFF</sub>, is determined by the ROSC terminal.» При <span class="pin">ROSC</span>, посаженном на землю, t<sub>OFF</sub> внутренне равно <strong>30 мкс</strong>, а спад — mixed decay для нарастающего и спадающего тока во всех режимах шага; в mixed decay первые <strong>31.25 % от t<sub>OFF</sub></strong> идёт быстрый спад, остальное — медленный.</p>
+  <div class="callout info">
+    <span class="ctitle">Оговорка про 30 мкс на конкретно вашем модуле</span>
+    <p>Число 30 мкс — это <em>условие даташита</em> «ROSC притянут к земле (или к VDD)», а не измеренный факт вашего носителя. Pololu на странице своего носителя A4988 пишет только «Configured for mixed decay mode» и вывод ROSC не документирует; на клонах его положение тем более не гарантировано. <strong>Не проверено на модулях этой машины.</strong> Механика ниже от точного значения не зависит.</p>
+  </div>
+  <p><strong>Почему это даёт «плавающий» писк.</strong> Пауза фиксирована по времени, а вот <em>насколько за неё упадёт ток</em> — нет: скорость спада задаётся напряжением на обмотке, которое складывается из питания, падения на ключах и <strong>противо-ЭДС, растущей со скоростью</strong>. Значит на разной скорости и в разных точках синуса за одни и те же 30 мкс ток проваливается на разную глубину, а время обратного набора до порога получается разным — и амплитуда пульсации, и эффективная частота чоппера гуляют. Отсюда характерный меняющийся по тону вой у A4988, который на слух ползёт вместе со скоростью каретки. Плюс на спадающей части синуса, где цель уходит вниз быстрее, чем ток успевает спадать, регулятор просто не догоняет цель — это классический источник неровного микрошага у этой схемы.</p>
+
+  <h3>spreadCycle: регулирование током, цикл за циклом</h3>
+  <p>Даташит §7: «While StealthChop is a voltage mode PWM controlled chopper, SpreadCycle is a cycle-by-cycle current control. Therefore, it can react extremely fast to changes in motor velocity or motor load.»</p>
+  <p>Фаз в цикле — <strong>три типа</strong> (Figure 7.1): <em>on</em> (ток течёт в сторону цели), <em>fast decay</em> (ключи развёрнуты, ток гасится встречным напряжением) и <em>slow decay</em> (ток циркулирует по замкнутому контуру, почти не теряя энергии). Сам же цикл проходит <strong>четыре фазы</strong>: «The SpreadCycle chopper mode cycles through four phases: on, slow decay, fast decay, and a second slow decay».</p>
+  <ol class="legend">
+    <li><span class="badge">1</span><span><strong>Фазу <em>on</em> завершает компаратор</strong>, а не таймер: «The on phase is terminated by the comparator when the current through the coil reaches the target current». Это и есть ключевое отличие от constant off-time — момент выключения определяется <em>измеренным током</em>.</span></li>
+    <li><span class="badge">2</span><span><strong>Фазу <em>slow decay</em> завершает таймер</strong> (<code>TOFF</code>), потому что в ней ток не течёт через шунт и измерить его нечем: «The current comparator can measure coil current during phases when the current flows through the sense resistor, but not during the slow decay phase, so the slow decay phase is terminated by a timer». Длительность: <code>N<sub>CLK</sub> = 24 + 32·TOFF</code>, то есть при <code>toff=3</code> и внутренних 12 МГц это 120 тактов ≈ <strong>10 мкс</strong> — ровно пример из даташита для целевых 25 кГц.</span></li>
+    <li><span class="badge">3</span><span><strong>Фазу <em>fast decay</em> завершает компаратор либо таймер</strong>, и её долю драйвер подбирает сам: «The SpreadCycle (patented) chopper algorithm is a precise and simple to use chopper mode which <strong>automatically determines the optimum length for the fast-decay phase</strong>» (§7.1). Именно это снимает с пользователя настройку decay-режима, над которой мучаются с A4988.</span></li>
+    <li><span class="badge">4</span><span><strong>Blanking (<code>TBL</code>)</strong> — окно, в котором компаратор отключён, чтобы не сработать на выброс при переключении ключей: «Blanking is the time when the input to the comparator is masked to block these spikes», выбросы длятся «typically one or two microseconds». Настройка <code>TBL</code> = 16/24/32/40 тактов; при <code>tbl=2</code> (32 такта на 12 МГц) это ≈ 2.7 мкс.</span></li>
+    <li><span class="badge">5</span><span><strong>Гистерезис <code>HSTRT</code>/<code>HEND</code></strong> задаёт намеренную ширину пульсации: «The hysteresis start setting forces the driver to introduce a minimum amount of current ripple into the motor coils. The current ripple must be higher than the current ripple which is caused by resistive losses in the motor in order to give best microstepping results.» Мало гистерезиса — ступенька у нуля и потеря точности; много — ниже частота чоппера и больше шума при нулевом выигрыше по форме.</span></li>
+  </ol>
+  <p><strong>Откуда берётся постоянство тока на любой скорости.</strong> В контуре нет ни одной величины, которая была бы <em>вычислена</em>. Компаратор каждый цикл сравнивает реальный ток в шунте с целью. Выросла противо-ЭДС (быстрее едем) — ток набирается медленнее, значит фаза <em>on</em> просто длится дольше, и цель всё равно достигается. Изменилась нагрузка, просело питание, нагрелась обмотка и подросло R — то же самое: контур это видит по факту, а не по модели. Поэтому spreadCycle <strong>работает с незнакомым мотором без настройки</strong> («will provide superior microstepping quality even with default settings») и реагирует на изменение нагрузки в пределах одного цикла чоппера, то есть за десятки микросекунд.</p>
+  <p><strong>Чем платим — шумом.</strong> Пульсация тока здесь не побочный эффект, а рабочий инструмент (см. гистерезис выше), и частота чоппера не фиксирована — она плавает вместе с индуктивностью, питанием и настройками. Рекомендуемый диапазон — «16 kHz to 30 kHz gives a good result for most motors», то есть частично в слышимой полосе и рядом с ней. Отсюда узнаваемое пение spreadCycle.</p>
+
+  <h3>stealthChop2: ШИМ по напряжению с постоянной частотой</h3>
+  <p>Здесь всё наоборот: драйвер <strong>не измеряет ток каждый цикл, а подаёт на обмотку рассчитанное эффективное напряжение</strong> на фиксированной частоте. Даташит §6: «With StealthChop, the motor current is applied by driving a certain effective voltage into the coil, using a voltage mode PWM.»</p>
+  <ul class="checklist">
+    <li><span><strong>Частота — реальные цифры.</strong> <code>f<sub>PWM</sub></code> выбирается из четырёх делителей: 2/1024, 2/683, 2/512, 2/410 от <code>f<sub>CLK</sub></code>. При внутреннем генераторе <strong>12 МГц</strong> это <strong>23.4 / 35.1 / 46.9 / 58.5 кГц</strong> соответственно (Table 6.1). Значение по умолчанию — <code>PWM_FREQ=%01</code>, то есть <strong>35.1 кГц</strong>; Klipper пишет ровно его (<code>set_config_field(config, "pwm_freq", 1)</code>, <code>tmc2208.py</code>). Даташит добавляет: «A setting in the range of 20-50kHz is good for most applications» — то есть частота сознательно вынесена выше слышимого диапазона, и это половина ответа на вопрос «почему тихо».</span></li>
+    <li><span><strong>Скважность считается по модели мотора.</strong> Амплитуда ШИМ складывается из статической части и скоростной: <code>PWM_SCALE_SUM = PWM_OFS·((CS_ACTUAL+1)/32) + PWM_GRAD·256/TSTEP</code>. Первое слагаемое компенсирует активное сопротивление обмотки, второе — противо-ЭДС: «With rising motor velocity, the motor generates an increasing back EMF voltage… It reduces the PWM voltage effective at the coil resistance and thus current decreases. The TMC2209 provides a second velocity dependent factor (PWM_GRAD) to compensate for this.» <code>TSTEP</code> — измеренное время между микрошагами, то есть модель компенсирует ЭДС <em>как функцию скорости</em>.</span></li>
+    <li><span><strong><code>pwm_autoscale</code></strong> — обратная связь по току поверх этой модели: «The driver measures the motor current during the chopper on time and uses a proportional regulator to regulate PWM_SCALE_AUTO in order match the motor current to the target current. PWM_REG is the proportionality coefficient for this regulator.» Это П-регулятор, а не поцикловый компаратор: он подтягивает амплитуду медленно и мягко.</span></li>
+    <li><span><strong><code>pwm_autograd</code></strong> — автоподбор того самого скоростного коэффициента: <code>PWM_GRAD_AUTO</code> инициализируется из <code>PWM_GRAD</code> и оптимизируется в движении.</span></li>
+  </ul>
+  <p><strong>Зачем нужна фаза обучения и из чего она состоит</strong> (§6.1, «Automatic Tuning»): драйвер сам определяет два коэффициента модели, и для этого ему нужны два разных режима работы.</p>
+  <div class="scroll-x">
+  <table>
+    <caption>Фазы автонастройки stealthChop2 — по даташиту TMC2209 Rev. 1.03, §6.1 «Automatic Tuning»</caption>
+    <thead><tr><th>Фаза</th><th>Что подбирается</th><th>Что для этого требуется</th><th>Сколько длится</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">AT#1</td><td><code>PWM_OFS_AUTO</code> — статическая часть (сопротивление обмотки)</td><td>Мотор <strong>стоит</strong>, но запитан полным рабочим током (CS = IRUN); VS и VREF на рабочем уровне</td><td>2<sup>20</sup>+2·2<sup>18</sup> тактов ≈ <strong>130 мс</strong> на внутреннем генераторе</td></tr>
+      <tr><td class="mono">AT#2</td><td><code>PWM_GRAD_AUTO</code> — скоростная часть (противо-ЭДС)</td><td>Мотор <strong>едет</strong> на средней скорости, где «a significant amount of back EMF is generated and where the full run current can be reached»; типичный диапазон — 60–300 об/мин</td><td>8 полных шагов на изменение ±1; «up to 400 fullsteps are required when starting from OTP default 14»</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p><strong>Что происходит, если мотор тронули до завершения обучения.</strong> Коэффициенты остаются на затравочных значениях, то есть напряжение считается по <em>чужому</em> мотору. Практически это значит, что ток в обмотке не равен заданному — как правило, ниже на разгоне, где нужнее всего. Ошибиться легко и позже: «Modifying VREF or the supply voltage VS invalidates the result of the automatic tuning process. Motor current regulation cannot compensate significant changes until next AT#1 phase» — то есть покрутили триммер или сменили блок питания, и модель снова неверна, пока мотор не постоит 130 мс и не проедет свои сотни полных шагов. Штатный приём — отдать под AT#2 хоуминг: «An initial homing sequence is sufficient for learning» (§1.4).</p>
+
+  <h3>Почему у stealthChop падает момент на разгонах и высоких скоростях</h3>
+  <p>Это не «так написано в документации», а прямое следствие того, что контур разомкнут по току и медленный по скорости:</p>
+  <ol class="step-list">
+    <li><strong>Компенсация противо-ЭДС — упреждающая и по установившейся скорости.</strong> Слагаемое <code>PWM_GRAD·256/TSTEP</code> верно, когда скорость постоянна. На разгоне <code>TSTEP</code> меняется каждый микрошаг, а поправку тянет П-регулятор с коэффициентом <code>PWM_REG</code>, который специально выбирают маленьким ради мягкости. Даташит признаёт это прямым текстом: «During initial tuning step AT#2, PWM_REG also compensates for the change of motor velocity. Therefore, a <strong>high acceleration during AT#2 will require a higher setting of PWM_REG</strong>… PWM_REG setting should be optimized for the fastest required acceleration and deceleration ramp». Иначе говоря, на резком разгоне амплитуда отстаёт от потребности — ток проседает именно там, где нужен момент.</li>
+    <li><strong>С ростом скорости ток отстаёт от напряжения по фазе.</strong> §6.5: «the back-EMF of the motor (which rises with the velocity) causes a <strong>phase shift of up to 90°</strong> between motor voltage and motor current». Управляя напряжением, вы управляете током всё более косвенно; а микрошаг — это именно управление <em>током</em>, см. начало раздела.</li>
+    <li><strong>Снизу тоже есть предел.</strong> Ток измеряется только в фазе <em>on</em>, поэтому минимальная скважность ограничена blanking-ом и частотой ШИМ: «the motor specific minimum coil current in StealthChop autoscaling mode rises with the supply voltage and with the chopper frequency». Диапазон, в котором регулятор вообще работает, конечен.</li>
+  </ol>
+  <div class="callout warn">
+    <span class="ctitle">Измеренная цена stealthChop по данным самого Klipper</span>
+    <p><code>docs/TMC_Drivers.md</code>: «Tests comparing modes have shown an increased "positional lag" of around <strong>75% of a full-step</strong> during constant velocity moves when using stealthChop mode (for example, on a printer with 40mm rotation_distance and 200 steps_per_rotation, position deviation of constant speed moves increased by <strong>~0.150mm</strong>).» Это <em>на постоянной скорости</em>, без разгонов — то есть нижняя граница эффекта, а не худший случай.</p>
+  </div>
+
+  <div class="scroll-x">
+  <table>
+    <caption>spreadCycle против stealthChop — по существу механики</caption>
+    <thead><tr><th>Признак</th><th>spreadCycle</th><th>stealthChop2</th></tr></thead>
+    <tbody>
+      <tr><td>Что регулируется</td><td class="good">Ток, поцикловый компаратор в шунте</td><td>Напряжение, ШИМ по модели мотора</td></tr>
+      <tr><td>Частота чоппера</td><td>Плавает (16–30 кГц рекомендовано), частично в слышимой полосе</td><td class="good">Фиксирована, по умолчанию 35.1 кГц при 12 МГц — выше слуха</td></tr>
+      <tr><td>Реакция на скачок нагрузки</td><td class="good">В пределах одного цикла чоппера (десятки мкс)</td><td class="bad">Через П-регулятор амплитуды, с запаздыванием</td></tr>
+      <tr><td>Нужна ли настройка под мотор</td><td class="good">Нет, работает с незнакомым мотором «из коробки»</td><td class="bad">Да: AT#1 (130 мс в покое) + AT#2 (сотни полных шагов в движении)</td></tr>
+      <tr><td>Живучесть при смене Vref / питания</td><td class="good">Не важна, цель ловится по факту</td><td class="bad">Настройка аннулируется, нужен новый цикл обучения</td></tr>
+      <tr><td>Момент на разгоне и высокой скорости</td><td class="good">Предсказуемый</td><td class="bad">Падает (фазовый сдвиг до 90°, запаздывание амплитуды)</td></tr>
+      <tr><td>Шум</td><td class="bad">Слышимое пение, тон зависит от скорости</td><td class="good">Практически бесшумно, в покое — абсолютно</td></tr>
+      <tr><td>Как проявляется перегрузка</td><td class="good">Слышно: вой, дребезг, скрежет — есть за что зацепиться</td><td class="bad">Молча: тихая потеря шагов без единого звука</td></tr>
+      <tr><td>StallGuard4 / coolStep</td><td class="bad">Не работают (см. врезку ниже)</td><td class="good">Рассчитаны именно на этот режим</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout info">
+    <span class="ctitle">StallGuard4 у TMC2209 рассчитан на stealthChop — в отличие от StallGuard2 у TMC2130</span>
+    <p>Даташит §11.1 дословно: «<strong>StallGuard4 is optimized for operation with StealthChop, its predecessor StallGuard2 works with SpreadCycle.</strong>» И в описании регистра <code>SG_RESULT</code> (0x41): «<strong>Intended for StealthChop mode, only.</strong>» Там же про выход DIAG: «It is only enabled in StealthChop mode». Практический вывод: <em>бессенсорный хоуминг на TMC2209 требует stealthChop</em> — поэтому Klipper временно переключает режим сам на время хоуминга («the <code>stealthchop_threshold</code> config option does not impact sensorless homing as Klipper automatically switches the TMC driver to an appropriate mode during sensorless homing operations», <code>TMC_Drivers.md</code>). Если вы выбрали spreadCycle ради момента — это <strong>не</strong> закрывает вам дорогу к sensorless homing.</p>
+  </div>
+
+  <div class="callout info">
+    <span class="ctitle">coolStep у TMC2209 есть — и он тоже привязан к stealthChop</span>
+    <p>coolStep в TMC2209 присутствует (регистры <code>TCOOLTHRS</code> 0x14 и <code>COOLCONF</code> 0x42; в Klipper — параметр <code>coolstep_threshold</code>). Он снижает ток по фактической нагрузке, опираясь на значение <code>SG_RESULT</code> от StallGuard4 — а значит наследует его ограничение. В описании <code>TCOOLTHRS</code> прямо: «TCOOLTHRS ≥ TSTEP &gt; TPWMTHRS — <strong>CoolStep is enabled, if configured (only with StealthChop)</strong>». То есть окно работы coolStep — это скорости <em>выше</em> порога включения coolStep и при этом <em>ниже</em> порога перехода в spreadCycle; в чистом spreadCycle его нет. <strong>Отдельного подтверждения обратного (что coolStep как-то работает в spreadCycle на TMC2209) в даташите не нашлось</strong> — если вам нужен coolStep, планируйте stealthChop-окно.</p>
+  </div>
+
+  <h3>Вывод SPREAD против регистра: фактический режим — это XOR</h3>
+  <p>Это ловушка, из-за которой конфиг и поведение мотора расходятся при полностью исправном железе. Две формулировки даташита, обе Rev. 1.03:</p>
+  <ul class="checklist">
+    <li><span><strong>Регистр GCONF (0x00), бит 2 <code>en_SpreadCycle</code>:</strong> «0: StealthChop PWM mode enabled (depending on velocity thresholds)… 1: SpreadCycle mode enabled. <strong>A high level on the pin SPREAD inverts this flag to switch between both chopper modes.</strong>»</span></li>
+    <li><span><strong>§6, таблица «Parameters related to StealthChop», строка <code>en_spread_cycle</code>:</strong> «General disable for use of StealthChop (register GCONF). <strong>The input SPREAD is XORed to this flag.</strong>»</span></li>
+  </ul>
+  <p>То есть <strong>утверждение подтверждено дословно и в двух независимых местах даташита</strong>: вывод не «отключается при переходе на UART», а складывается с регистровым битом по XOR. Диагностически это худший из возможных симптомов — конфиг верный, регистры читаются и показывают ровно то, что вы написали, а мотор ведёт себя как в другом режиме.</p>
+  <div class="scroll-x">
+  <table>
+    <caption>Фактический режим = XOR(вывод SPREAD, GCONF.en_SpreadCycle). Смысл бита: 1 = spreadCycle</caption>
+    <thead><tr><th>Вывод SPREAD</th><th><code>GCONF.en_SpreadCycle</code></th><th>Фактический режим</th><th>Совпадает с тем, что просил конфиг?</th></tr></thead>
+    <tbody>
+      <tr><td>низкий (джампер не запаян)</td><td class="mono">0</td><td class="good">stealthChop</td><td class="good">да — XOR прозрачен</td></tr>
+      <tr><td>низкий (джампер не запаян)</td><td class="mono">1</td><td class="good">spreadCycle</td><td class="good">да — XOR прозрачен</td></tr>
+      <tr><td>высокий (джампер запаян / пин на VIO)</td><td class="mono">0</td><td class="bad">spreadCycle</td><td class="bad">нет, инверсия</td></tr>
+      <tr><td>высокий (джампер запаян / пин на VIO)</td><td class="mono">1</td><td class="bad">stealthChop</td><td class="bad">нет, инверсия</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Уровень на выводе при «ничего не подключено»: даташит помечает <span class="pin">SPREAD</span> (вывод 7) как «Chopper mode selection: Low=StealthChop, High=SpreadCycle <strong>(may be left unconnected)</strong>», то есть висящий вывод — штатный режим. Явной пометки типа <code>DI (pd)</code> в колонке Type у SPREAD в вытащенном тексте даташита <strong>не оказалось</strong> (у ENN/MS1/MS2 она есть), поэтому наличие внутренней подтяжки вниз здесь приводится <strong>по документации Watterott на SilentStepStick TMC2209</strong>, где SPREAD описан как «Chopper, pd (GND=stealthChop, VIO=spreadCycle)», а не по даташиту. Практический вывод от этого не меняется: незапаянный/неподключённый SPREAD = низкий уровень = XOR прозрачен.</p>
+
+  <div class="callout danger">
+    <span class="ctitle">🔴 Главные грабли Klipper: явный <code>stealthchop_threshold: 0</code> — это НЕ то же самое, что отсутствие параметра</span>
+    <p>Разбор по исходнику (<code>klippy/extras/tmc.py</code>, <code>TMCStealthchopHelper</code>): читается <code>config.getfloat('stealthchop_threshold', None, minval=0.)</code>, и дальше развилка идёт по <code>velocity is not None</code>, <strong>а не по «нулю»</strong>. При заданном параметре ставится <code>en_pwm_mode = True</code>, а в регистр уходит <code>en_spreadcycle = not en_pwm_mode</code>, то есть <strong>0</strong>. Порог считает <code>TMCtstepHelper</code>, и там первая же строка — <code>if velocity &lt;= 0.: return 0xfffff</code>.</p>
+    <p>Ключ к чтению — направление сравнения в чипе. <code>TSTEP</code> — это <em>время</em> между микрошагами, поэтому быстрее едем = меньше <code>TSTEP</code>. Даташит, регистр <code>TPWMTHRS</code> (0x13): «Sets the upper velocity for StealthChop voltage PWM mode. <strong>TSTEP ≥ TPWMTHRS</strong> — StealthChop PWM mode is enabled, if configured. When the velocity exceeds the limit set by TPWMTHRS, the driver switches to SpreadCycle.» И регистр <code>TSTEP</code> (0x12): «Measured value is <strong>(2^20)-1 in case of overflow or stand still</strong>» — то есть на стоянке <code>TSTEP</code> упирается ровно в <code>0xFFFFF</code>.</p>
+    <div class="scroll-x">
+    <table>
+      <caption>Три случая записи параметра — что реально уходит в чип</caption>
+      <thead><tr><th>В конфиге</th><th><code>en_spreadcycle</code></th><th><code>TPWMTHRS</code></th><th>Фактически</th></tr></thead>
+      <tbody>
+        <tr><td>параметра нет вообще</td><td class="mono">1</td><td class="mono">0xFFFFF (не используется)</td><td class="good">spreadCycle всегда, включая стоянку</td></tr>
+        <tr><td><code>stealthchop_threshold: 0</code></td><td class="mono">0</td><td class="mono">0xFFFFF</td><td>Пороговая скорость ≈ 0: <strong>в движении spreadCycle</strong>, а на стоянке (где <code>TSTEP</code> насыщен в <code>0xFFFFF</code>) — stealthChop</td></tr>
+        <tr><td><code>stealthchop_threshold: V</code> (V &gt; 0)</td><td class="mono">0</td><td class="mono">12·10<sup>6</sup>·d<sub>256</sub>/V</td><td class="good">stealthChop ниже V мм/с, spreadCycle выше</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p><strong>Почему это грабли.</strong> В официальном <code>Config_Reference.md</code> строка выглядит как <code>#stealthchop_threshold: 0</code> с пояснением «The default is 0, which disables "stealthChop" mode» — но <em>это закомментированная строка</em>, и описываемый «default» есть <strong>отсутствие параметра</strong>. Скопировать её в конфиг, раскомментировав, — не то же самое, что оставить как есть: вы переводите <code>en_spreadcycle</code> из 1 в 0. В движении разницы почти нет (spreadCycle в обоих случаях), но на стоянке машина оказывается в stealthChop, и любой <code>DUMP_TMC</code> в покое покажет <code>stealth=1</code> — что читается как «конфиг не сработал».</p>
+    <p><strong>Перекрёстная проверка направления.</strong> Тот же вывод независимо следует из <code>docs/TMC_Drivers.md</code>: «It is recommended to always use "spreadCycle" mode (<strong>by not specifying <code>stealthchop_threshold</code></strong>) or to always use "stealthChop" mode (<strong>by setting <code>stealthchop_threshold</code> to 999999</strong>)». Всегда-тихо — это огромная пороговая скорость (значит крошечный <code>TPWMTHRS</code>, и сравнение <code>TSTEP ≥ TPWMTHRS</code> истинно всегда), всегда-громко — это <em>отсутствие</em> параметра. Ноль не даёт ни того, ни другого.</p>
+    <p>Как считается порог (<code>TMCtstepHelper</code>): <code>TPWMTHRS = f<sub>TMC</sub> · d<sub>256</sub> / V</code>, где <code>f<sub>TMC</sub></code> = 12 МГц (<code>TMC_FREQUENCY</code> в <code>tmc2209.py</code>), <code>d<sub>256</sub></code> — длина одного 1/256-микрошага в мм (<code>rotation_distance / steps_per_rotation / 2<sup>MRES</sup></code>), <code>V</code> — ваше значение в мм/с. Результат ограничивается диапазоном 0…0xFFFFF.</p>
+  </div>
+
+  <h3>Как узнать ФАКТИЧЕСКИЙ режим, а не поверить конфигу</h3>
+  <p>Единственный честный ответ даёт сам чип — бит <strong><code>stealth</code> (бит 30) регистра <code>DRV_STATUS</code> (0x6F)</strong>. Даташит: «<strong>StealthChop indicator. 1: Driver operates in StealthChop mode. 0: Driver operates in SpreadCycle mode.</strong>» Это <em>индикатор текущего состояния</em>, а не копия того, что вы записали: он уже учитывает и XOR с выводом SPREAD, и сравнение <code>TSTEP</code> с <code>TPWMTHRS</code>. Klipper печатает его в выводе <code>DUMP_TMC STEPPER=stepper_x</code>.</p>
+  <div class="callout key">
+    <span class="ctitle">Два условия, без которых чтение <code>DUMP_TMC</code> толкуется неверно</span>
+    <p><strong>1. Нулевые поля в выводе не печатаются.</strong> <code>FieldHelper.pretty_format</code> в <code>klippy/extras/tmc.py</code> добавляет поле в строку только при <code>sval and sval != "0"</code>. Значит <em>отсутствие</em> имени поля в дампе означает, что оно равно нулю, — на этом строится вся расшифровка ниже.</p>
+    <p><strong>2. Бит показывает режим В МОМЕНТ ЧТЕНИЯ.</strong> Дамп, снятый на стоянке, ничего не говорит о режиме в движении: на стоянке <code>TSTEP</code> насыщен в <code>0xFFFFF</code>, и сравнение с порогом даёт stealthChop при любом ненулевом <code>TPWMTHRS</code>. Читайте бит в том состоянии, о котором хотите узнать, — иначе вы измеряете стоянку, а выводы делаете про печать.</p>
+  </div>
+  <p>Разбор реального дампа с этой машины (<code>DUMP_TMC STEPPER=stepper_y</code>, снят <strong>2026-08-03</strong>, конфиг того момента: <code>stealthchop_threshold: 0</code>, <code>run_current: 0.6</code>, <code>sense_resistor: 0.110</code>):</p>
+  <p><code>IOIN: 2100004d enn=1 ms1=1 ms2=1 pdn_uart=1 version=0x21</code><br>
+  <code>GCONF: 000001c0 pdn_disable=1 mstep_reg_select=1 multistep_filt=1</code><br>
+  <code>DRV_STATUS: c0130000 cs_actual=19 stealth=1 stst=1</code><br>
+  <code>TPWMTHRS: 000fffff tpwmthrs=1048575</code><br>
+  <code>CHOPCONF: 14030053 toff=3 hstrt=5 tbl=2 vsense=1 mres=4(16usteps) intpol=1</code><br>
+  <code>PWM_AUTO: pwm_ofs_auto=36 pwm_grad_auto=14 · PWM_SCALE: pwm_scale_sum=22</code></p>
+  <ol class="step-list">
+    <li><strong>Вывод SPREAD физически низкий — это измерение, а не догадка.</strong> В <code>IOIN</code> у TMC2209 бит 8 называется <code>spread_en</code> (<code>tmc2209.py</code>, <code>Fields["IOIN"]</code>) и отражает уровень на выводе. В дампе его нет, а нулевые поля не печатаются (см. условие 1) → <code>spread_en=0</code>. Сходится и с байтом: <code>0x2100004d</code>, бит 8 = 0. <strong>Значит XOR прозрачен и режим определяется только регистром.</strong> Так закрывается вопрос, который нельзя было закрыть осмотром платы.</li>
+    <li><strong>Режим просили spreadCycle, чип отвечает <code>stealth=1</code> — и это не противоречие.</strong> В <code>GCONF</code> нет <code>en_spreadcycle</code> (значит 0), <code>tpwmthrs=1048575=0xFFFFF</code>, и рядом стоит <code>stst=1</code> — <strong>мотор стоял</strong>. На стоянке <code>TSTEP</code> насыщен в <code>0xFFFFF</code>, условие <code>TSTEP ≥ TPWMTHRS</code> выполняется, драйвер в stealthChop. <strong>Этот дамп не доказывает, что stealthChop работает и в движении</strong> — на стоянке обе гипотезы дают одинаковый бит. Чтобы различить их, бит надо читать на ходу.</li>
+    <li><strong>Ток сходится с конфигом.</strong> <code>cs_actual=19</code>, <code>vsense=1</code>. По формуле Klipper (<code>tmc2130.py</code>, <code>_calc_current_from_bits</code>): <code>I<sub>RMS</sub> = (CS+1)·V<sub>FS</sub> / (32·(R<sub>sense</sub>+0.020)·√2)</code>, при <code>vsense=1</code> берётся <code>V<sub>FS</sub> = 0.18 В</code>. Подставляем: <code>20·0.18/(32·0.130·1.4142) = 0.61 А</code> — то есть заданные <code>run_current: 0.6</code> легли в ближайшую ступеньку CS. Это и есть смысл UART: ток стал проверяемым числом, а не положением триммера. <em>Дамп снят до перехода на токи X 0.8 / Y 0.7 / Z 0.6 — после него <code>cs_actual</code> будет другим.</em></li>
+    <li><strong>А вот чего дамп НЕ доказывает: что автонастройка stealthChop отработала.</strong> <code>pwm_ofs_auto=36</code> и <code>pwm_grad_auto=14</code> совпадают одновременно с заводскими значениями (у <code>PWM_OFS</code> «Reset default=36», у <code>PWM_GRAD</code> OTP-дефолт 14) и с затравками, которые пишет сам Klipper (<code>set_config_field(config, "pwm_ofs", 36)</code> и <code>"pwm_grad", 14</code> в <code>tmc2208.py</code>). <code>PWM_GRAD_AUTO</code> сдвигается только при движении в stealthChop, по 8 полных шагов на единицу — <strong>значение, оставшееся ровно на 14, скорее говорит, что AT#2 не отрабатывал</strong> (что согласуется с пунктом 2: в движении машина была не в stealthChop). Живая величина здесь только <code>pwm_scale_sum=22</code> — текущая скважность регулятора. Не выдавайте совпадение с дефолтом за доказательство обучения.</li>
+    <li><strong><code>toff=3 hstrt=5 tbl=2</code> — это дефолты Klipper, а не чипа.</strong> Они приходят из <code>tmc2208.py</code> (<code>set_config_field(config, "toff", 3)</code>, <code>"hstrt", 5</code>, <code>"hend", 0</code>, <code>"tbl", 2</code>) и переопределяются параметрами <code>driver_TOFF</code>/<code>driver_HSTRT</code>/… в секции. Не читайте их как «OTP-настройки этого экземпляра».</li>
+  </ol>
+
+  <h3>Что выбирать на запуске машины</h3>
+  <div class="callout key">
+    <span class="ctitle">На непроверенной машине — spreadCycle, и это решение про диагностику, а не про звук</span>
+    <p>Запуск — это состояние, где токи прикидочные, трение по осям не измерено, масса каретки меняется от переделки к переделке, а разгоны выставлены «на глазок». Оба режима в этих условиях будут иногда срывать шаги. Разница в том, <strong>как вы об этом узнаете</strong>.</p>
+    <p><strong>stealthChop теряет шаги молча.</strong> Он и создан быть беззвучным; срыв в нём не сопровождается ничем, что слышно, — вы увидите только смещённый слой через сорок минут печати. Плюс на нём завязана фаза обучения, которая на непрогретой машине с ползающим Vref регулярно оказывается недействительной (см. §6.1 выше).</p>
+    <p><strong>spreadCycle честно слышно.</strong> И шум тут — не побочный ущерб, а бесплатный диагностический канал: по звуку различаются резонанс на конкретной скорости, упор в концевик, заклинившая ось, слишком высокий разгон и мотор на грани по току. Ровно то, что вы ищете на запуске. Заодно spreadCycle не требует ни настройки под мотор, ни знания его паспорта — что удобно, когда моторы с разборки и параметры неизвестны.</p>
+  </div>
+  <p><strong>К тишине возвращаться после того, как машина поедет.</strong> Классический приём — гибридный режим: <code>stealthchop_threshold</code> порядка <strong>60–100 мм/с</strong>, чтобы периметры и мелкие детали печатались тихо, а перемещения и разгоны шли на полном моменте. Пороговая скорость подбирается опытно.</p>
+  <div class="callout warn">
+    <span class="ctitle">Честная оговорка: гибридный режим — компромисс, и Klipper его не рекомендует</span>
+    <p>Диапазон 60–100 мм/с — это <strong>практика сообщества, а не число из даташита</strong>; источника с измерениями под него не нашлось, проверяйте на своей машине. Более того, официальный <code>TMC_Drivers.md</code> советует обратное: «It is recommended to always use "spreadCycle" mode… or to always use "stealthChop" mode… <strong>Unfortunately, the drivers often produce poor and confusing results if the mode changes while the motor is at a non-zero velocity.</strong>»</p>
+    <p>У даташита претензия та же, но объяснённая: при переключении возникает рывок тока, потому что противо-ЭДС на скорости даёт фазовый сдвиг до 90° между напряжением и током, «A high jerk may even produce a temporary overcurrent condition». Рецепт производителя — <strong>«Use a low transfer velocity to avoid a jerk at the switching point»</strong>, то есть переключаться на <em>малой</em> скорости (§6.5). Это прямо противоречит соблазну поставить порог повыше «чтобы тихо было подольше»: чем выше порог, тем злее рывок в точке перехода.</p>
+  </div>
+
+  <div class="callout info">
+    <span class="ctitle">Применительно к этой машине</span>
+    <p>На модулях TMC2209 этой сборки <span class="pin">SPREAD</span> <strong>не выведен на гребёнку</strong> — третья позиция гнезда занята другим сигналом, а сам вход задаётся отдельным <strong>паяльным джампером <code>SPRE</code> на плате драйвера</strong>, который глазами под установленным модулем не читается. Поэтому вопрос закрыт не осмотром, а измерением: <code>IOIN.spread_en = 0</code> в дампе выше → джампер не запаян, вывод низкий, XOR прозрачен, режим определяется одним лишь регистром.</p>
+    <p>В конфиге на момент этого дампа стоял <code>stealthchop_threshold: 0</code> — и, как разобрано выше, это не «всегда spreadCycle», а «spreadCycle в движении, stealthChop на стоянке». Для чистого всегда-spreadCycle параметр из секций <code>[tmc2209 …]</code> нужно <strong>убрать целиком</strong>; в репозитории это уже сделано, но <strong>на принтер не выкачено</strong> — значит машина по-прежнему едет со старым поведением, и приведённый дамп остаётся актуальным.</p>
+    <p><strong>Проверка после деплоя (её ещё предстоит выполнить, это не отчёт о результате):</strong> тот же <code>DUMP_TMC</code> в покое должен показать в <code>GCONF</code> появившийся <code>en_spreadcycle=1</code> и <strong>исчезнувший</strong> <code>stealth</code> — то есть <code>stealth=0</code> уже на стоянке. Если бит остался единицей, ищите причину не в конфиге, а на входе SPREAD.</p>
   </div>
 </section>
 </div>
