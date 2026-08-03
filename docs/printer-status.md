@@ -249,7 +249,7 @@ return (cs + 1) * vref / (32. * sense_resistor * math.sqrt(2.))
 | строки **нет вообще** ← так сейчас в репозитории | 1 | 0xfffff | **spreadCycle всегда**, включая покой |
 | `stealthchop_threshold: 0` | 0 | 0xfffff (максимум) | **spreadCycle в движении**, stealthChop только в покое |
 | `stealthchop_threshold: V` (V > 0) | 0 | порог по V мм/с | stealthChop ниже V мм/с, spreadCycle выше |
-| `stealthchop_threshold: 999999` | 0 | маленький | stealthChop практически всегда |
+| `stealthchop_threshold: 999999` | 0 | маленький (условие `TSTEP ≥ TPWMTHRS` истинно почти всегда) | stealthChop практически всегда |
 
 ⚠️ **`TPWMTHRS` не различает первые две строки таблицы — он `0xfffff` и там, и там.** Единственный признак в дампе — **`en_spreadCycle` в `GCONF`**. Сессия, которая попробует прочитать режим по `TPWMTHRS`, получит одинаковое число для двух разных настроек и снова ошибётся.
 
@@ -275,7 +275,7 @@ if velocity <= 0.:
 
 ⚠️ **Не искать `en_pwm_mode` в выводе `DUMP_TMC` — на TMC2209 такого бита нет.** `en_pwm_mode` — это внутреннее имя флага в Klipper (и реальный бит GCONF у TMC2130/5160); на 2209 та же `tmc.py` записывает его как **`en_spreadCycle = 0`**, что и видно в дампе. Читать надо **`en_spreadCycle` в `GCONF`** и **`stealth` в `DRV_STATUS`**. Сессия, которая грепнет дамп по `en_pwm_mode`, ничего не найдёт и решит, что заметка путается, — это ровно та сессия, которая вернёт нолик обратно.
 
-**Перекрёстная проверка, независимая от чтения исходника** — `TMC_Drivers.md`: «By default, Klipper places the TMC drivers in **'spreadCycle'** mode», и там же прямой рецепт «always use 'spreadCycle' mode (**by not specifying `stealthchop_threshold`**) or to always use 'stealthChop' mode (**by setting `stealthchop_threshold` to 999999**)». Идиома «всегда тихо = 999999» существует ровно потому, что **ноль этого не даёт** — иначе она была бы не нужна. **Способ получить чистый spreadCycle — убрать строку; ноль даёт почти то же самое, но с stealthChop в покое.**
+**Перекрёстная проверка, независимая от чтения исходника** — `TMC_Drivers.md`: «By default, Klipper places the TMC drivers in **'spreadCycle'** mode», и там же прямой рецепт «always use 'spreadCycle' mode (**by not specifying `stealthchop_threshold`**) or to always use 'stealthChop' mode (**by setting `stealthchop_threshold` to 999999**)». Идиома «всегда тихо = 999999» существует ровно потому, что **ноль этого не даёт** — иначе она была бы не нужна. **Что ставить на этой машине: строки быть не должно** — только так spreadCycle получается и в движении, и в покое. Ноль — не альтернатива и не «то же самое»: в движении он даёт тот же spreadCycle, но добавляет переключение режима на каждой остановке.
 
 #### ❌ Что здесь было записано неверно и чем это опровергнуто
 
