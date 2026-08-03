@@ -52,7 +52,13 @@ LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../printer-configs" && pwd)"
 # него Klipper не поднимется. Файла на принтере пока нет — цикл диффа ниже это
 # переживает (пустой remote_content => файл считается изменённым и заливается,
 # бэкап делается через `cp ... || true`).
-FILES=(printer.cfg smoke-alarm.cfg moonraker.conf crowsnest.conf autotune_tmc.cfg KlipperScreen.conf mainsail.cfg)
+# power-loss-recovery.cfg добавлен 2026-08-03 по той же причине, что и
+# smoke-alarm.cfg: printer.cfg его [include]-ит, значит без него Klipper не
+# поднимется вовсе. Файл ~/printer_data/config/variables.cfg, куда пишет его
+# [save_variables], в этом списке НЕТ и быть не должно — это живое состояние
+# машины (сохранённая точка прерванной печати), деплой его затирать не имеет
+# права.
+FILES=(printer.cfg smoke-alarm.cfg power-loss-recovery.cfg moonraker.conf crowsnest.conf autotune_tmc.cfg KlipperScreen.conf mainsail.cfg)
 
 ASSUME_YES=0
 DRY_RUN=0
