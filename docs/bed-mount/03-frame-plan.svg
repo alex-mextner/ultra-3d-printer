@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1180" width="1400" height="1180" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1230" width="1400" height="1230" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
   <defs>
     <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
     </marker>
   </defs>
 
-  <rect width="1400" height="1180" fill="#fbfaf7"/>
+  <rect width="1400" height="1230" fill="#fbfaf7"/>
   <rect x="0" y="0" width="1400" height="100" fill="#1f2933"/>
   <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">3 / 6 — РАМКА В ПЛАНЕ: 4 КУСКА УГОЛКА ВМЕСТО СВАРКИ</text>
   <text x="40" y="78" fill="#9fb3c8" font-size="19">вид сверху · плита 310 × 315 показана пунктиром · всё на болтах, сварка не нужна</text>
@@ -65,9 +65,11 @@
     <line x1="516" y1="180" x2="904" y2="180"/>
     <line x1="1100" y1="282" x2="1100" y2="768"/>
   </g>
-  <text x="710" y="861" text-anchor="middle" fill="#2c6fb5" font-size="22" font-weight="bold">260 мм</text>
-  <text x="710" y="172" text-anchor="middle" fill="#2c6fb5" font-size="22" font-weight="bold">200 мм</text>
-  <text x="1114" y="520" fill="#2c6fb5" font-size="22" font-weight="bold">251 мм</text>
+  <text x="710" y="861" text-anchor="middle" fill="#2c6fb5" font-size="21" font-weight="bold">260 или 265 мм</text>
+  <text x="710" y="172" text-anchor="middle" fill="#2c6fb5" font-size="21" font-weight="bold">200 или 205 мм</text>
+  <text x="1114" y="512" fill="#2c6fb5" font-size="20" font-weight="bold">251 или 246</text>
+  <text x="1114" y="536" fill="#c0392b" font-size="15">см. плакат 1: зависит от того,</text>
+  <text x="1114" y="556" fill="#c0392b" font-size="15">какая кромка 310, а какая 315</text>
 
   <!-- callouts -->
   <g stroke="#c0392b" stroke-width="2" marker-end="url(#ar3)">
@@ -88,7 +90,7 @@
   <text x="322" y="454" text-anchor="end" fill="#1e8449" font-size="16">свободы, куда поставить стяжки</text>
 
   <text x="1252" y="622" fill="#1f2933" font-size="20" font-weight="bold">СТЯЖКИ, 2 шт</text>
-  <text x="1252" y="648" fill="#33404d" font-size="17">тот же уголок, длина 290 мм</text>
+  <text x="1252" y="648" fill="#c0392b" font-size="17" font-weight="bold">длина 290 мм — ПРЕДВАРИТЕЛЬНО</text>
   <text x="1252" y="672" fill="#c0392b" font-size="17" font-weight="bold">В КАЖДОМ УГЛУ ПО 2 БОЛТА М5</text>
   <text x="1252" y="694" fill="#33404d" font-size="16">один болт в углу = шарнир, рама сложится</text>
   <text x="1252" y="722" fill="#1e8449" font-size="17" font-weight="bold">резьба М5 метчиком прямо в полку</text>
@@ -100,8 +102,9 @@
   <text x="1252" y="854" fill="#5b4300" font-size="16">под 300-мм плитой они дают раскачку;</text>
   <text x="1252" y="876" fill="#5b4300" font-size="16">вместо них жёсткая втулка или силикон,</text>
   <text x="1252" y="898" fill="#5b4300" font-size="16">высота ловится гайкой + контргайкой</text>
-  <text x="1252" y="926" fill="#5b4300" font-size="16">Расположение точек на схеме условное —</text>
-  <text x="1252" y="948" fill="#5b4300" font-size="16">поставить стяжки туда, где они реально.</text>
+  <text x="1252" y="926" fill="#c0392b" font-size="16" font-weight="bold">Положение точек на схеме ВЫДУМАНО.</text>
+  <text x="1252" y="948" fill="#c0392b" font-size="16" font-weight="bold">Замерить расстояния между ними ДО реза —</text>
+  <text x="1252" y="970" fill="#5b4300" font-size="16">иначе стяжки лягут мимо и 290 мм врёт.</text>
 
   <!-- bottom notes -->
   <rect x="60" y="990" width="626" height="160" fill="#eaf7ee" stroke="#1e8449" stroke-width="2" rx="8"/>
@@ -111,10 +114,11 @@
   <text x="86" y="1114" fill="#145a32" font-size="17">кручение работает как сварная. Три точки опоры снизу —</text>
   <text x="86" y="1140" fill="#145a32" font-size="17">статически определимая схема: не качается, не «козлит».</text>
 
-  <rect x="714" y="990" width="626" height="160" fill="#fff5e6" stroke="#d68910" stroke-width="2" rx="8"/>
+  <rect x="714" y="990" width="626" height="196" fill="#fff5e6" stroke="#d68910" stroke-width="2" rx="8"/>
   <text x="740" y="1028" fill="#7d5a00" font-size="20" font-weight="bold">ПРОФИЛЯ КУПИТЬ 2 МЕТРА</text>
   <text x="740" y="1062" fill="#5b4300" font-size="17">300 + 300 + 290 + 290 = 1180 мм в дело.</text>
   <text x="740" y="1088" fill="#5b4300" font-size="17">Берём 2 м: остаётся 800 мм на ошибки реза,</text>
   <text x="740" y="1114" fill="#5b4300" font-size="17">пробные отверстия и уголки под кабель.</text>
-  <text x="740" y="1140" fill="#5b4300" font-size="17">Уголок алюминиевый равнополочный 30×30×3.</text>
+  <text x="740" y="1142" fill="#c0392b" font-size="17" font-weight="bold">Купить можно сразу — РЕЗАТЬ только после</text>
+  <text x="740" y="1164" fill="#c0392b" font-size="17" font-weight="bold">замера трёх точек кронштейна.</text>
 </svg>

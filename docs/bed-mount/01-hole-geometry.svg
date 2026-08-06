@@ -1,14 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1180" width="1400" height="1180" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1250" width="1400" height="1250" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
   <defs>
     <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#2c6fb5"/>
     </marker>
   </defs>
 
-  <rect width="1400" height="1180" fill="#fbfaf7"/>
+  <rect width="1400" height="1250" fill="#fbfaf7"/>
   <rect x="0" y="0" width="1400" height="100" fill="#1f2933"/>
   <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">1 / 6 — ГЕОМЕТРИЯ ОТВЕРСТИЙ. Плита Creality K1 Max</text>
   <text x="40" y="78" fill="#9fb3c8" font-size="19">310 × 315 мм · литой алюминий 5083, толщина 6 мм · ⌀4 сквозные, конус (зенковка) СВЕРХУ · вид сверху</text>
+  <rect x="0" y="100" width="1400" height="34" fill="#c0392b"/>
+  <text x="40" y="124" fill="#ffffff" font-size="19" font-weight="bold">СНАЧАЛА ЗАМЕРЬ КРОМКУ, ВОЗЛЕ КОТОРОЙ ОТВЕРСТИЯ В 27 мм: она 310 или 315? От этого зависят ВСЕ ТРИ числа ниже.</text>
 
   <!-- plate -->
   <rect x="470" y="240" width="600" height="610" fill="#c8ced3" stroke="#5b6670" stroke-width="3"/>
@@ -58,8 +60,8 @@
     <line x1="518" y1="900" x2="1022" y2="900"/>
     <line x1="576" y1="950" x2="964" y2="950"/>
   </g>
-  <text x="770" y="891" text-anchor="middle" fill="#2c6fb5" font-size="24" font-weight="bold">260 мм   (передняя пара = 310 − 50)</text>
-  <text x="770" y="941" text-anchor="middle" fill="#2c6fb5" font-size="24" font-weight="bold">200 мм   (задняя пара = 310 − 110)</text>
+  <text x="770" y="891" text-anchor="middle" fill="#2c6fb5" font-size="23" font-weight="bold">передняя пара = W − 50   →   260 или 265 мм</text>
+  <text x="770" y="941" text-anchor="middle" fill="#2c6fb5" font-size="23" font-weight="bold">задняя пара = W − 110   →   200 или 205 мм</text>
 
   <!-- dims left -->
   <g stroke="#2c6fb5" stroke-width="2" marker-start="url(#ar)" marker-end="url(#ar)">
@@ -68,8 +70,8 @@
     <line x1="320" y1="240" x2="320" y2="312"/>
   </g>
   <text x="430" y="832" text-anchor="end" fill="#2c6fb5" font-size="20" font-weight="bold">27</text>
-  <text x="368" y="548" text-anchor="end" fill="#2c6fb5" font-size="24" font-weight="bold">251 мм</text>
-  <text x="364" y="576" text-anchor="end" fill="#2c6fb5" font-size="17">= 315 − 64</text>
+  <text x="368" y="544" text-anchor="end" fill="#2c6fb5" font-size="22" font-weight="bold">D − 64 =</text>
+  <text x="368" y="572" text-anchor="end" fill="#2c6fb5" font-size="22" font-weight="bold">251 или 246</text>
   <text x="364" y="600" text-anchor="end" fill="#2c6fb5" font-size="17">между ригелями</text>
   <text x="308" y="282" text-anchor="end" fill="#2c6fb5" font-size="20" font-weight="bold">37</text>
 
@@ -94,23 +96,35 @@
   <text x="1140" y="518" fill="#5b4300" font-size="17">ригели ставим ПОПЕРЁК.</text>
 
   <!-- variant table -->
-  <rect x="1120" y="560" width="250" height="300" fill="#eef3f7" stroke="#2c6fb5" stroke-width="2" rx="8"/>
-  <text x="1140" y="598" fill="#1a4d80" font-size="18" font-weight="bold">ПРОВЕРЬ, КАКАЯ</text>
-  <text x="1140" y="622" fill="#1a4d80" font-size="18" font-weight="bold">КРОМКА ПЕРЕДНЯЯ</text>
-  <line x1="1140" y1="638" x2="1350" y2="638" stroke="#2c6fb5" stroke-width="1.5"/>
-  <text x="1140" y="668" fill="#33404d" font-size="16">перед = 310 (принято):</text>
-  <text x="1156" y="694" fill="#1f2933" font-size="16">260 / 200 / 251</text>
-  <text x="1140" y="732" fill="#33404d" font-size="16">перед = 315 (если так):</text>
-  <text x="1156" y="758" fill="#1f2933" font-size="16">265 / 205 / 246</text>
-  <line x1="1140" y1="782" x2="1350" y2="782" stroke="#2c6fb5" stroke-width="1.5"/>
-  <text x="1140" y="810" fill="#c0392b" font-size="15" font-weight="bold">Разницу в 5 мм ловить</text>
-  <text x="1140" y="832" fill="#c0392b" font-size="15" font-weight="bold">не надо — размечай</text>
-  <text x="1140" y="852" fill="#c0392b" font-size="15" font-weight="bold">переносом (см. ниже).</text>
+  <rect x="1120" y="560" width="250" height="300" fill="#fdecea" stroke="#c0392b" stroke-width="3" rx="8"/>
+  <text x="1245" y="592" text-anchor="middle" fill="#c0392b" font-size="17" font-weight="bold">ДВА РАВНОПРАВНЫХ</text>
+  <text x="1245" y="614" text-anchor="middle" fill="#c0392b" font-size="17" font-weight="bold">ВАРИАНТА</text>
+  <line x1="1245" y1="628" x2="1245" y2="838" stroke="#c0392b" stroke-width="1.5"/>
+  <line x1="1136" y1="628" x2="1354" y2="628" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="1190" y="652" text-anchor="middle" fill="#7b241c" font-size="16" font-weight="bold">перед = 310</text>
+  <text x="1300" y="652" text-anchor="middle" fill="#7b241c" font-size="16" font-weight="bold">перед = 315</text>
+  <line x1="1136" y1="664" x2="1354" y2="664" stroke="#c0392b" stroke-width="1"/>
+  <text x="1190" y="692" text-anchor="middle" fill="#1f2933" font-size="19">260</text>
+  <text x="1300" y="692" text-anchor="middle" fill="#1f2933" font-size="19">265</text>
+  <text x="1190" y="726" text-anchor="middle" fill="#1f2933" font-size="19">200</text>
+  <text x="1300" y="726" text-anchor="middle" fill="#1f2933" font-size="19">205</text>
+  <text x="1190" y="760" text-anchor="middle" fill="#1f2933" font-size="19">251</text>
+  <text x="1300" y="760" text-anchor="middle" fill="#1f2933" font-size="19">246</text>
+  <text x="1136" y="692" fill="#7b241c" font-size="13">пер.</text>
+  <text x="1136" y="726" fill="#7b241c" font-size="13">зад.</text>
+  <text x="1136" y="760" fill="#7b241c" font-size="13">меж.</text>
+  <line x1="1136" y1="784" x2="1354" y2="784" stroke="#c0392b" stroke-width="1.5"/>
+  <text x="1245" y="810" text-anchor="middle" fill="#7b241c" font-size="15">Который из двух —</text>
+  <text x="1245" y="830" text-anchor="middle" fill="#7b241c" font-size="15">решает одна рулетка.</text>
+  <text x="1245" y="850" text-anchor="middle" fill="#c0392b" font-size="15" font-weight="bold">Угадывать нельзя.</text>
 
   <!-- bottom box -->
-  <rect x="60" y="1000" width="1280" height="150" fill="#eaf7ee" stroke="#1e8449" stroke-width="2" rx="8"/>
+  <rect x="60" y="1000" width="1280" height="222" fill="#eaf7ee" stroke="#1e8449" stroke-width="2" rx="8"/>
   <text x="90" y="1038" fill="#1e8449" font-size="21" font-weight="bold">ГЛАВНЫЙ ПРИЁМ: РАЗМЕЧАТЬ ПЕРЕНОСОМ, А НЕ ПО ЦИФРАМ</text>
   <text x="90" y="1074" fill="#145a32" font-size="18">Положи отрезанный ригель на плиту снизу, выставь по кромке — и накерни прямо через отверстия плиты. Цифры выше нужны только чтобы</text>
   <text x="90" y="1104" fill="#145a32" font-size="18">купить профиль нужной длины и понять схему. Замер рулеткой на 300 мм даёт ошибку 1–2 мм, перенос — ноль.</text>
-  <text x="90" y="1136" fill="#145a32" font-size="18">Отверстия в ригелях всё равно сверлим <tspan font-weight="bold" fill="#c0392b">⌀5 мм</tspan> под винт М4 — запас на тепловое расширение плиты (0.74 мм при нагреве до 120 °C) и на ошибку разметки.</text>
+  <line x1="90" y1="1124" x2="1310" y2="1124" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="90" y="1156" fill="#145a32" font-size="18">Отверстия в ригелях сверлим <tspan font-weight="bold" fill="#c0392b">⌀5 мм</tspan> под винт М4 — это запас на ошибку ручной разметки, и только на неё.</text>
+  <text x="90" y="1188" fill="#145a32" font-size="18">Тепловое расширение плиты (0.74 мм при 120 °C) зазором в отверстии <tspan font-weight="bold" fill="#c0392b">НЕ лечится</tspan>: затянутый винт держит стык трением,</text>
+  <text x="90" y="1214" fill="#145a32" font-size="18">а не телом винта. Лечится тем, что <tspan font-weight="bold">не перетягиваем</tspan> — для 6-мм литой плиты на трёх точках этого достаточно.</text>
 </svg>
