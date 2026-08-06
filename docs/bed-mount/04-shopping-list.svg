@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1320" width="1400" height="1320" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
+  <rect width="1400" height="1320" fill="#fbfaf7"/>
+  <rect x="0" y="0" width="1400" height="100" fill="#1f2933"/>
+  <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">4 / 6 — СПИСОК ПОКУПОК: ОДИН ПОХОД В МАГАЗИН</text>
+  <text x="40" y="78" fill="#9fb3c8" font-size="19">длины уже посчитаны под плиту 310 × 315 × 6 мм и стойку 10–12 мм · всё есть в строительном + электротовары</text>
+
+  <!-- ============ ПРОФИЛЬ ============ -->
+  <rect x="50" y="124" width="640" height="176" fill="#ffffff" stroke="#33404d" stroke-width="2" rx="8"/>
+  <rect x="50" y="124" width="640" height="42" fill="#33404d" rx="8"/>
+  <rect x="50" y="150" width="640" height="16" fill="#33404d"/>
+  <text x="70" y="153" fill="#ffffff" font-size="20" font-weight="bold">ПРОФИЛЬ (строительный отдел)</text>
+
+  <polygon points="78,196 78,244 126,244 126,232 90,232 90,196" fill="#8896a3" stroke="#33404d" stroke-width="2"/>
+  <text x="150" y="204" fill="#1f2933" font-size="19" font-weight="bold">Уголок алюминиевый равнополочный 30×30×3</text>
+  <text x="150" y="230" fill="#33404d" font-size="18">2 метра — хватит на всё с запасом на ошибки реза</text>
+  <text x="150" y="256" fill="#5b6670" font-size="16">Режем: 300 + 300 (ригели) + 290 + 290 (стяжки)</text>
+  <text x="150" y="280" fill="#1e8449" font-size="16">Алюминий, а не сталь: груз висит на Z, каждый грамм лишний</text>
+
+  <!-- ============ ГОРЯЧАЯ ============ -->
+  <rect x="50" y="320" width="640" height="420" fill="#ffffff" stroke="#c0392b" stroke-width="2" rx="8"/>
+  <rect x="50" y="320" width="640" height="42" fill="#c0392b" rx="8"/>
+  <rect x="50" y="346" width="640" height="16" fill="#c0392b"/>
+  <text x="70" y="349" fill="#ffffff" font-size="20" font-weight="bold">ГОРЯЧАЯ СТОРОНА — стол ↔ ригели (4 точки)</text>
+
+  <!-- countersunk screw -->
+  <polygon points="76,390 108,390 100,404 84,404" fill="#2f3a45"/>
+  <rect x="84" y="404" width="16" height="42" fill="#2f3a45"/>
+  <g stroke="#8896a3" stroke-width="2"><line x1="84" y1="412" x2="100" y2="412"/><line x1="84" y1="422" x2="100" y2="422"/><line x1="84" y1="432" x2="100" y2="432"/></g>
+  <text x="150" y="398" fill="#1f2933" font-size="19" font-weight="bold">Винт М4×30 ПОТАЙНОЙ, DIN 7991, нерж. А2 — 6 шт</text>
+  <text x="150" y="424" fill="#33404d" font-size="17">+ М4×35 про запас — 4 шт (если стойка выйдет 12 мм)</text>
+  <text x="150" y="448" fill="#c0392b" font-size="16">именно потайной: в плите готовые конусы сверху</text>
+
+  <!-- standoff -->
+  <rect x="80" y="480" width="26" height="46" fill="#8896a3" stroke="#33404d" stroke-width="2"/>
+  <text x="150" y="490" fill="#1f2933" font-size="19" font-weight="bold">Стойка / втулка под М4, высота 10–12 мм — 4 шт</text>
+  <text x="150" y="516" fill="#33404d" font-size="17">латунная стойка из радиомагазина, ИЛИ удлинённая</text>
+  <text x="150" y="540" fill="#33404d" font-size="17">(соединительная) гайка М4, ИЛИ отрезок трубки ⌀6×1</text>
+  <text x="150" y="564" fill="#c0392b" font-size="16">стопку обычных гаек не делать — не соосна, разболтается</text>
+
+  <!-- DIN 980 -->
+  <polygon points="92,596 108,588 124,596 124,614 108,622 92,614" fill="#4a5560" stroke="#2f3a45" stroke-width="2"/>
+  <path d="M96,592 q12,-8 24,0" stroke="#8896a3" stroke-width="3" fill="none"/>
+  <text x="150" y="600" fill="#1f2933" font-size="19" font-weight="bold">Гайка М4 DIN 980 — ЦЕЛЬНОМЕТАЛЛИЧЕСКАЯ — 8 шт</text>
+  <text x="150" y="626" fill="#c0392b" font-size="17" font-weight="bold">НЕ нейлоновая! Нейлон дохнет на 100–120 °C.</text>
+  <text x="150" y="650" fill="#33404d" font-size="17">Нет в наличии — бери обычные М4 и ставь контргайкой (16 шт).</text>
+
+  <!-- washer -->
+  <circle cx="108" cy="692" r="18" fill="#8896a3" stroke="#33404d" stroke-width="2"/>
+  <circle cx="108" cy="692" r="7" fill="#ffffff" stroke="#33404d" stroke-width="2"/>
+  <text x="150" y="686" fill="#1f2933" font-size="19" font-weight="bold">Шайба М4 плоская DIN 125 — 10 шт</text>
+  <text x="150" y="712" fill="#1e8449" font-size="17">Теплоизолирующие шайбы М4 — у тебя уже есть, нужно 4 шт</text>
+
+  <!-- ============ ХОЛОДНАЯ ============ -->
+  <rect x="710" y="124" width="640" height="392" fill="#ffffff" stroke="#1e8449" stroke-width="2" rx="8"/>
+  <rect x="710" y="124" width="640" height="42" fill="#1e8449" rx="8"/>
+  <rect x="710" y="150" width="640" height="16" fill="#1e8449"/>
+  <text x="730" y="153" fill="#ffffff" font-size="20" font-weight="bold">ХОЛОДНАЯ СТОРОНА — рамка и посадка на кронштейн</text>
+
+  <rect x="740" y="196" width="12" height="40" fill="#2f3a45"/>
+  <rect x="732" y="188" width="28" height="10" fill="#2f3a45"/>
+  <text x="800" y="202" fill="#1f2933" font-size="19" font-weight="bold">Винт М5×16 DIN 912 (под шестигранник) — 10 шт</text>
+  <text x="800" y="228" fill="#33404d" font-size="17">углы рамки, по 2 болта на каждый из 4 углов</text>
+  <text x="800" y="252" fill="#1e8449" font-size="17" font-weight="bold">У тебя есть метчики → режь резьбу М5 прямо в полке</text>
+  <text x="800" y="274" fill="#1e8449" font-size="17" font-weight="bold">уголка, и гайки в углах вообще не нужны.</text>
+
+  <polygon points="742,306 758,298 774,306 774,324 758,332 742,324" fill="#4a5560" stroke="#2f3a45" stroke-width="2"/>
+  <rect x="742" y="298" width="32" height="7" fill="#2c6fb5"/>
+  <text x="800" y="310" fill="#1f2933" font-size="19" font-weight="bold">Гайка М5 DIN 985 нейлоновая — 10 шт</text>
+  <text x="800" y="336" fill="#33404d" font-size="17">на 3 точки кронштейна и там, где резьбу не нарезать</text>
+
+  <circle cx="758" cy="382" r="24" fill="#8896a3" stroke="#33404d" stroke-width="2"/>
+  <circle cx="758" cy="382" r="8" fill="#ffffff" stroke="#33404d" stroke-width="2"/>
+  <text x="800" y="376" fill="#1f2933" font-size="19" font-weight="bold">Шайба М5 увеличенная DIN 9021 ⌀15 — 10 шт</text>
+  <text x="800" y="402" fill="#33404d" font-size="17">+ шайба М5 обычная DIN 125 — 20 шт</text>
+
+  <rect x="742" y="440" width="32" height="34" fill="#8896a3" stroke="#33404d" stroke-width="2"/>
+  <text x="800" y="446" fill="#1f2933" font-size="19" font-weight="bold">Втулка/стойка М5 взамен пружин — 3 шт</text>
+  <text x="800" y="472" fill="#33404d" font-size="17">либо силиконовые демпферы для стола, 3 шт</text>
+  <text x="800" y="496" fill="#c0392b" font-size="16">высоту подобрать по месту, точная не важна</text>
+
+  <!-- ============ ЗАЗЕМЛЕНИЕ ============ -->
+  <rect x="710" y="536" width="640" height="204" fill="#ffffff" stroke="#d68910" stroke-width="2" rx="8"/>
+  <rect x="710" y="536" width="640" height="42" fill="#d68910" rx="8"/>
+  <rect x="710" y="562" width="640" height="16" fill="#d68910"/>
+  <text x="730" y="565" fill="#ffffff" font-size="20" font-weight="bold">ЗАЗЕМЛЕНИЕ — не опция, см. плакат 5</text>
+
+  <path d="M736,610 h44" stroke="#1e8449" stroke-width="8"/>
+  <circle cx="792" cy="610" r="13" fill="none" stroke="#c9a227" stroke-width="5"/>
+  <text x="820" y="604" fill="#1f2933" font-size="19" font-weight="bold">Провод ПуГВ 1.5 мм² жёлто-зелёный — 1.5 м</text>
+  <text x="820" y="630" fill="#33404d" font-size="17">Наконечник кольцевой НКИ под М4 — 4 шт</text>
+
+  <circle cx="758" cy="676" r="20" fill="#c9a227" stroke="#8a6d00" stroke-width="2"/>
+  <circle cx="758" cy="676" r="7" fill="#ffffff" stroke="#8a6d00" stroke-width="2"/>
+  <g stroke="#8a6d00" stroke-width="2"><line x1="738" y1="676" x2="778" y2="676"/><line x1="758" y1="656" x2="758" y2="696"/><line x1="744" y1="662" x2="772" y2="690"/><line x1="772" y1="662" x2="744" y2="690"/></g>
+  <text x="820" y="662" fill="#1f2933" font-size="19" font-weight="bold">Шайба ЗУБЧАТАЯ (веерная) М4 — 4 шт</text>
+  <text x="820" y="688" fill="#33404d" font-size="17">прогрызает оксид/краску, даёт настоящий контакт</text>
+  <text x="820" y="716" fill="#c0392b" font-size="17" font-weight="bold">УЗО 30 мА на линию стола, если ещё не стоит</text>
+
+  <!-- ============ СВЁРЛА ============ -->
+  <rect x="50" y="770" width="1300" height="250" fill="#ffffff" stroke="#2c6fb5" stroke-width="2" rx="8"/>
+  <rect x="50" y="770" width="1300" height="42" fill="#2c6fb5" rx="8"/>
+  <rect x="50" y="796" width="1300" height="16" fill="#2c6fb5"/>
+  <text x="70" y="799" fill="#ffffff" font-size="20" font-weight="bold">СВЁРЛА И РАСХОДКА (метчики М4/М5 у тебя есть)</text>
+
+  <g fill="#33404d">
+    <rect x="80" y="848" width="10" height="52"/><polygon points="80,848 90,848 85,836" />
+    <rect x="380" y="848" width="10" height="52"/><polygon points="380,848 390,848 385,836" />
+    <rect x="680" y="848" width="10" height="52"/><polygon points="680,848 690,848 685,836" />
+    <rect x="980" y="848" width="10" height="52"/><polygon points="980,848 990,848 985,836" />
+  </g>
+  <text x="110" y="858" fill="#1f2933" font-size="19" font-weight="bold">⌀5.0 мм</text>
+  <text x="110" y="884" fill="#33404d" font-size="17">зазор под М4 в ригелях</text>
+  <text x="110" y="908" fill="#5b6670" font-size="15">с запасом на расширение</text>
+  <text x="410" y="858" fill="#1f2933" font-size="19" font-weight="bold">⌀5.5 мм</text>
+  <text x="410" y="884" fill="#33404d" font-size="17">зазор под М5</text>
+  <text x="710" y="858" fill="#1f2933" font-size="19" font-weight="bold">⌀4.2 мм</text>
+  <text x="710" y="884" fill="#33404d" font-size="17">под резьбу М5 метчиком</text>
+  <text x="1010" y="858" fill="#1f2933" font-size="19" font-weight="bold">⌀3.3 мм</text>
+  <text x="1010" y="884" fill="#33404d" font-size="17">под резьбу М4 метчиком</text>
+
+  <text x="80" y="950" fill="#33404d" font-size="18">Кернер (обязательно — по полке уголка сверло уводит) · Сверло ⌀8–10 для снятия заусенцев · Ножовка по металлу</text>
+  <text x="80" y="980" fill="#33404d" font-size="18">Масло или ВД-40 для метчика (по алюминию без смазки метчик рвёт резьбу) · Хомуты нейлоновые для разгрузки кабеля</text>
+  <text x="80" y="1008" fill="#1e8449" font-size="18" font-weight="bold">Сверло ⌀4.2 работает дважды: и как зазор под М4, и как отверстие под резьбу М5 — брать одно.</text>
+
+  <!-- ============ ИТОГО ============ -->
+  <rect x="50" y="1050" width="1300" height="230" fill="#fff5e6" stroke="#d68910" stroke-width="2" rx="8"/>
+  <text x="80" y="1092" fill="#7d5a00" font-size="22" font-weight="bold">ЧЕГО В СПИСКЕ НЕТ И ПОЧЕМУ</text>
+  <text x="80" y="1132" fill="#5b4300" font-size="18">· <tspan font-weight="bold">Пружины</tspan> — не покупаем и старые снимаем. Под плитой 310 мм и 6 мм алюминия они дают раскачку, а не регулировку.</text>
+  <text x="80" y="1164" fill="#5b4300" font-size="18">· <tspan font-weight="bold">Гроверы</tspan> — не нужны. Держат хуже контргайки и хуже нейлока, а под температурой отпускаются.</text>
+  <text x="80" y="1196" fill="#5b4300" font-size="18">· <tspan font-weight="bold">Резьбовой фиксатор</tspan> — не нужен, если ставить контргайки; и на горячей стороне обычный синий фиксатор всё равно плывёт.</text>
+  <text x="80" y="1228" fill="#5b4300" font-size="18">· <tspan font-weight="bold">Стальной уголок</tspan> — можно, если алюминия нет, но на Z добавится ~0.5 кг, а он уже несёт почти 3 кг.</text>
+  <text x="80" y="1262" fill="#c0392b" font-size="18" font-weight="bold">· Акрил 4.7 мм из силовой схемы убираем совсем — он не покупка, он то, что надо снять.</text>
+</svg>

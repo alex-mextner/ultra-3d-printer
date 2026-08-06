@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1180" width="1400" height="1180" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
+  <defs>
+    <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+    </marker>
+  </defs>
+
+  <rect width="1400" height="1180" fill="#fbfaf7"/>
+  <rect x="0" y="0" width="1400" height="100" fill="#1f2933"/>
+  <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">3 / 6 — РАМКА В ПЛАНЕ: 4 КУСКА УГОЛКА ВМЕСТО СВАРКИ</text>
+  <text x="40" y="78" fill="#9fb3c8" font-size="19">вид сверху · плита 310 × 315 показана пунктиром · всё на болтах, сварка не нужна</text>
+
+  <!-- bed outline -->
+  <rect x="410" y="210" width="600" height="610" fill="none" stroke="#9aa5b1" stroke-width="3" stroke-dasharray="12 8"/>
+  <text x="422" y="200" fill="#9aa5b1" font-size="18">контур плиты 310 × 315</text>
+  <line x1="410" y1="820" x2="1010" y2="820" stroke="#c0392b" stroke-width="7" stroke-dasharray="12 8"/>
+  <text x="1026" y="826" fill="#c0392b" font-size="20" font-weight="bold">ПЕРЁД</text>
+
+  <!-- rails: both 300 mm long -->
+  <rect x="418" y="745" width="584" height="46" fill="#6b7d8c" stroke="#33404d" stroke-width="3" rx="4"/>
+  <rect x="476" y="259" width="584" height="46" fill="#6b7d8c" stroke="#33404d" stroke-width="3" rx="4"/>
+
+  <!-- ties -->
+  <rect x="500" y="282" width="40" height="486" fill="#8896a3" stroke="#33404d" stroke-width="3" rx="4"/>
+  <rect x="940" y="282" width="40" height="486" fill="#8896a3" stroke="#33404d" stroke-width="3" rx="4"/>
+
+  <!-- bed holes -->
+  <g fill="#ffffff" stroke="#c0392b" stroke-width="3">
+    <circle cx="458" cy="768" r="14"/><circle cx="962" cy="768" r="14"/>
+    <circle cx="516" cy="282" r="14"/><circle cx="904" cy="282" r="14"/>
+  </g>
+  <g stroke="#c0392b" stroke-width="2">
+    <line x1="458" y1="749" x2="458" y2="787"/><line x1="439" y1="768" x2="477" y2="768"/>
+    <line x1="962" y1="749" x2="962" y2="787"/><line x1="943" y1="768" x2="981" y2="768"/>
+    <line x1="516" y1="263" x2="516" y2="301"/><line x1="497" y1="282" x2="535" y2="282"/>
+    <line x1="904" y1="263" x2="904" y2="301"/><line x1="885" y1="282" x2="923" y2="282"/>
+  </g>
+
+  <!-- corner bolts, 2 per corner -->
+  <g fill="#33404d">
+    <circle cx="512" cy="290" r="7"/><circle cx="530" cy="290" r="7"/>
+    <circle cx="950" cy="290" r="7"/><circle cx="968" cy="290" r="7"/>
+    <circle cx="512" cy="760" r="7"/><circle cx="530" cy="760" r="7"/>
+    <circle cx="950" cy="760" r="7"/><circle cx="968" cy="760" r="7"/>
+  </g>
+
+  <!-- bracket points -->
+  <g fill="#f0b429" stroke="#8a6d00" stroke-width="3">
+    <circle cx="710" cy="360" r="21"/>
+    <circle cx="560" cy="670" r="21"/>
+    <circle cx="860" cy="670" r="21"/>
+  </g>
+  <text x="710" y="367" text-anchor="middle" fill="#5b4300" font-size="19" font-weight="bold">М5</text>
+  <text x="560" y="677" text-anchor="middle" fill="#5b4300" font-size="19" font-weight="bold">М5</text>
+  <text x="860" y="677" text-anchor="middle" fill="#5b4300" font-size="19" font-weight="bold">М5</text>
+  <polygon points="710,360 560,670 860,670" fill="none" stroke="#f0b429" stroke-width="2" stroke-dasharray="7 5"/>
+
+  <!-- cable channel -->
+  <rect x="700" y="480" width="70" height="240" fill="#a8462f" opacity="0.18"/>
+  <text x="735" y="600" text-anchor="middle" fill="#a8462f" font-size="16" font-weight="bold" transform="rotate(-90 735 600)">канал под кабель 220 В</text>
+
+  <!-- dims -->
+  <g stroke="#2c6fb5" stroke-width="2" marker-start="url(#ar3)" marker-end="url(#ar3)">
+    <line x1="458" y1="870" x2="962" y2="870"/>
+    <line x1="516" y1="180" x2="904" y2="180"/>
+    <line x1="1100" y1="282" x2="1100" y2="768"/>
+  </g>
+  <text x="710" y="861" text-anchor="middle" fill="#2c6fb5" font-size="22" font-weight="bold">260 мм</text>
+  <text x="710" y="172" text-anchor="middle" fill="#2c6fb5" font-size="22" font-weight="bold">200 мм</text>
+  <text x="1114" y="520" fill="#2c6fb5" font-size="22" font-weight="bold">251 мм</text>
+
+  <!-- callouts -->
+  <g stroke="#c0392b" stroke-width="2" marker-end="url(#ar3)">
+    <line x1="330" y1="620" x2="418" y2="760"/>
+    <line x1="330" y1="380" x2="476" y2="278"/>
+    <line x1="1240" y1="640" x2="984" y2="600"/>
+    <line x1="1240" y1="790" x2="880" y2="682"/>
+  </g>
+
+  <text x="322" y="596" text-anchor="end" fill="#1f2933" font-size="20" font-weight="bold">РИГЕЛЬ №1 (передний)</text>
+  <text x="322" y="622" text-anchor="end" fill="#33404d" font-size="17">уголок алюм. 30×30×3, длина 300 мм</text>
+  <text x="322" y="646" text-anchor="end" fill="#33404d" font-size="17">межцентровое 260 мм · отверстия ⌀5</text>
+
+  <text x="322" y="356" text-anchor="end" fill="#1f2933" font-size="20" font-weight="bold">РИГЕЛЬ №2 (задний)</text>
+  <text x="322" y="382" text-anchor="end" fill="#33404d" font-size="17">тот же уголок, тоже 300 мм</text>
+  <text x="322" y="406" text-anchor="end" fill="#33404d" font-size="17">межцентровое 200 мм · отверстия ⌀5</text>
+  <text x="322" y="432" text-anchor="end" fill="#1e8449" font-size="16">одинаковая длина = проще резать и больше</text>
+  <text x="322" y="454" text-anchor="end" fill="#1e8449" font-size="16">свободы, куда поставить стяжки</text>
+
+  <text x="1252" y="622" fill="#1f2933" font-size="20" font-weight="bold">СТЯЖКИ, 2 шт</text>
+  <text x="1252" y="648" fill="#33404d" font-size="17">тот же уголок, длина 290 мм</text>
+  <text x="1252" y="672" fill="#c0392b" font-size="17" font-weight="bold">В КАЖДОМ УГЛУ ПО 2 БОЛТА М5</text>
+  <text x="1252" y="694" fill="#33404d" font-size="16">один болт в углу = шарнир, рама сложится</text>
+  <text x="1252" y="722" fill="#1e8449" font-size="17" font-weight="bold">резьба М5 метчиком прямо в полку</text>
+  <text x="1252" y="744" fill="#1e8449" font-size="17" font-weight="bold">→ гайки в углах не нужны</text>
+
+  <text x="1252" y="782" fill="#8a6d00" font-size="20" font-weight="bold">3 ТОЧКИ КРОНШТЕЙНА</text>
+  <text x="1252" y="808" fill="#5b4300" font-size="17">существующие М5 + пружины + контргайки</text>
+  <text x="1252" y="832" fill="#c0392b" font-size="17" font-weight="bold">пружины УБРАТЬ</text>
+  <text x="1252" y="854" fill="#5b4300" font-size="16">под 300-мм плитой они дают раскачку;</text>
+  <text x="1252" y="876" fill="#5b4300" font-size="16">вместо них жёсткая втулка или силикон,</text>
+  <text x="1252" y="898" fill="#5b4300" font-size="16">высота ловится гайкой + контргайкой</text>
+  <text x="1252" y="926" fill="#5b4300" font-size="16">Расположение точек на схеме условное —</text>
+  <text x="1252" y="948" fill="#5b4300" font-size="16">поставить стяжки туда, где они реально.</text>
+
+  <!-- bottom notes -->
+  <rect x="60" y="990" width="626" height="160" fill="#eaf7ee" stroke="#1e8449" stroke-width="2" rx="8"/>
+  <text x="86" y="1028" fill="#1e8449" font-size="20" font-weight="bold">ПОЧЕМУ ЭТО ЗАМЕНЯЕТ СВАРКУ</text>
+  <text x="86" y="1062" fill="#145a32" font-size="17">Замкнутый прямоугольник из четырёх уголков, скрученных</text>
+  <text x="86" y="1088" fill="#145a32" font-size="17">в углах двумя болтами каждый — это ферма. На изгиб и</text>
+  <text x="86" y="1114" fill="#145a32" font-size="17">кручение работает как сварная. Три точки опоры снизу —</text>
+  <text x="86" y="1140" fill="#145a32" font-size="17">статически определимая схема: не качается, не «козлит».</text>
+
+  <rect x="714" y="990" width="626" height="160" fill="#fff5e6" stroke="#d68910" stroke-width="2" rx="8"/>
+  <text x="740" y="1028" fill="#7d5a00" font-size="20" font-weight="bold">ПРОФИЛЯ КУПИТЬ 2 МЕТРА</text>
+  <text x="740" y="1062" fill="#5b4300" font-size="17">300 + 300 + 290 + 290 = 1180 мм в дело.</text>
+  <text x="740" y="1088" fill="#5b4300" font-size="17">Берём 2 м: остаётся 800 мм на ошибки реза,</text>
+  <text x="740" y="1114" fill="#5b4300" font-size="17">пробные отверстия и уголки под кабель.</text>
+  <text x="740" y="1140" fill="#5b4300" font-size="17">Уголок алюминиевый равнополочный 30×30×3.</text>
+</svg>

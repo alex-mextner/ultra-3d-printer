@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1200" width="1400" height="1200" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
+  <rect width="1400" height="1200" fill="#fbfaf7"/>
+  <rect x="0" y="0" width="1400" height="100" fill="#1f2933"/>
+  <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">6 / 6 — ПОРЯДОК РАБОТ И ЧТО ПРОВЕРИТЬ ГЛАЗАМИ</text>
+  <text x="40" y="78" fill="#9fb3c8" font-size="19">шаг 0 делается ДО магазина — он может отменить всю затею</text>
+
+  <!-- step 0 -->
+  <rect x="50" y="126" width="1300" height="150" fill="#fdecea" stroke="#c0392b" stroke-width="3" rx="8"/>
+  <circle cx="110" cy="200" r="34" fill="#c0392b"/>
+  <text x="110" y="212" text-anchor="middle" fill="#ffffff" font-size="32" font-weight="bold">0</text>
+  <text x="170" y="172" fill="#c0392b" font-size="23" font-weight="bold">ПРИЛОЖИТЬ ПЛИТУ НА МЕСТО — ДО ПОКУПОК</text>
+  <text x="170" y="206" fill="#7b241c" font-size="18">Короб MBot Cube снаружи 410 × 400 мм, плита 310 × 315 — по габариту влезает с запасом. Вопрос НЕ в стенках, а в том,</text>
+  <text x="170" y="234" fill="#7b241c" font-size="18">не заденет ли плита <tspan font-weight="bold">Z-направляющие и ходовой винт</tspan>, которые стоят внутри короба. Проверить в ВЕРХНЕЙ и в НИЖНЕЙ точке Z.</text>
+  <text x="170" y="262" fill="#7b241c" font-size="18">Стол на этой машине ездит только по Z (голова — по XY), так что достаточно статической примерки на двух высотах.</text>
+
+  <!-- steps -->
+  <g font-size="18">
+    <!-- 1 -->
+    <circle cx="110" cy="330" r="28" fill="#2c6fb5"/>
+    <text x="110" y="340" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">1</text>
+    <text x="170" y="322" fill="#1f2933" font-size="20" font-weight="bold">Пометить переднюю кромку плиты маркером</text>
+    <text x="170" y="350" fill="#33404d">Отверстия образуют трапецию, зеркально собранная рамка не сядет. Заодно записать, какая кромка 310, а какая 315.</text>
+
+    <!-- 2 -->
+    <circle cx="110" cy="410" r="28" fill="#2c6fb5"/>
+    <text x="110" y="420" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">2</text>
+    <text x="170" y="402" fill="#1f2933" font-size="20" font-weight="bold">Нарезать уголок: 300, 300, 290, 290 мм</text>
+    <text x="170" y="430" fill="#33404d">Торцы подровнять напильником. Заусенцы снять — иначе рамка не сядет плоско.</text>
+
+    <!-- 3 -->
+    <circle cx="110" cy="490" r="28" fill="#2c6fb5"/>
+    <text x="110" y="500" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">3</text>
+    <text x="170" y="482" fill="#1f2933" font-size="20" font-weight="bold">Разметить отверстия ПЕРЕНОСОМ через плиту, накернить</text>
+    <text x="170" y="510" fill="#33404d">Положить ригель на плиту снизу, выставить по кромке, накернить через отверстия. Рулеткой на 300 мм не мерить.</text>
+
+    <!-- 4 -->
+    <circle cx="110" cy="570" r="28" fill="#2c6fb5"/>
+    <text x="110" y="580" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">4</text>
+    <text x="170" y="562" fill="#1f2933" font-size="20" font-weight="bold">Сверлить: ⌀5 под М4 в ригелях, ⌀4.2 + метчик М5 в углах</text>
+    <text x="170" y="590" fill="#33404d">⌀5 вместо ⌀4.2 — запас на тепловое расширение плиты (0.74 мм при 120 °C) и на ошибку разметки. Метчик смазывать.</text>
+
+    <!-- 5 -->
+    <circle cx="110" cy="650" r="28" fill="#2c6fb5"/>
+    <text x="110" y="660" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">5</text>
+    <text x="170" y="642" fill="#1f2933" font-size="20" font-weight="bold">Собрать рамку на верстаке, не затягивая до конца</text>
+    <text x="170" y="670" fill="#33404d">По 2 болта М5 в каждом углу. Примерить плиту, поймать все 4 отверстия, и только тогда затянуть углы.</text>
+
+    <!-- 6 -->
+    <circle cx="110" cy="730" r="28" fill="#2c6fb5"/>
+    <text x="110" y="740" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">6</text>
+    <text x="170" y="722" fill="#1f2933" font-size="20" font-weight="bold">Вырезать изоляцию: ⌀25 под каждую стойку + канал под кабель</text>
+    <text x="170" y="750" fill="#33404d">Изоляция ничего не несёт — весь вес держат 4 стойки. Провода 220 В и термистор выходят снизу плиты, им нужен свободный канал.</text>
+
+    <!-- 7 -->
+    <circle cx="110" cy="810" r="28" fill="#2c6fb5"/>
+    <text x="110" y="820" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">7</text>
+    <text x="170" y="802" fill="#1f2933" font-size="20" font-weight="bold">Снять акрил и пружины, посадить рамку на 3 точки М5</text>
+    <text x="170" y="830" fill="#33404d">Вместо пружин — жёсткие втулки или силиконовые демпферы. Высота ловится гайкой + контргайкой.</text>
+
+    <!-- 8 -->
+    <circle cx="110" cy="890" r="28" fill="#1e8449"/>
+    <text x="110" y="900" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">8</text>
+    <text x="170" y="882" fill="#1e8449" font-size="20" font-weight="bold">Заземление: PE на плиту, на рамку, на кронштейн. Прозвонить.</text>
+    <text x="170" y="910" fill="#145a32">Плита ↔ PE розетки должно быть меньше 1 Ом. Только после этого подавать 220 В (плакат 5).</text>
+
+    <!-- 9 -->
+    <circle cx="110" cy="970" r="28" fill="#d68910"/>
+    <text x="110" y="980" text-anchor="middle" fill="#ffffff" font-size="24" font-weight="bold">9</text>
+    <text x="170" y="962" fill="#7d5a00" font-size="20" font-weight="bold">Проверить, что Z поднимает новый вес — ОСТОРОЖНО</text>
+    <text x="170" y="990" fill="#5b4300">Стол потяжелел примерно до 3 кг. Сначала посмотреть глазами, где он стоит (высоты не знает никто, G28 не проходил ни разу),</text>
+    <text x="170" y="1016" fill="#5b4300">потом короткий FORCE_MOVE STEPPER=stepper_z DISTANCE=-2 VELOCITY=2 с пальцем на аварийной остановке. Не потянет — поднять ток Z с 0.6 А.</text>
+  </g>
+
+  <!-- open questions -->
+  <rect x="50" y="1056" width="640" height="120" fill="#fff5e6" stroke="#d68910" stroke-width="2" rx="8"/>
+  <text x="76" y="1092" fill="#7d5a00" font-size="19" font-weight="bold">ПРОВЕРИТЬ ГЛАЗАМИ ПЕРЕД ПОКУПКОЙ</text>
+  <text x="76" y="1122" fill="#5b4300" font-size="17">· Магнитная подложка не перекрывает конусы?</text>
+  <text x="76" y="1148" fill="#5b4300" font-size="17">· Где именно 3 точки кронштейна — под стяжки ли они попадают?</text>
+  <text x="76" y="1170" fill="#5b4300" font-size="17">· Откуда конкретно выходит кабель — под ригелем или мимо?</text>
+
+  <rect x="710" y="1056" width="640" height="120" fill="#eef3f7" stroke="#2c6fb5" stroke-width="2" rx="8"/>
+  <text x="736" y="1092" fill="#1a4d80" font-size="19" font-weight="bold">ПОБОЧНОЕ СЛЕДСТВИЕ, НЕ ЗАБЫТЬ</text>
+  <text x="736" y="1122" fill="#33404d" font-size="17">Плита 310 × 315 сильно больше рабочего хода 220 × 220.</text>
+  <text x="736" y="1148" fill="#33404d" font-size="17">Печатать будем центральным окном — после установки задать</text>
+  <text x="736" y="1170" fill="#33404d" font-size="17">смещение так, чтобы это окно легло на середину плиты.</text>
+</svg>

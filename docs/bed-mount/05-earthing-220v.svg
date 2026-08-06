@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1060" width="1400" height="1060" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
+  <defs>
+    <marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e8449"/>
+    </marker>
+  </defs>
+
+  <rect width="1400" height="1060" fill="#fbfaf7"/>
+  <rect x="0" y="0" width="1400" height="100" fill="#7b241c"/>
+  <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">5 / 6 — 220 В: ЗАЗЕМЛЕНИЕ ОБЯЗАТЕЛЬНО</text>
+  <text x="40" y="78" fill="#f5c6c0" font-size="19">ты прикручиваешь металлическую раму к плите с сетевым нагревателем 1000 Вт · это меняет требования к электробезопасности</text>
+
+  <!-- mains -->
+  <rect x="60" y="150" width="200" height="120" fill="#ffffff" stroke="#33404d" stroke-width="2" rx="6"/>
+  <text x="160" y="184" text-anchor="middle" fill="#1f2933" font-size="19" font-weight="bold">СЕТЬ 220 В</text>
+  <text x="90" y="216" fill="#a8462f" font-size="17">L — фаза</text>
+  <text x="90" y="240" fill="#2c6fb5" font-size="17">N — ноль</text>
+  <text x="90" y="264" fill="#1e8449" font-size="17" font-weight="bold">PE — земля</text>
+
+  <!-- RCD -->
+  <rect x="320" y="150" width="180" height="120" fill="#fff5e6" stroke="#d68910" stroke-width="3" rx="6"/>
+  <text x="410" y="190" text-anchor="middle" fill="#7d5a00" font-size="20" font-weight="bold">УЗО</text>
+  <text x="410" y="220" text-anchor="middle" fill="#7d5a00" font-size="22" font-weight="bold">30 мА</text>
+  <text x="410" y="250" text-anchor="middle" fill="#5b4300" font-size="15">если ещё не стоит</text>
+
+  <!-- fuse -->
+  <rect x="560" y="150" width="180" height="120" fill="#ffffff" stroke="#33404d" stroke-width="2" rx="6"/>
+  <text x="650" y="184" text-anchor="middle" fill="#1f2933" font-size="18" font-weight="bold">ПРЕДОХРАНИТЕЛЬ</text>
+  <text x="650" y="214" text-anchor="middle" fill="#1e8449" font-size="16">✔ есть — встроен</text>
+  <text x="650" y="238" text-anchor="middle" fill="#1e8449" font-size="16">в корпусной IEC-разъём</text>
+  <text x="650" y="262" text-anchor="middle" fill="#5b6670" font-size="15">(там же выключатель)</text>
+
+  <!-- SSR -->
+  <rect x="800" y="150" width="180" height="120" fill="#ffffff" stroke="#33404d" stroke-width="2" rx="6"/>
+  <text x="890" y="184" text-anchor="middle" fill="#1f2933" font-size="19" font-weight="bold">SSR-25DA</text>
+  <text x="890" y="214" text-anchor="middle" fill="#c0392b" font-size="16" font-weight="bold">✘ радиатора нет</text>
+  <text x="890" y="240" text-anchor="middle" fill="#5b6670" font-size="15">~5–9 Вт на корпусе</text>
+  <text x="890" y="264" text-anchor="middle" fill="#5b6670" font-size="15">при 4.55 А</text>
+
+  <!-- thermal fuse -->
+  <rect x="1040" y="150" width="180" height="120" fill="#ffffff" stroke="#33404d" stroke-width="2" rx="6"/>
+  <text x="1130" y="180" text-anchor="middle" fill="#1f2933" font-size="17" font-weight="bold">ТЕРМОПРЕДОХР.</text>
+  <text x="1130" y="206" text-anchor="middle" fill="#1f2933" font-size="19" font-weight="bold">133 °C</text>
+  <text x="1130" y="232" text-anchor="middle" fill="#c0392b" font-size="16" font-weight="bold">✘ не установлен</text>
+  <text x="1130" y="258" text-anchor="middle" fill="#5b6670" font-size="14">не лепить к самому</text>
+  <text x="1130" y="278" text-anchor="middle" fill="#5b6670" font-size="14">горячему участку</text>
+
+  <!-- L path -->
+  <g stroke="#a8462f" stroke-width="5" fill="none">
+    <path d="M260,200 h60"/><path d="M500,200 h60"/><path d="M740,200 h60"/><path d="M980,200 h60"/>
+    <path d="M1220,210 h60 v190 h-500"/>
+  </g>
+
+  <!-- plate -->
+  <rect x="440" y="380" width="440" height="46" fill="#c8ced3" stroke="#5b6670" stroke-width="3"/>
+  <rect x="470" y="426" width="380" height="12" fill="#a8462f"/>
+  <text x="660" y="410" text-anchor="middle" fill="#33404d" font-size="20" font-weight="bold">АЛЮМИНИЕВАЯ ПЛИТА 310 × 315 × 6</text>
+  <text x="660" y="464" text-anchor="middle" fill="#a8462f" font-size="17" font-weight="bold">плёночный нагреватель 1000 Вт / 220 В — прямо на плите</text>
+
+  <!-- frame -->
+  <rect x="400" y="530" width="520" height="26" fill="#6b7d8c" stroke="#33404d" stroke-width="3"/>
+  <text x="660" y="549" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="bold">МЕТАЛЛИЧЕСКАЯ РАМКА (новая)</text>
+
+  <!-- bracket -->
+  <rect x="430" y="620" width="460" height="26" fill="#3d3d3d" stroke="#1f2933" stroke-width="3"/>
+  <text x="660" y="639" text-anchor="middle" fill="#e8e8e8" font-size="18" font-weight="bold">КРОНШТЕЙН MBot Cube</text>
+
+  <!-- PE bus -->
+  <rect x="1080" y="470" width="180" height="200" fill="#eaf7ee" stroke="#1e8449" stroke-width="3" rx="6"/>
+  <text x="1170" y="510" text-anchor="middle" fill="#1e8449" font-size="20" font-weight="bold">ШИНА PE</text>
+  <g stroke="#1e8449" stroke-width="6">
+    <line x1="1130" y1="560" x2="1210" y2="560"/>
+    <line x1="1142" y1="582" x2="1198" y2="582"/>
+    <line x1="1154" y1="604" x2="1186" y2="604"/>
+  </g>
+  <text x="1170" y="646" text-anchor="middle" fill="#145a32" font-size="16">к PE розетки</text>
+
+  <!-- PE wires -->
+  <g stroke="#1e8449" stroke-width="6" fill="none" marker-end="url(#ar5)">
+    <path d="M880,400 h140 v140 h60"/>
+    <path d="M920,543 h100 v20 h60"/>
+    <path d="M890,633 h60 v-40 h70 v-10 h60"/>
+  </g>
+  <circle cx="880" cy="400" r="10" fill="#c9a227" stroke="#8a6d00" stroke-width="3"/>
+  <circle cx="920" cy="543" r="10" fill="#c9a227" stroke="#8a6d00" stroke-width="3"/>
+  <circle cx="890" cy="633" r="10" fill="#c9a227" stroke="#8a6d00" stroke-width="3"/>
+
+  <text x="946" y="386" fill="#1e8449" font-size="17" font-weight="bold">PE на ПЛИТУ ← самое важное</text>
+  <text x="946" y="522" fill="#1e8449" font-size="17" font-weight="bold">PE на рамку</text>
+  <text x="946" y="672" fill="#1e8449" font-size="17" font-weight="bold">PE на кронштейн</text>
+
+  <!-- how to attach -->
+  <rect x="60" y="380" width="340" height="290" fill="#ffffff" stroke="#1e8449" stroke-width="2" rx="8"/>
+  <text x="82" y="418" fill="#1e8449" font-size="19" font-weight="bold">КАК КРЕПИТЬ PE</text>
+  <text x="82" y="452" fill="#145a32" font-size="17">1. Кольцевой наконечник НКИ</text>
+  <text x="82" y="478" fill="#145a32" font-size="17">2. Зубчатая (веерная) шайба —</text>
+  <text x="100" y="502" fill="#145a32" font-size="17">она прогрызает оксид алюминия</text>
+  <text x="100" y="526" fill="#145a32" font-size="17">и краску, иначе контакта нет</text>
+  <text x="82" y="558" fill="#145a32" font-size="17">3. Винт М4 + гайка, затянуть</text>
+  <text x="82" y="590" fill="#145a32" font-size="17">4. Проверить мультиметром:</text>
+  <text x="100" y="614" fill="#145a32" font-size="17">плита ↔ PE розетки &lt; 1 Ом</text>
+  <text x="82" y="648" fill="#c0392b" font-size="16" font-weight="bold">Не использовать под PE тот же винт,</text>
+  <text x="82" y="668" fill="#c0392b" font-size="16" font-weight="bold">что несёт нагрузку — отдельный.</text>
+
+  <!-- big warning -->
+  <rect x="60" y="710" width="640" height="180" fill="#fdecea" stroke="#c0392b" stroke-width="3" rx="8"/>
+  <g stroke="#c0392b" stroke-width="8">
+    <line x1="100" y1="750" x2="160" y2="810"/>
+    <line x1="160" y1="750" x2="100" y2="810"/>
+  </g>
+  <text x="196" y="762" fill="#c0392b" font-size="21" font-weight="bold">НЕ ИЗОЛИРОВАТЬ ПЛИТУ ОТ РАМЫ</text>
+  <text x="196" y="796" fill="#7b241c" font-size="17">Изоляция здесь ХУЖЕ заземления: при пробое изолированная</text>
+  <text x="196" y="822" fill="#7b241c" font-size="17">плита просто повиснет под фазой и никого не защитит.</text>
+  <text x="196" y="856" fill="#7b241c" font-size="17">Твои теплоизолирующие шайбы М4 — это ТЕПЛОВОЙ разрыв,</text>
+  <text x="196" y="880" fill="#7b241c" font-size="17">а не электробезопасность. Не путать одно с другим.</text>
+
+  <!-- open items -->
+  <rect x="720" y="710" width="620" height="180" fill="#fff5e6" stroke="#d68910" stroke-width="2" rx="8"/>
+  <text x="746" y="748" fill="#7d5a00" font-size="20" font-weight="bold">ЧТО ПО 220 В ВСЁ ЕЩЁ НЕ СДЕЛАНО</text>
+  <text x="746" y="782" fill="#5b4300" font-size="17">✔ Предохранитель — нашёлся в корпусном IEC-разъёме</text>
+  <text x="746" y="810" fill="#c0392b" font-size="17" font-weight="bold">✘ Радиатор на SSR + термопаста</text>
+  <text x="746" y="838" fill="#c0392b" font-size="17" font-weight="bold">✘ Механический термопредохранитель 133 °C</text>
+  <text x="746" y="868" fill="#5b4300" font-size="16">Пока их нет — греющийся стол без присмотра не оставлять.</text>
+
+  <!-- bottom -->
+  <rect x="60" y="920" width="1280" height="110" fill="#1f2933" rx="8"/>
+  <text x="90" y="962" fill="#ffffff" font-size="20" font-weight="bold">ПОЧЕМУ ЭТО СТАЛО ОБЯЗАТЕЛЬНЫМ ИМЕННО СЕЙЧАС</text>
+  <text x="90" y="996" fill="#c6d4e1" font-size="18">Пока плита лежала отдельно, к ней никто не прикасался. Теперь она станет частью металлической конструкции, за которую берутся руками</text>
+  <text x="90" y="1020" fill="#c6d4e1" font-size="18">при снятии детали. Пробой изоляции нагревателя на алюминий — штатный сценарий отказа для такого стола, а не экзотика.</text>
+</svg>

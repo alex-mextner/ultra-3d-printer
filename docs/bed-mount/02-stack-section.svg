@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1180" width="1400" height="1180" font-family="DejaVu Sans, Verdana, Geneva, sans-serif">
+  <defs>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/>
+    </marker>
+    <pattern id="hatch" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#b9a06a" stroke-width="3"/>
+    </pattern>
+  </defs>
+
+  <rect width="1400" height="1180" fill="#fbfaf7"/>
+  <rect x="0" y="0" width="1400" height="100" fill="#1f2933"/>
+  <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">2 / 6 — РАЗРЕЗ ПИРОГА: ОТ ПЛИТЫ ДО КРОНШТЕЙНА</text>
+  <text x="40" y="78" fill="#9fb3c8" font-size="19">вид сбоку, схематично · показана одна точка крепления из четырёх · винт ПОТАЙНОЙ, входит СВЕРХУ в готовый конус</text>
+
+  <!-- ================= layers ================= -->
+  <rect x="120" y="152" width="740" height="10" fill="#3d3d3d"/>
+  <rect x="120" y="162" width="740" height="48" fill="#c8ced3" stroke="#5b6670" stroke-width="2"/>
+  <rect x="150" y="210" width="680" height="10" fill="#a8462f"/>
+
+  <!-- countersink + flush screw head -->
+  <polygon points="366,162 434,162 414,182 386,182" fill="#2f3a45"/>
+  <rect x="392" y="182" width="16" height="176" fill="#2f3a45"/>
+
+  <!-- insulation with cutout -->
+  <rect x="120" y="220" width="230" height="70" fill="url(#hatch)" stroke="#8a7440" stroke-width="2"/>
+  <rect x="450" y="220" width="410" height="70" fill="url(#hatch)" stroke="#8a7440" stroke-width="2"/>
+  <text x="640" y="264" text-anchor="middle" fill="#6b5a2e" font-size="19">теплоизоляция 10 мм (фольга)</text>
+
+  <!-- insulating washer + standoff -->
+  <rect x="370" y="220" width="60" height="10" fill="#e6b422" stroke="#8a6d00" stroke-width="1.5"/>
+  <rect x="382" y="230" width="36" height="60" fill="#8896a3" stroke="#3f4b57" stroke-width="2"/>
+
+  <!-- rail -->
+  <rect x="180" y="290" width="620" height="18" fill="#6b7d8c" stroke="#33404d" stroke-width="2"/>
+  <rect x="180" y="308" width="18" height="52" fill="#6b7d8c" stroke="#33404d" stroke-width="2"/>
+  <rect x="782" y="308" width="18" height="52" fill="#6b7d8c" stroke="#33404d" stroke-width="2"/>
+
+  <!-- washer + two nuts -->
+  <rect x="374" y="308" width="52" height="8" fill="#7d8a96"/>
+  <rect x="380" y="316" width="40" height="18" fill="#4a5560"/>
+  <rect x="380" y="338" width="40" height="18" fill="#4a5560"/>
+
+  <!-- frame tie -->
+  <rect x="230" y="440" width="540" height="20" fill="#6b7d8c" stroke="#33404d" stroke-width="2"/>
+  <rect x="252" y="360" width="18" height="80" fill="#6b7d8c" stroke="#33404d" stroke-width="2"/>
+  <rect x="730" y="360" width="18" height="80" fill="#6b7d8c" stroke="#33404d" stroke-width="2"/>
+
+  <!-- cable exit -->
+  <path d="M700,220 q0,60 -60,80 q-80,26 -120,90 q-30,50 -30,110" stroke="#a8462f" stroke-width="7" fill="none"/>
+  <path d="M718,220 q0,66 -54,92 q-76,30 -110,92 q-26,46 -26,106" stroke="#e0b0a0" stroke-width="4" fill="none"/>
+  <circle cx="490" cy="520" r="14" fill="none" stroke="#c0392b" stroke-width="3"/>
+  <text x="512" y="527" fill="#c0392b" font-size="16" font-weight="bold">хомут (разгрузка)</text>
+
+  <!-- old bracket -->
+  <rect x="180" y="620" width="620" height="26" fill="#3d3d3d" stroke="#1f2933" stroke-width="2"/>
+  <text x="490" y="639" text-anchor="middle" fill="#e8e8e8" font-size="18">треугольный кронштейн MBot Cube — 3 точки</text>
+
+  <!-- existing M5 adjustment -->
+  <rect x="234" y="460" width="12" height="160" fill="#2f3a45"/>
+  <rect x="222" y="500" width="36" height="70" fill="#8896a3" stroke="#3f4b57" stroke-width="2"/>
+  <rect x="219" y="576" width="42" height="15" fill="#4a5560"/>
+  <rect x="219" y="596" width="42" height="15" fill="#4a5560"/>
+  <text x="180" y="700" fill="#1e8449" font-size="17" font-weight="bold">М5 остаётся,</text>
+  <text x="180" y="722" fill="#1e8449" font-size="17" font-weight="bold">пружина → втулка</text>
+
+  <!-- acrylic removed -->
+  <rect x="880" y="620" width="230" height="12" fill="#c99a5a" opacity="0.45"/>
+  <line x1="880" y1="612" x2="1110" y2="640" stroke="#c0392b" stroke-width="5"/>
+  <line x1="1110" y1="612" x2="880" y2="640" stroke="#c0392b" stroke-width="5"/>
+  <text x="995" y="676" text-anchor="middle" fill="#c0392b" font-size="17" font-weight="bold">акрил 4.7 мм —</text>
+  <text x="995" y="698" text-anchor="middle" fill="#c0392b" font-size="17" font-weight="bold">вон из силовой схемы</text>
+  <text x="995" y="722" text-anchor="middle" fill="#7b241c" font-size="15">ползёт от ~70 °C, трещит от отверстий</text>
+
+  <!-- ================= right callouts ================= -->
+  <g stroke="#c0392b" stroke-width="2" marker-end="url(#ar2)">
+    <line x1="1130" y1="158" x2="870" y2="157"/>
+    <line x1="1130" y1="208" x2="870" y2="190"/>
+    <line x1="1130" y1="258" x2="870" y2="252"/>
+    <line x1="1130" y1="310" x2="810" y2="299"/>
+    <line x1="1130" y1="452" x2="780" y2="450"/>
+  </g>
+  <text x="1142" y="150" fill="#1f2933" font-size="18" font-weight="bold">магнитная подложка</text>
+  <text x="1142" y="174" fill="#5b6670" font-size="15">уже приклеена; конусы не перекрыты</text>
+  <text x="1142" y="202" fill="#1f2933" font-size="18" font-weight="bold">алюм. плита 6 мм + нагреватель</text>
+  <text x="1142" y="226" fill="#c0392b" font-size="16" font-weight="bold">220 В / 1000 Вт → сюда PE!</text>
+  <text x="1142" y="252" fill="#1f2933" font-size="18" font-weight="bold">изоляция 10 мм</text>
+  <text x="1142" y="276" fill="#5b6670" font-size="15">вырез ⌀≈25 вокруг стойки + канал под кабель</text>
+  <text x="1142" y="306" fill="#1f2933" font-size="18" font-weight="bold">ригель: уголок алюм. 30×30×3</text>
+  <text x="1142" y="330" fill="#5b6670" font-size="15">2 шт поперёк стола, отверстия ⌀5</text>
+  <text x="1142" y="448" fill="#1f2933" font-size="18" font-weight="bold">продольная стяжка, 2 шт</text>
+  <text x="1142" y="472" fill="#5b6670" font-size="15">замыкает рамку в жёсткий контур</text>
+
+  <!-- left callouts -->
+  <g stroke="#c0392b" stroke-width="2" marker-end="url(#ar2)">
+    <line x1="330" y1="120" x2="392" y2="150"/>
+    <line x1="250" y1="196" x2="376" y2="224"/>
+    <line x1="250" y1="256" x2="380" y2="258"/>
+    <line x1="250" y1="392" x2="378" y2="345"/>
+  </g>
+  <text x="326" y="114" text-anchor="end" fill="#1f2933" font-size="18" font-weight="bold">винт М4×30 ПОТАЙНОЙ (DIN 7991)</text>
+  <text x="326" y="136" text-anchor="end" fill="#5b6670" font-size="15">садится заподлицо в готовый конус — ничего не торчит</text>
+  <text x="246" y="190" text-anchor="end" fill="#d68910" font-size="18" font-weight="bold">твоя теплоизолирующая шайба М4</text>
+  <text x="246" y="212" text-anchor="end" fill="#5b6670" font-size="15">переехала СЮДА: под конус её не подложить,</text>
+  <text x="246" y="232" text-anchor="end" fill="#5b6670" font-size="15">работает как разрыв плита → стойка</text>
+  <text x="246" y="250" text-anchor="end" fill="#1f2933" font-size="18" font-weight="bold">жёсткая стойка 10–12 мм</text>
+  <text x="246" y="272" text-anchor="end" fill="#5b6670" font-size="15">держит зазор, изоляцию не сминает</text>
+  <text x="246" y="386" text-anchor="end" fill="#c0392b" font-size="18" font-weight="bold">гайка + контргайка DIN 980</text>
+  <text x="246" y="408" text-anchor="end" fill="#c0392b" font-size="16" font-weight="bold">ЦЕЛЬНОМЕТАЛЛИЧЕСКИЕ</text>
+  <text x="246" y="430" text-anchor="end" fill="#5b6670" font-size="15">регулировка высоты + фиксация</text>
+
+  <!-- cable note -->
+  <text x="880" y="516" fill="#a8462f" font-size="18" font-weight="bold">силовые 220 В и термистор</text>
+  <text x="880" y="540" fill="#7b241c" font-size="16">выходят ИЗ ПЛИТЫ СНИЗУ — вырезать</text>
+  <text x="880" y="562" fill="#7b241c" font-size="16">канал в изоляции, вывести между</text>
+  <text x="880" y="584" fill="#7b241c" font-size="16">ригелями, ничем не пережимать</text>
+
+  <!-- hot / cold zone banner -->
+  <rect x="60" y="770" width="620" height="152" fill="#fdecea" stroke="#c0392b" stroke-width="2" rx="8"/>
+  <text x="86" y="808" fill="#c0392b" font-size="21" font-weight="bold">ГОРЯЧАЯ ЗОНА (у плиты, до 120 °C)</text>
+  <text x="86" y="842" fill="#7b241c" font-size="18">Только цельнометаллические гайки DIN 980, либо обычная</text>
+  <text x="86" y="872" fill="#7b241c" font-size="18">гайка + контргайка. Нейлоновые DIN 985 сюда НЕЛЬЗЯ:</text>
+  <text x="86" y="902" fill="#7b241c" font-size="18">кольцо деградирует уже на 100–120 °C.</text>
+
+  <rect x="720" y="770" width="620" height="152" fill="#eaf7ee" stroke="#1e8449" stroke-width="2" rx="8"/>
+  <text x="746" y="808" fill="#1e8449" font-size="21" font-weight="bold">ХОЛОДНАЯ ЗОНА (рамка ↔ кронштейн)</text>
+  <text x="746" y="842" fill="#145a32" font-size="18">Здесь нейлоновые DIN 985 уместны и предпочтительны:</text>
+  <text x="746" y="872" fill="#145a32" font-size="18">вибрация есть, температуры нет.</text>
+  <text x="746" y="902" fill="#145a32" font-size="18">Гроверы не нужны — они держат хуже.</text>
+
+  <!-- screw length -->
+  <rect x="60" y="950" width="1280" height="180" fill="#eef3f7" stroke="#2c6fb5" stroke-width="2" rx="8"/>
+  <text x="86" y="988" fill="#1f2933" font-size="21" font-weight="bold">ДЛИНА ВИНТА — ПОСЧИТАНА, БРАТЬ М4×30</text>
+  <text x="86" y="1026" fill="#1a4d80" font-size="19" font-family="DejaVu Sans Mono, Consolas, monospace">L = 6 (плита) + 0.5 (изол. шайба) + 11 (стойка) + 3 (полка) + 0.8 (шайба) + 3.2 (гайка) + 2 (запас) ≈ 26.5 мм</text>
+  <text x="86" y="1062" fill="#33404d" font-size="18">У потайного винта длина считается ОТ ВЕРХА ГОЛОВКИ, головка целиком уходит в 6-мм плиту → <tspan font-weight="bold">М4×30 DIN 7991</tspan>.</text>
+  <text x="86" y="1094" fill="#33404d" font-size="18">М4×25 не хватит (под плитой останется 19 мм при потребных 20). Возьми и М4×35 про запас — если стойка окажется 12 мм, пригодится.</text>
+  <text x="86" y="1120" fill="#c0392b" font-size="17" font-weight="bold">Перед покупкой убедись глазами: магнитная подложка НЕ перекрывает конусы, винт физически вставляется сверху.</text>
+</svg>
