@@ -1,0 +1,25 @@
+[Unit]
+Description=Smoke alarm siren pulser - polls Moonraker directly, independent of klippy
+After=network.target moonraker.service
+Wants=moonraker.service
+# StartLimitIntervalSec/StartLimitBurst belong in [Unit] on systemd >= 230,
+# NOT in [Service] - verified live on this box (systemd 257): putting them
+# in [Service] (as orangepi-display/systemd/nav-buttons-remap.service does)
+# logs "Unknown key ... ignoring" via `systemd-analyze verify` and silently
+# disables restart-loop limiting. Not fixing the older file as part of this
+# task (out of scope), but not repeating the mistake here either.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# root: /sys/class/gpio/export is --w------- root root on this box (checked
+# 2026-08-06), and no group grants ultra access to it. See the long comment
+# in smoke-siren-daemon.py for why a udev rule was not worth adding instead.
+User=root
+ExecStart=/usr/bin/python3 /usr/local/bin/smoke-siren-daemon.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
