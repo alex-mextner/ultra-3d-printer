@@ -50,6 +50,9 @@
 ## Структура репозитория
 
 - [`docs/printer-status.md`](docs/printer-status.md) — статус проекта: что сделано и проверено, что в работе, история решений. Читать первым.
+- [`docs/bom.md`](docs/bom.md) — спецификация деталей (BOM): что за железо в машине, что изготавливаем сами, а что закупаем, откуда данные и что ещё надо померить. Часть 1 — унаследованная механика mbot, Часть 2 — апгрейд (электроника, периферия, крепление головы).
+- [`docs/purchases.md`](docs/purchases.md) — закупки и стоимость проекта (итог считает [`scripts/bom-cost.py`](scripts/bom-cost.py)).
+- [`hardware/`](hardware/) — исходники деталей собственного изготовления (фанера, печать, металл). В закупку от них идёт только сырьё.
 - [`docs/index.html`](docs/index.html) — входная страница HTML-портала документации. Портал = методология, применимая к любой машине на RAMPS/Klipper: [`ramps-diagnostics.html`](docs/ramps-diagnostics.html) (диагностика платы и драйверов, подбор тока и скорости, безопасность 220В, UART к TMC2209) и [`reference.html`](docs/reference.html) (схемы и пиноуты). Конкретики этой машины в портале нет — она вся в `printer-status.md`.
 - [`printer-configs/`](printer-configs/) — живые конфиги Klipper/Moonraker/crowsnest, источник истины (правится только тут, см. `CLAUDE.md`).
 - [`scripts/deploy.sh`](scripts/deploy.sh) — выкатка конфигов на принтер.
