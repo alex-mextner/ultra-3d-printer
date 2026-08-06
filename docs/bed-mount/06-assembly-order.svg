@@ -74,11 +74,11 @@
   <!-- open questions -->
   <rect x="50" y="1056" width="640" height="188" fill="#fdecea" stroke="#c0392b" stroke-width="3" rx="8"/>
   <text x="76" y="1092" fill="#c0392b" font-size="19" font-weight="bold">ЗАМЕРИТЬ ДО РЕЗА — РУЛЕТКА, ПЯТЬ МИНУТ</text>
-  <text x="76" y="1124" fill="#7b241c" font-size="17">· Кромка возле передних отверстий — 310 или 315?</text>
-  <text x="76" y="1152" fill="#7b241c" font-size="17">· Расстояния между тремя точками М5 кронштейна</text>
+  <text x="76" y="1124" fill="#1e8449" font-size="17">✔ Кромки замерены: 310 поперёк, 315 в глубину → 260 / 200 / 251</text>
+  <text x="76" y="1152" fill="#c0392b" font-size="17" font-weight="bold">· Расстояния между тремя точками М5 кронштейна ← ЕДИНСТВЕННЫЙ БЛОКЕР РЕЗА</text>
   <text x="76" y="1180" fill="#7b241c" font-size="17">· Магнитная подложка не перекрывает конусы?</text>
   <text x="76" y="1208" fill="#7b241c" font-size="17">· Откуда конкретно выходит кабель снизу плиты</text>
-  <text x="76" y="1234" fill="#c0392b" font-size="15" font-weight="bold">Первые два — цифры в плакатах 1 и 3 зависят от них напрямую.</text>
+  <text x="76" y="1234" fill="#7b241c" font-size="15">Последние два — глазами, на рез не влияют.</text>
 
   <rect x="710" y="1056" width="640" height="188" fill="#eef3f7" stroke="#2c6fb5" stroke-width="2" rx="8"/>
   <text x="736" y="1092" fill="#1a4d80" font-size="19" font-weight="bold">ПОБОЧНОЕ СЛЕДСТВИЕ, НЕ ЗАБЫТЬ</text>

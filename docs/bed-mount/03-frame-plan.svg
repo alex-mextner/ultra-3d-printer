@@ -8,11 +8,11 @@
   <rect width="1400" height="1230" fill="#fbfaf7"/>
   <rect x="0" y="0" width="1400" height="100" fill="#1f2933"/>
   <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">3 / 6 — РАМКА В ПЛАНЕ: 4 КУСКА УГОЛКА ВМЕСТО СВАРКИ</text>
-  <text x="40" y="78" fill="#9fb3c8" font-size="19">вид сверху · плита 310 × 315 показана пунктиром · всё на болтах, сварка не нужна</text>
+  <text x="40" y="78" fill="#9fb3c8" font-size="19">вид сверху · плита показана пунктиром · размеры окончательные (кромки замерены) · всё на болтах, сварка не нужна</text>
 
   <!-- bed outline -->
   <rect x="410" y="210" width="600" height="610" fill="none" stroke="#9aa5b1" stroke-width="3" stroke-dasharray="12 8"/>
-  <text x="422" y="200" fill="#9aa5b1" font-size="18">контур плиты 310 × 315</text>
+  <text x="422" y="200" fill="#9aa5b1" font-size="18">контур плиты: 310 поперёк, 315 в глубину</text>
   <line x1="410" y1="820" x2="1010" y2="820" stroke="#c0392b" stroke-width="7" stroke-dasharray="12 8"/>
   <text x="1026" y="826" fill="#c0392b" font-size="20" font-weight="bold">ПЕРЁД</text>
 
@@ -65,11 +65,9 @@
     <line x1="516" y1="180" x2="904" y2="180"/>
     <line x1="1100" y1="282" x2="1100" y2="768"/>
   </g>
-  <text x="710" y="861" text-anchor="middle" fill="#2c6fb5" font-size="21" font-weight="bold">260 или 265 мм</text>
-  <text x="710" y="172" text-anchor="middle" fill="#2c6fb5" font-size="21" font-weight="bold">200 или 205 мм</text>
-  <text x="1114" y="512" fill="#2c6fb5" font-size="20" font-weight="bold">251 или 246</text>
-  <text x="1114" y="536" fill="#c0392b" font-size="15">см. плакат 1: зависит от того,</text>
-  <text x="1114" y="556" fill="#c0392b" font-size="15">какая кромка 310, а какая 315</text>
+  <text x="710" y="861" text-anchor="middle" fill="#2c6fb5" font-size="22" font-weight="bold">260 мм</text>
+  <text x="710" y="172" text-anchor="middle" fill="#2c6fb5" font-size="22" font-weight="bold">200 мм</text>
+  <text x="1114" y="520" fill="#2c6fb5" font-size="22" font-weight="bold">251 мм</text>
 
   <!-- callouts -->
   <g stroke="#c0392b" stroke-width="2" marker-end="url(#ar3)">

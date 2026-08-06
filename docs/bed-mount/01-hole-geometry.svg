@@ -9,12 +9,12 @@
   <rect x="0" y="0" width="1400" height="100" fill="#1f2933"/>
   <text x="40" y="44" fill="#ffffff" font-size="33" font-weight="bold">1 / 6 — ГЕОМЕТРИЯ ОТВЕРСТИЙ. Плита Creality K1 Max</text>
   <text x="40" y="78" fill="#9fb3c8" font-size="19">310 × 315 мм · литой алюминий 5083, толщина 6 мм · ⌀4 сквозные, конус (зенковка) СВЕРХУ · вид сверху</text>
-  <rect x="0" y="100" width="1400" height="34" fill="#c0392b"/>
-  <text x="40" y="124" fill="#ffffff" font-size="19" font-weight="bold">СНАЧАЛА ЗАМЕРЬ КРОМКУ, ВОЗЛЕ КОТОРОЙ ОТВЕРСТИЯ В 27 мм: она 310 или 315? От этого зависят ВСЕ ТРИ числа ниже.</text>
+  <rect x="0" y="100" width="1400" height="34" fill="#1e8449"/>
+  <text x="40" y="124" fill="#ffffff" font-size="19" font-weight="bold">ЗАМЕРЕНО: передняя и задняя кромки по 310 мм, боковые по 315 → ширина 310, глубина 315. Все три числа ниже ОКОНЧАТЕЛЬНЫЕ.</text>
 
   <!-- plate -->
   <rect x="470" y="240" width="600" height="610" fill="#c8ced3" stroke="#5b6670" stroke-width="3"/>
-  <text x="770" y="530" text-anchor="middle" fill="#66707a" font-size="24" font-weight="bold">310 × 315 мм</text>
+  <text x="770" y="530" text-anchor="middle" fill="#66707a" font-size="22" font-weight="bold">310 поперёк · 315 в глубину</text>
   <text x="770" y="562" text-anchor="middle" fill="#66707a" font-size="19">алюминий 6 мм</text>
   <text x="770" y="592" text-anchor="middle" fill="#8a939b" font-size="17">масса плиты ≈ 1.6 кг</text>
 
@@ -60,8 +60,8 @@
     <line x1="518" y1="900" x2="1022" y2="900"/>
     <line x1="576" y1="950" x2="964" y2="950"/>
   </g>
-  <text x="770" y="891" text-anchor="middle" fill="#2c6fb5" font-size="23" font-weight="bold">передняя пара = W − 50   →   260 или 265 мм</text>
-  <text x="770" y="941" text-anchor="middle" fill="#2c6fb5" font-size="23" font-weight="bold">задняя пара = W − 110   →   200 или 205 мм</text>
+  <text x="770" y="891" text-anchor="middle" fill="#2c6fb5" font-size="24" font-weight="bold">260 мм   (передняя пара = 310 − 50)</text>
+  <text x="770" y="941" text-anchor="middle" fill="#2c6fb5" font-size="24" font-weight="bold">200 мм   (задняя пара = 310 − 110)</text>
 
   <!-- dims left -->
   <g stroke="#2c6fb5" stroke-width="2" marker-start="url(#ar)" marker-end="url(#ar)">
@@ -70,8 +70,8 @@
     <line x1="320" y1="240" x2="320" y2="312"/>
   </g>
   <text x="430" y="832" text-anchor="end" fill="#2c6fb5" font-size="20" font-weight="bold">27</text>
-  <text x="368" y="544" text-anchor="end" fill="#2c6fb5" font-size="22" font-weight="bold">D − 64 =</text>
-  <text x="368" y="572" text-anchor="end" fill="#2c6fb5" font-size="22" font-weight="bold">251 или 246</text>
+  <text x="368" y="548" text-anchor="end" fill="#2c6fb5" font-size="24" font-weight="bold">251 мм</text>
+  <text x="364" y="576" text-anchor="end" fill="#2c6fb5" font-size="17">= 315 − 64</text>
   <text x="364" y="600" text-anchor="end" fill="#2c6fb5" font-size="17">между ригелями</text>
   <text x="308" y="282" text-anchor="end" fill="#2c6fb5" font-size="20" font-weight="bold">37</text>
 
@@ -96,27 +96,23 @@
   <text x="1140" y="518" fill="#5b4300" font-size="17">ригели ставим ПОПЕРЁК.</text>
 
   <!-- variant table -->
-  <rect x="1120" y="560" width="250" height="300" fill="#fdecea" stroke="#c0392b" stroke-width="3" rx="8"/>
-  <text x="1245" y="592" text-anchor="middle" fill="#c0392b" font-size="17" font-weight="bold">ДВА РАВНОПРАВНЫХ</text>
-  <text x="1245" y="614" text-anchor="middle" fill="#c0392b" font-size="17" font-weight="bold">ВАРИАНТА</text>
-  <line x1="1245" y1="628" x2="1245" y2="838" stroke="#c0392b" stroke-width="1.5"/>
-  <line x1="1136" y1="628" x2="1354" y2="628" stroke="#c0392b" stroke-width="1.5"/>
-  <text x="1190" y="652" text-anchor="middle" fill="#7b241c" font-size="16" font-weight="bold">перед = 310</text>
-  <text x="1300" y="652" text-anchor="middle" fill="#7b241c" font-size="16" font-weight="bold">перед = 315</text>
-  <line x1="1136" y1="664" x2="1354" y2="664" stroke="#c0392b" stroke-width="1"/>
-  <text x="1190" y="692" text-anchor="middle" fill="#1f2933" font-size="19">260</text>
-  <text x="1300" y="692" text-anchor="middle" fill="#1f2933" font-size="19">265</text>
-  <text x="1190" y="726" text-anchor="middle" fill="#1f2933" font-size="19">200</text>
-  <text x="1300" y="726" text-anchor="middle" fill="#1f2933" font-size="19">205</text>
-  <text x="1190" y="760" text-anchor="middle" fill="#1f2933" font-size="19">251</text>
-  <text x="1300" y="760" text-anchor="middle" fill="#1f2933" font-size="19">246</text>
-  <text x="1136" y="692" fill="#7b241c" font-size="13">пер.</text>
-  <text x="1136" y="726" fill="#7b241c" font-size="13">зад.</text>
-  <text x="1136" y="760" fill="#7b241c" font-size="13">меж.</text>
-  <line x1="1136" y1="784" x2="1354" y2="784" stroke="#c0392b" stroke-width="1.5"/>
-  <text x="1245" y="810" text-anchor="middle" fill="#7b241c" font-size="15">Который из двух —</text>
-  <text x="1245" y="830" text-anchor="middle" fill="#7b241c" font-size="15">решает одна рулетка.</text>
-  <text x="1245" y="850" text-anchor="middle" fill="#c0392b" font-size="15" font-weight="bold">Угадывать нельзя.</text>
+  <rect x="1120" y="560" width="250" height="300" fill="#eaf7ee" stroke="#1e8449" stroke-width="3" rx="8"/>
+  <text x="1245" y="596" text-anchor="middle" fill="#1e8449" font-size="18" font-weight="bold">ЗАМЕР ЗАКРЫТ</text>
+  <line x1="1136" y1="612" x2="1354" y2="612" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="1140" y="644" fill="#145a32" font-size="16">перед и зад:</text>
+  <text x="1350" y="644" text-anchor="end" fill="#1f2933" font-size="19" font-weight="bold">310</text>
+  <text x="1140" y="678" fill="#145a32" font-size="16">бока:</text>
+  <text x="1350" y="678" text-anchor="end" fill="#1f2933" font-size="19" font-weight="bold">315</text>
+  <line x1="1136" y1="698" x2="1354" y2="698" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="1140" y="726" fill="#145a32" font-size="16">передняя пара</text>
+  <text x="1350" y="726" text-anchor="end" fill="#1f2933" font-size="19" font-weight="bold">260</text>
+  <text x="1140" y="758" fill="#145a32" font-size="16">задняя пара</text>
+  <text x="1350" y="758" text-anchor="end" fill="#1f2933" font-size="19" font-weight="bold">200</text>
+  <text x="1140" y="790" fill="#145a32" font-size="16">между ригелями</text>
+  <text x="1350" y="790" text-anchor="end" fill="#1f2933" font-size="19" font-weight="bold">251</text>
+  <line x1="1136" y1="810" x2="1354" y2="810" stroke="#1e8449" stroke-width="1.5"/>
+  <text x="1245" y="836" text-anchor="middle" fill="#145a32" font-size="15">Сверять всё равно</text>
+  <text x="1245" y="854" text-anchor="middle" fill="#145a32" font-size="15">переносом — см. ниже.</text>
 
   <!-- bottom box -->
   <rect x="60" y="1000" width="1280" height="222" fill="#eaf7ee" stroke="#1e8449" stroke-width="2" rx="8"/>
