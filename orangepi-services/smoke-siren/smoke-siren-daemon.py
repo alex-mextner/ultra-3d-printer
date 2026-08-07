@@ -434,35 +434,58 @@
 # and run standalone for 8-second windows at three duty patterns, with this
 # PROCESS's own CPU time read from /proc/self/stat (utime+stime ticks)
 # before/after each window - measures the daemon's actual CPU consumption,
-# not a proxy:
-#   worst case (all 3 channels genuinely mid-duty, e.g. 0.5/0.3/0.7,
-#     maximizing writes/period): 11.50% of one core.
-#   steady full-on (1.0/1.0/1.0, matches RGB_PRINTING):    3.00% of one core.
-#   steady off     (0.0/0.0/0.0, matches RGB_OFF):          4.25% of one core.
-#   idle baseline (process alive, PWM thread not started):  0.00%.
-# Correction to an earlier assumption made before this was actually
-# measured: the steady cases are NOT near-zero the way the raw write-cost
-# argument alone would suggest (Gpio.set()'s cache does make the SYSCALL
-# count near-zero for a steady channel, that part held up) - what the
-# syscall argument missed is the fixed per-period Python bookkeeping this
-# thread pays 200 times a second regardless of duty (lock acquisitions,
-# a dict copy of the duty snapshot, monotonic() calls, constructing/sorting
-# the (usually empty) off-edge list). That bookkeeping, not the writes
-# themselves, is why steady-state sits at a real 3-4% instead of ~0%. Left
-# in this comment with the actual numbers, not hedged as "reasoned only",
-# because the first attempt at this estimate undersold it and this project
-# has already been asked once tonight not to repeat that pattern.
-# In absolute terms: worst case 11.5% of ONE of this board's four cores is
-# at most a few percent of total system capacity even in the pathological
-# case of three channels being dragged simultaneously (a rare, manual,
-# momentary state, not a steady operating point) - and the pre-PWM version
-# of this thread's work (a plain 1Hz poll) cost effectively 0%, so this is
-# a real, honestly-reported increase, not a free lunch, even though it
-# stays comfortably inside what a 512MB/4-core board run alongside Klipper/
-# Moonraker/KlipperScreen/crowsnest can absorb. Re-run scripts equivalent to
-# this session's rgb_pwm_cpu_test.py (not kept in this repo - ad hoc,
-# scratch-pin-only, safe to recreate) if PWM_FREQUENCY_HZ ever changes and
-# this number needs rechecking.
+# not a proxy. Two rounds of this measurement, described in order because
+# the first round changed the design (see IDLE CPU in RgbPwm's docstring):
+#   ROUND 1 (always-loop-at-PWM_FREQUENCY_HZ design, since replaced):
+#     worst case (0.5/0.3/0.7, maximizing writes/period): 11.50% of a core.
+#     steady full-on (1.0/1.0/1.0, matches RGB_PRINTING):  3.00% of a core.
+#     steady off     (0.0/0.0/0.0, matches RGB_OFF):        4.25% of a core.
+#   This surfaced something the raw write-cost argument alone had missed:
+#   Gpio.set()'s cache does make the SYSCALL count near-zero for a steady
+#   channel (that part of the original reasoning held up), but the FIXED
+#   per-period Python bookkeeping this thread paid 200 times a second
+#   REGARDLESS of duty (lock acquisitions, a dict copy of the duty
+#   snapshot, monotonic() calls, constructing/sorting the usually-empty
+#   off-edge list) does not disappear just because there's nothing to
+#   write - that bookkeeping, not the writes, is why steady-state cost a
+#   real 3-4% instead of ~0%. Left in this comment with the numbers, not
+#   hedged as "reasoned only", because the first attempt at this estimate
+#   undersold it and this project has already been asked once tonight not
+#   to repeat that pattern.
+#   ROUND 2, after adding the event-driven idle block described in RgbPwm's
+#   IDLE CPU section (current design): re-measured the same three
+#   scenarios, same harness:
+#     steady full-on: 0.00% of a core. steady off: 0.00% of a core.
+#     worst case: 11.50% in one run, 18.25% in a later rerun (1.46s CPU /
+#       8s wall both times the 18.25% figure came up - not a fluke of a
+#       single sample) - the difference tracks a `load average` that had
+#       risen from a quiet board to 2.33 with "2 users" logged in between
+#       the two measurements, almost certainly a second concurrent SSH
+#       session active on this same board during this work, not a change
+#       in this code. Reported as a RANGE (roughly 11-18% of one core in
+#       the worst case, under real observed system-load variance) rather
+#       than a single misleadingly-precise number.
+#   Net effect of the fix: the common case (any steady color, including
+#   RGB_OFF - which is where this light spends most of its life) dropped
+#   from a real, continuously-paid 3-4% to measured 0.00%, matching the
+#   idle-baseline (PWM thread not running at all) figure exactly. The
+#   worst case (actively dragging multiple channels through intermediate
+#   values at once) is unchanged in kind - still bounded, still only paid
+#   while someone is actively at the Mainsail slider, not a steady
+#   operating point - and its exact percentage moves with whatever else is
+#   running on the board at the time, which the range above states rather
+#   than hides.
+# In absolute terms, even the higher end of that range (18.25% of ONE of
+# this board's four cores) is at most a few percent of total system
+# capacity in the pathological case of three channels being dragged
+# simultaneously - and the pre-PWM version of this thread's work (a plain
+# 1Hz poll) cost effectively 0%, so the worst case remains a real,
+# honestly-reported increase, not a free lunch, even though it stays
+# comfortably inside what a 512MB/4-core board run alongside Klipper/
+# Moonraker/KlipperScreen/crowsnest can absorb. Re-run scripts equivalent
+# to this session's rgb_pwm_cpu_test.py (not kept in this repo - ad hoc,
+# scratch-pin-only, safe to recreate) if PWM_FREQUENCY_HZ or the idle
+# design ever change and this number needs rechecking.
 #
 # THREADING MODEL - one dedicated thread (RgbPwm) drives all three channels
 # together, NOT one thread per channel. See RgbPwm's own docstring for the
@@ -700,18 +723,61 @@ class RgbPwm:
     write's latency, then this thread goes idle (see IDLE_POLL_S) until the
     alarm clears. See the module docstring's FIRE ALARM OVERRIDE section
     for the full race-freedom argument and the ~5ms worst-case bound either
-    direction."""
+    direction.
+
+    CRASH HANDLING - found on advisor review, not in the original design:
+    an uncaught exception inside a Python thread does NOT propagate
+    anywhere - it just kills that one thread silently, while the process
+    (and systemd's view of it) stays alive. Pre-PWM, this same class of
+    failure was self-healing by accident: the old quiet-branch code
+    re-asserted gpio_r/g/b.set_on(requested[...]) every single second from
+    the MAIN thread, so a transient write failure fixed itself next poll,
+    and the main loop itself dying took the whole process down with it
+    (systemd Restart=always then gets a clean process restart). Moving the
+    writes into a separate thread quietly gave up both properties - a dead
+    PWM thread now freezes the channels at their last state FOREVER with no
+    symptom anywhere. _run() wraps the whole loop in try/except and sets
+    _crashed on any exception; main()'s loop polls is_healthy() and exits
+    (triggering the same Restart=always recovery) if it ever goes False -
+    see main() for the check.
+
+    IDLE CPU (added after advisor review: the original always-loop-at-
+    PWM_FREQUENCY_HZ design measured 3-4% of a core even at duty 0/1 - see
+    module docstring's CPU IMPACT numbers - which is 200 wakeups/second of
+    pure bookkeeping producing zero writes once a color is steady, the
+    resting state this light spends nearly all its time in, INCLUDING at
+    RGB_OFF). Whenever every channel's duty is exactly 0.0 or 1.0 (no
+    channel needs a mid-period OFF edge), this thread writes the steady
+    state once and then BLOCKS on _wake instead of re-entering the tight
+    period loop to do nothing STEADY_WAKE_TIMEOUT_S times a second.
+    set_duty()/set_alarm() both signal _wake, so a real change is picked up
+    immediately, not after a poll delay; the timeout is a safety net against
+    a theoretically missed wakeup, not the normal wake path - main()
+    already calls set_duty()/set_alarm() roughly once a second regardless
+    of whether values changed, so in practice this thread naturally wakes
+    at about that same ~1Hz cadence while steady, not on the timeout."""
 
     IDLE_POLL_S = 0.005  # while alarm-overridden, how often this thread
-                          # rechecks for release - bounds "how long can the
-                          # strip sit at its last alarm-branch state before
-                          # real PWM resumes driving it toward the requested
-                          # duty" to about this long. Deliberately a
-                          # separate constant from PWM_PERIOD_S (even though
-                          # it happens to equal it at the current frequency)
-                          # so a future change to PWM_FREQUENCY_HZ doesn't
+                          # rechecks for release (via _wake, with this as a
+                          # timeout/safety-net, not a fixed sleep - see
+                          # _run()) - bounds "how long can the strip sit at
+                          # its last alarm-branch state before real PWM
+                          # resumes driving it toward the requested duty" to
+                          # about this long. Deliberately a separate
+                          # constant from PWM_PERIOD_S (even though it
+                          # happens to equal it at the current frequency) so
+                          # a future change to PWM_FREQUENCY_HZ doesn't
                           # silently change this bound too without a reader
                           # noticing.
+    STEADY_WAKE_TIMEOUT_S = 2.0  # safety-net timeout while every channel is
+                                  # steady at duty 0/1 (see IDLE CPU above) -
+                                  # normal wakeups are event-driven via
+                                  # _wake and arrive far sooner than this in
+                                  # practice (main() calls set_duty()/
+                                  # set_alarm() roughly once a second either
+                                  # way); this only bounds how long a
+                                  # hypothetical missed wakeup could wedge
+                                  # this thread for.
 
     def __init__(self, channels, period_s):
         self._channels = channels  # {"r": Gpio, "g": Gpio, "b": Gpio}
@@ -724,6 +790,13 @@ class RgbPwm:
         self._duty = {name: 0.0 for name in channels}
         self._alarm_active = False
         self._stop_event = threading.Event()
+        self._wake = threading.Event()  # signaled by set_duty()/set_alarm()
+                                         # to interrupt an idle/steady block
+                                         # early - see class docstring, IDLE
+                                         # CPU.
+        self._crashed = threading.Event()  # set by _run() if the loop ever
+                                            # raises - see class docstring,
+                                            # CRASH HANDLING.
         self._thread = threading.Thread(
             target=self._run, name="rgb-pwm", daemon=True
         )
@@ -736,9 +809,20 @@ class RgbPwm:
         called BEFORE any direct off-writes to the RGB Gpio objects (e.g.
         in main()'s finally: block) - otherwise this thread could still be
         mid-write when the direct writes happen, defeating the same
-        interlock the fire-alarm handoff relies on."""
+        interlock the fire-alarm handoff relies on. Safe to call even if
+        the thread already died on its own (is_healthy() is False) - the
+        Event is already set / thread already finished, join() returns
+        immediately."""
         self._stop_event.set()
+        self._wake.set()
         self._thread.join(timeout=2.0)
+
+    def is_healthy(self):
+        """False if the PWM thread has died from an uncaught exception -
+        see class docstring, CRASH HANDLING. main() polls this and exits
+        (letting systemd's Restart=always recover with a fresh thread)
+        rather than silently leaving the channels frozen forever."""
+        return not self._crashed.is_set()
 
     def set_duty(self, r, g, b):
         """Update the TARGET duty (0.0-1.0 per channel = fraction of each
@@ -750,6 +834,7 @@ class RgbPwm:
             self._duty["r"] = _snap_duty(r)
             self._duty["g"] = _snap_duty(g)
             self._duty["b"] = _snap_duty(b)
+        self._wake.set()
 
     def set_alarm(self, active):
         """True: this thread stops touching gpio_r/g/b entirely (the main
@@ -758,6 +843,7 @@ class RgbPwm:
         no attempt to "catch up" periods skipped while overridden."""
         with self._lock:
             self._alarm_active = active
+        self._wake.set()
 
     def _write(self, name, on):
         """Write one channel's logical on/off state, UNLESS the alarm
@@ -771,6 +857,20 @@ class RgbPwm:
             return True
 
     def _run(self):
+        """Thin wrapper: see class docstring, CRASH HANDLING, for why this
+        exists separately from _run_loop()."""
+        try:
+            self._run_loop()
+        except Exception:
+            log.exception(
+                "RGB PWM thread crashed - channels are now frozen at "
+                "whatever they were last written to. Setting _crashed so "
+                "main() notices and exits (systemd Restart=always will "
+                "bring up a fresh thread)."
+            )
+            self._crashed.set()
+
+    def _run_loop(self):
         period = self._period_s
         t0 = time.monotonic()
         while not self._stop_event.is_set():
@@ -779,13 +879,21 @@ class RgbPwm:
                 duty = dict(self._duty)
 
             if alarm:
-                time.sleep(self.IDLE_POLL_S)
+                self._wake.wait(self.IDLE_POLL_S)
+                self._wake.clear()
                 t0 = time.monotonic()  # resync on next non-alarm iteration -
                                         # deliberately NOT accumulating a
                                         # "how many periods did we miss"
                                         # backlog to catch up on; the very
                                         # next period just starts now.
                 continue
+
+            # See class docstring, IDLE CPU: if no channel needs a
+            # mid-period OFF edge (every duty is exactly 0.0 or 1.0), this
+            # period's start-of-period writes below are the ONLY writes it
+            # needs - block afterwards instead of re-entering this loop at
+            # PWM_FREQUENCY_HZ to do nothing.
+            needs_pwm = any(0.0 < d < 1.0 for d in duty.values())
 
             period_start = t0
             now = time.monotonic()
@@ -801,21 +909,31 @@ class RgbPwm:
                     aborted = True
                     break
 
-            if not aborted:
-                # Scheduled OFF writes for genuine intermediate duties only,
-                # processed in time order.
-                offs = sorted(
-                    (period_start + d * period, name)
-                    for name, d in duty.items()
-                    if 0.0 < d < 1.0
-                )
-                for off_time, name in offs:
-                    now = time.monotonic()
-                    if now < off_time:
-                        time.sleep(off_time - now)
-                    if not self._write(name, False):
-                        aborted = True
-                        break
+            if aborted:
+                t0 = time.monotonic()
+                continue
+
+            if not needs_pwm:
+                self._wake.wait(self.STEADY_WAKE_TIMEOUT_S)
+                self._wake.clear()
+                t0 = time.monotonic()
+                continue
+
+            # Scheduled OFF writes for genuine intermediate duties only,
+            # processed in time order. (needs_pwm being True is exactly
+            # the condition that this generator is non-empty.)
+            offs = sorted(
+                (period_start + d * period, name)
+                for name, d in duty.items()
+                if 0.0 < d < 1.0
+            )
+            for off_time, name in offs:
+                now = time.monotonic()
+                if now < off_time:
+                    time.sleep(off_time - now)
+                if not self._write(name, False):
+                    aborted = True
+                    break
 
             t0 = time.monotonic() if aborted else period_start + period
 
@@ -1000,6 +1118,22 @@ def main():
 
     try:
         while running:
+            if not pwm.is_healthy():
+                # See RgbPwm's CRASH HANDLING docstring section: an
+                # uncaught exception inside the PWM thread does not
+                # propagate here on its own - without this check, a dead
+                # PWM thread would silently freeze the RGB channels forever
+                # while this process and systemd both stay "healthy". Exit
+                # instead, so Restart=always gets a clean process restart
+                # and a fresh thread - matching what the pre-PWM design got
+                # for free from the main loop re-asserting gpio_r/g/b every
+                # second itself.
+                log.error(
+                    "RGB PWM thread is dead (see traceback above) - exiting "
+                    "so systemd restarts this daemon with a fresh thread"
+                )
+                break
+
             now = time.monotonic()
             if now - last_poll >= POLL_INTERVAL_S:
                 last_poll = now
@@ -1042,8 +1176,11 @@ def main():
                 pwm.set_duty(requested["r"], requested["g"], requested["b"])
                 time.sleep(POLL_INTERVAL_S)
     finally:
-        # Runs on SIGTERM/SIGINT and on any unhandled exception alike -
-        # systemctl stop/restart must never leave the buzzer stuck on OR
+        # Runs on SIGTERM/SIGINT, on any unhandled exception in THIS loop,
+        # and on the deliberate `break` above when the PWM thread has died
+        # (pwm.is_healthy() False) alike - systemctl stop/restart, or a
+        # systemd-triggered restart after that break, must never leave the
+        # buzzer stuck on OR
         # the strip stuck lit (see the BOOT-DEFAULT WARNING in the module
         # docstring for why "stuck lit" is the RGB failure mode to guard
         # against here, not "stuck dark"). pwm.stop() runs FIRST and joins
