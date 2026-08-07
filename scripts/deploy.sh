@@ -47,18 +47,8 @@ set -euo pipefail
 HOST="${PRINTER_HOST:-ultra@192.168.11.160}"
 API="${PRINTER_API:-http://192.168.11.160:7125}"
 REMOTE_DIR="printer_data/config"
-LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../printer-configs" && pwd)"
-# smoke-alarm.cfg добавлен 2026-08-02: printer.cfg его [include]-ит, значит без
-# него Klipper не поднимется. Файла на принтере пока нет — цикл диффа ниже это
-# переживает (пустой remote_content => файл считается изменённым и заливается,
-# бэкап делается через `cp ... || true`).
-# power-loss-recovery.cfg добавлен 2026-08-03 по той же причине, что и
-# smoke-alarm.cfg: printer.cfg его [include]-ит, значит без него Klipper не
-# поднимется вовсе. Файл ~/printer_data/config/variables.cfg, куда пишет его
-# [save_variables], в этом списке НЕТ и быть не должно — это живое состояние
-# машины (сохранённая точка прерванной печати), деплой его затирать не имеет
-# права.
-FILES=(printer.cfg smoke-alarm.cfg power-loss-recovery.cfg moonraker.conf crowsnest.conf autotune_tmc.cfg KlipperScreen.conf mainsail.cfg)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_DIR="$(cd "$SCRIPT_DIR/../printer-configs" && pwd)"
 
 ASSUME_YES=0
 DRY_RUN=0
@@ -89,6 +79,72 @@ die() {
     echo "$*" >&2
     exit 1
 }
+
+# --- FILES: автообнаружение, не ручной список (с 2026-08-07) ---------------
+# ИНЦИДЕНТ, который к этому привёл: FILES=(...) раньше был хардкоженным
+# списком. electronics-fan.cfg и rgb-status.cfg были созданы и [include]-нуты
+# в printer.cfg, но забыты в FILES= — деплой залил обновлённый printer.cfg,
+# ссылающийся на оба новых инклюда, БЕЗ самих файлов. Klipper упал в error:
+# "Include file '.../electronics-fan.cfg' does not exist". Пофикшено на месте
+# руками, но хардкоженный список — сам класс бага; он больше не хардкоженный.
+#
+# Что попадает: *.cfg и *.conf верхнего уровня printer-configs/, НЕ рекурсивно.
+# Это ровно расширения, которые реально используют printer.cfg/moonraker.conf/
+# crowsnest.conf/KlipperScreen.conf/mainsail.cfg/autotune_tmc.cfg и т.п. —
+# и с 2026-08-07 в printer-configs/ не должно лежать ничего ещё (см. CLAUDE.md,
+# раздел про printer-configs/): всё, что не деплоится, живёт в соседней
+# printer-configs-snapshots/.
+#
+# KlipperScreen-themes/ — директория, под *.cfg/*.conf не подпадает физически,
+# и это НАМЕРЕННО, не недосмотр: её реальный путь на принтере —
+# /home/ultra/KlipperScreen/styles/, СОВСЕМ другой каталог, не $REMOTE_DIR
+# (printer_data/config). Второй, рекурсивный механизм синхронизации для неё
+# сюда сознательно НЕ добавлен: репозиторная копия styles/big-font/style.css
+# уже задокументированно ОТСТАЁТ от живой версии на принтере (docs/printer-
+# status.md, запись 2026-07-30: параллельная правка на принтере добавила туда
+# .buttons_slim/.action_bar фиксы, не через printer-configs/) — наивный
+# рекурсивный деплой поверх этого расхождения ЗАТЁР бы более новые правки на
+# принтере, а не помог бы. Темы деплоятся отдельно/вручную; если это когда-
+# нибудь понадобится автоматизировать, сначала нужно подтянуть репозиторную
+# копию до живой (отдельная задача), не наоборот.
+#
+# variables.cfg НИКОГДА не должен попасть сюда: живое состояние принтера
+# (save_variables — контрольная точка прерванной печати), деплой не имеет
+# права его затирать. Раньше это гарантировалось тем, что его не было в
+# ручном списке; теперь список автоматический, поэтому исключение — явное.
+shopt -s nullglob
+FILES_FOUND=("$LOCAL_DIR"/*.cfg "$LOCAL_DIR"/*.conf)
+shopt -u nullglob
+FILES=()
+for f in "${FILES_FOUND[@]}"; do
+    base="$(basename "$f")"
+    if [ "$base" = "variables.cfg" ]; then
+        echo "ВНИМАНИЕ: variables.cfg найден в printer-configs/ — это живое состояние" >&2
+        echo "принтера (save_variables), деплой не имеет права его затирать. Пропускаю," >&2
+        echo "НЕ включаю в деплой. Убери его из printer-configs/ — ему тут не место." >&2
+        continue
+    fi
+    FILES+=("$base")
+done
+if [ ${#FILES[@]} -eq 0 ]; then
+    die "В $LOCAL_DIR не нашлось ни одного *.cfg/*.conf — это не похоже на правду, отказываюсь деплоить."
+fi
+
+# --- Линтер конфигов: жёсткий pre-flight гейт, ДО проверок состояния -------
+# Дешёвая, не зависящая от состояния печати проверка идёт первой (fail fast):
+# находка линтера (Jinja-синтаксис в gcode:, несуществующий [include], дубли
+# секций, коллизии пинов — все через настоящий парсер Klipper на самом
+# принтере, см. scripts/lint-configs.sh) = отказ деплоить, без исключений.
+# Тот же принцип "неизвестное состояние = отказ", что и у проверок ниже: код
+# выхода 2 (линтер сам не смог отработать) тоже блокирует, не только код 1.
+# Гоняется ВСЕГДА, включая --dry-run (--dry-run как раз и существует для
+# "проверить, не ломая", а линт — часть проверки).
+echo "== Линтер конфигов (pre-flight) =="
+if ! bash "$SCRIPT_DIR/lint-configs.sh" "$LOCAL_DIR"; then
+    die "СТОП: scripts/lint-configs.sh нашёл проблему (или не смог отработать) —
+см. вывод выше. Деплой отменён до исправления."
+fi
+echo
 
 # GET /printer/objects/query?<объект>. Никогда не валит скрипт сам по себе:
 # пустой ответ разбирается дальше как «состояние неизвестно» → отказ.

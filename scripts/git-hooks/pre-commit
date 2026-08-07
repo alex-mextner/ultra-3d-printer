@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Klipper config linter, as a pre-commit gate. Runs scripts/lint-configs.sh
+# against what would ACTUALLY be committed, not against the working tree —
+# those differ whenever a commit stages only some of printer-configs/, which
+# is this repo's normal convention (`git commit -- <files>`, no `git add -A`,
+# see CLAUDE.md). Linting the working tree here would be wrong in both
+# directions: it could fail a commit over an unrelated broken edit sitting
+# unstaged in the tree, or pass a commit that stages a broken file while a
+# clean version happens to still be on disk.
+#
+# So: materialize the STAGED (index) version of every *.cfg file into a throwaway
+# dir via `git checkout-index` and lint that — not `git show :path` per file,
+# which would miss unchanged-but-tracked files that also need to be in the
+# merged view for the include/duplicate checks to mean anything.
+#
+# Install (this repo has no other hooks-install convention, so this is it):
+#   git config core.hooksPath scripts/git-hooks
+# One-time, per clone. After that git runs this file directly for every
+# commit — no copying into .git/hooks, no symlink, stays in sync with the
+# tracked script automatically.
+#
+# Bypass for genuine emergencies: git commit --no-verify
+# (standard git mechanism, not something this hook has to implement itself.)
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# No-op fast path: don't pay ~4 SSH round-trips for a commit that doesn't
+# touch printer-configs/ at all (docs, scripts, cad, etc).
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '^printer-configs/'; then
+    exit 0
+fi
+
+TMPDIR="$(mktemp -d)"
+cleanup() { rm -rf "$TMPDIR"; }
+trap cleanup EXIT
+
+# Every *.cfg CURRENTLY IN THE INDEX (staged state: new/modified files get
+# their staged blob, untouched tracked files get their existing committed
+# blob, deleted-and-staged files are correctly absent) — this is exactly
+# "what printer-configs/ would look like right after this commit lands."
+mapfile -t STAGED_CFG < <(git ls-files --cached -- 'printer-configs/*.cfg')
+if [ ${#STAGED_CFG[@]} -eq 0 ]; then
+    echo "pre-commit: printer-configs/ изменился, но *.cfg среди застейдженного нет — пропускаю линт."
+    exit 0
+fi
+printf '%s\n' "${STAGED_CFG[@]}" | git -C "$REPO_ROOT" checkout-index --prefix="$TMPDIR/" --stdin
+
+echo "== pre-commit: линтую застейдженное состояние printer-configs/ =="
+# NOT "if ! cmd; then rc=$?" - under `!`, $? inside the then-block reports the
+# negated test's own truth value (always 0 there), not cmd's real exit code.
+# Found by this hook's own self-test: it printed LINT FAILED and still exited
+# 0. if/else does not have that problem - $? at the top of else is cmd's.
+if bash "$REPO_ROOT/scripts/lint-configs.sh" "$TMPDIR/printer-configs"; then
+    rc=0
+else
+    rc=$?
+fi
+if [ "$rc" -ne 0 ]; then
+    echo >&2
+    echo "СТОП: scripts/lint-configs.sh нашёл проблему в том, что уходит в коммит" >&2
+    echo "(см. вывод выше). Это застейдженное состояние, не обязательно рабочее" >&2
+    echo "дерево — если проблема в файле, который ты не трогал в этом коммите," >&2
+    echo "значит его тоже нужно застейджить, чтобы коммит остался консистентным." >&2
+    echo >&2
+    echo "Осознанный обход для настоящих чрезвычайных ситуаций:" >&2
+    echo "  git commit --no-verify" >&2
+    exit "$rc"
+fi

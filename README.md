@@ -54,7 +54,8 @@
 - [`docs/purchases.md`](docs/purchases.md) — закупки и стоимость проекта (итог считает [`scripts/bom-cost.py`](scripts/bom-cost.py)).
 - [`hardware/`](hardware/) — исходники деталей собственного изготовления (фанера, печать, металл). В закупку от них идёт только сырьё.
 - [`docs/index.html`](docs/index.html) — входная страница HTML-портала документации. Портал = методология, применимая к любой машине на RAMPS/Klipper: [`ramps-diagnostics.html`](docs/ramps-diagnostics.html) (диагностика платы и драйверов, подбор тока и скорости, безопасность 220В, UART к TMC2209) и [`reference.html`](docs/reference.html) (схемы и пиноуты). Конкретики этой машины в портале нет — она вся в `printer-status.md`.
-- [`printer-configs/`](printer-configs/) — живые конфиги Klipper/Moonraker/crowsnest, источник истины (правится только тут, см. `CLAUDE.md`).
-- [`scripts/deploy.sh`](scripts/deploy.sh) — выкатка конфигов на принтер.
+- [`printer-configs/`](printer-configs/) — живые конфиги Klipper/Moonraker/crowsnest, источник истины (правится только тут, см. `CLAUDE.md`). Деплоится на принтер автоматическим глобом `*.cfg`/`*.conf` — ничего постороннего сюда не класть.
+- [`printer-configs-snapshots/`](printer-configs-snapshots/) — НЕ деплоится: снимки/бэкапы, похожие на конфиг по месту, но не являющиеся им (например `moonraker-db-mainsail-ui.json`).
+- [`scripts/deploy.sh`](scripts/deploy.sh) — выкатка конфигов на принтер (гейтится `scripts/lint-configs.sh`).
 - [`scripts/serve-docs.sh`](scripts/serve-docs.sh) — публикация портала `docs/` на принтер → `http://192.168.11.160:8001/` (без `?v=`, сервер отдаёт `no-store`).
 - Отдельно в `docs/` — заметки по попутному проекту миграции домашнего роутера на OpenWrt (не относится к принтеру).

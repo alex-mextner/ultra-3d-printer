@@ -8,9 +8,14 @@
 #   в БД Moonraker (moonraker.db / SQLite на принтере), а не в printer.cfg,
 #   moonraker.conf и т.п. -- printer-configs/ их поэтому не отслеживал.
 # - Это ОДНОСТОРОННИЙ снимок для наглядности и бэкапа на момент запуска.
-#   Скрипт НИЧЕГО не пишет обратно на принтер и не является частью deploy.sh
-#   -- deploy.sh коммитит только файлы из своего списка FILES=(...), этот
-#   JSON туда не входит и никогда не заливается на принтер автоматически.
+#   Скрипт НИЧЕГО не пишет обратно на принтер и не является частью deploy.sh.
+#   С 2026-08-07 deploy.sh деплоит АВТОМАТИЧЕСКИМ глобом всё, что лежит в
+#   printer-configs/*.cfg и *.conf -- именно поэтому этот JSON физически
+#   живёт в СОСЕДНЕЙ директории printer-configs-snapshots/, а не в
+#   printer-configs/ самой: не конфиг-файл вообще (не .cfg/.conf, Klipper и
+#   Moonraker его не читают), и деплой на принтер для него не имеет смысла --
+#   класть его рядом с реальными конфигами означало бы либо городить
+#   исключение в глобе, либо рисковать, что он туда всё-таки попадёт.
 # - Импорт/восстановление из этого файла НЕ реализован и не поддерживается:
 #   БД Moonraker -- живое состояние, релевантное конкретной инсталляции
 #   (id виджетов, версии схемы), слепое накатывание чужого/старого снимка
@@ -34,7 +39,7 @@ set -euo pipefail
 
 MOONRAKER_URL="${MOONRAKER_URL:-http://192.168.11.160:7125}"
 NAMESPACE="mainsail"
-OUT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../printer-configs" && pwd)/moonraker-db-mainsail-ui.json"
+OUT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../printer-configs-snapshots" && pwd)/moonraker-db-mainsail-ui.json"
 KEYS=(general dashboard uiSettings control)
 
 echo "== Проверяю связь с Moonraker ($MOONRAKER_URL) =="
@@ -91,4 +96,4 @@ JSON
 
 echo
 echo "OK: снимок записан в $OUT"
-echo "Дальше: git diff printer-configs/moonraker-db-mainsail-ui.json && git add/commit руками."
+echo "Дальше: git diff printer-configs-snapshots/moonraker-db-mainsail-ui.json && git add/commit руками."
