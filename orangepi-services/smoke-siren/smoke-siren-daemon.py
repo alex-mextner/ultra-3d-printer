@@ -88,20 +88,26 @@
 # still live in printer-configs/rgb-status.cfg's header - read that first,
 # this section only covers what changed 2026-08-07 and the Orange-Pi side.
 #
-# THE ARCHITECTURE, IN ONE SENTENCE: rgb-status.cfg's three [output_pin]
-# sections (rgb_request_r/g/b, AUX-4 D23/D25/D27) are PURE VIRTUAL REQUEST
-# FLAGS (same pattern as siren_armed in smoke-alarm.cfg - nothing physically
-# wired to those AVR pins at all); Klipper's only job for RGB is to set them
-# via SET_PIN at the lifecycle events rgb-status.cfg documents. THIS daemon
-# polls those flags over Moonraker (rgb_requested(), same moonraker_get()
-# plumbing as alarm_source) once per second and mirrors them onto the real
+# THE ARCHITECTURE, IN ONE SENTENCE: rgb-status.cfg's [led rgb_strip] object
+# (Klipper's stock PWM-LED handler, AUX-4 dummy pins D23/D25/D27) is a real
+# Klipper object with DUMMY PINS - nothing physically wired to those AVR
+# pins at all (same "unconnected on purpose" idea as the output_pin flags
+# this replaced 2026-08-07, and as siren_armed in smoke-alarm.cfg); Klipper's
+# only job for RGB is to hold and report a requested color via SET_LED, sent
+# either by the lifecycle macros rgb-status.cfg documents or by Mainsail's
+# native color-picker widget (both call the same SET_LED command - one
+# object, one path, not two). THIS daemon polls that color over Moonraker
+# (rgb_requested(), same moonraker_get() plumbing as alarm_source) once per
+# second, THRESHOLDS each channel at 0.5 (rgb-status.cfg's "DIMMING:
+# THRESHOLD, NOT SMOOTH" section - the physical MOSFETs are pure on/off, the
+# picker's fractional color is not), and mirrors the result onto the real
 # MOSFET gates, which it drives from three Orange Pi GPIO pins through an
 # inverting KSP42(TA) pre-driver stage - see "WHY A LEVEL SHIFTER" below -
 # except during a fire alarm, when it overrides them entirely (see below).
 # Consequence worth stating plainly: there is up to ~1s of latency between a
-# lifecycle macro call (e.g. RGB_PRINTING) and the physical strip actually
-# changing color - the same POLL_INTERVAL_S already used for the siren, not
-# a new number, but a new place it applies.
+# color change (lifecycle macro call or a Mainsail picker click) and the
+# physical strip actually changing color - the same POLL_INTERVAL_S already
+# used for the siren, not a new number, but a new place it applies.
 #
 # WHY A LEVEL SHIFTER: Orange Pi GPIO is 3.3V logic. IRFZ44N's VGS(th) is
 # 2.0V min / 4.0V max (Infineon PD-94787B) - 3.3V is BELOW the worst-case
@@ -248,7 +254,7 @@
 # and printer-status.md basket C9 for the full blocker list).
 #
 # FIRE ALARM OVERRIDE - reuses alarm_source() UNCHANGED, does not touch
-# rgb_request_r's old shutdown_value mechanism at all. When alarm_source()
+# rgb_strip's color_data or shutdown behavior at all. When alarm_source()
 # is not None, RED blinks at the exact same PULSE_HALF_PERIOD_S cadence as
 # the siren (same loop iteration drives both), GREEN and BLUE are forced
 # off, and the REQUEST-flag mirroring is skipped entirely - fire alarm wins
@@ -274,6 +280,14 @@ MOONRAKER_BASE = "http://localhost:7125"  # localhost only - this runs ON the
 POLL_INTERVAL_S = 1.0        # how often Moonraker is asked, while quiet AND while alarming
 PULSE_HALF_PERIOD_S = 0.3    # ~300ms on / 300ms off while alarming
 HTTP_TIMEOUT_S = 3.0
+RGB_THRESHOLD = 0.5          # led rgb_strip's color_data is fractional
+                              # (0.0-1.0, from Mainsail's color-picker or a
+                              # macro); the physical MOSFETs are pure on/off.
+                              # >=0.5 on a channel -> that channel's real
+                              # MOSFET on, <0.5 -> off. See rgb-status.cfg's
+                              # "DIMMING: THRESHOLD, NOT SMOOTH" section for
+                              # the full reasoning - this is a documented,
+                              # intentional limitation, not an oversight.
 SHUTDOWN_MARKER = "SMOKE ALARM"  # must match printer-configs/smoke-alarm.cfg
                                   # _SMOKE_ESTOP - see the CONTRACT note there
                                   # before ever changing this string.
@@ -425,35 +439,41 @@ def alarm_source():
 
 
 def rgb_requested():
-    """Poll the three REQUEST flags Klipper sets via RGB_OFF/RGB_PREPARING/
-    RGB_PRINTING (printer-configs/rgb-status.cfg) - output_pin
-    rgb_request_r/g/b on AUX-4 D23/D25/D27, PURE VIRTUAL FLAGS with nothing
-    physically wired to those AVR pins (same pattern as siren_armed).
+    """Poll the color Klipper's [led rgb_strip] object is holding
+    (printer-configs/rgb-status.cfg) - set via SET_LED, either by RGB_OFF/
+    RGB_PREPARING/RGB_PRINTING or by Mainsail's native color-picker widget
+    on rgb_strip. red_pin/green_pin/blue_pin are DUMMY AVR pins (AUX-4
+    D23/D25/D27), nothing physically wired to them (same pattern as
+    siren_armed) - Klipper only holds and reports the requested color.
+    color_data is fractional (0.0-1.0 per channel, klippy/extras/led.py's
+    LEDHelper.get_status() returns {'color_data': [(r,g,b,w)]}); this
+    function THRESHOLDS each channel at RGB_THRESHOLD before returning it,
+    because the physical MOSFETs this daemon drives are pure on/off - see
+    rgb-status.cfg's "DIMMING: THRESHOLD, NOT SMOOTH" section.
     Returns {"r": bool, "g": bool, "b": bool}, or None on ANY failure -
-    including "rgb-status.cfg isn't included in printer.cfg yet", which is
-    the state as of 2026-08-07. Confirmed LIVE against this exact printer:
-    querying an output_pin Klipper doesn't know about returns HTTP 200 with
-    an EMPTY {} for that object's status (not an HTTP error, does not
-    poison the other objects in the same query) - so this hits the
-    KeyError branch below and returns None, same as a real Moonraker
-    outage would. The caller keeps the last known values in that case
-    (initialized to all-False = off, matching every other output_pin's
-    startup default in this project) - so running this daemon before
-    rgb-status.cfg is deployed is inert and safe, not a crash risk."""
-    resp = moonraker_get(
-        "/printer/objects/query?output_pin%20rgb_request_r"
-        "&output_pin%20rgb_request_g&output_pin%20rgb_request_b"
-    )
+    including "rgb-status.cfg isn't included in printer.cfg yet" or
+    "rgb_strip isn't defined". Confirmed LIVE against this exact printer:
+    querying an object Klipper doesn't know about returns HTTP 200 with an
+    EMPTY {} for that object's status (not an HTTP error, does not poison
+    other objects in the same query) - so this hits the KeyError/IndexError
+    branch below and returns None, same as a real Moonraker outage would.
+    The caller keeps the last known values in that case (initialized to
+    all-False = off, matching every other output_pin's startup default in
+    this project) - so running this daemon before rgb-status.cfg is
+    deployed, or before rgb_strip has ever been set, is inert and safe, not
+    a crash risk."""
+    resp = moonraker_get("/printer/objects/query?led%20rgb_strip")
     if resp is None:
         return None
     try:
-        status = resp["result"]["status"]
+        color = resp["result"]["status"]["led rgb_strip"]["color_data"][0]
+        red, green, blue = color[0], color[1], color[2]
         return {
-            "r": float(status["output_pin rgb_request_r"]["value"]) > 0,
-            "g": float(status["output_pin rgb_request_g"]["value"]) > 0,
-            "b": float(status["output_pin rgb_request_b"]["value"]) > 0,
+            "r": float(red) >= RGB_THRESHOLD,
+            "g": float(green) >= RGB_THRESHOLD,
+            "b": float(blue) >= RGB_THRESHOLD,
         }
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, IndexError, TypeError, ValueError):
         return None
 
 
