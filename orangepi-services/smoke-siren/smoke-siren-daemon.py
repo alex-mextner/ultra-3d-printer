@@ -88,23 +88,20 @@
 # still live in printer-configs/rgb-status.cfg's header - read that first,
 # this section only covers what changed 2026-08-07 and the Orange-Pi side.
 #
-# THE ARCHITECTURE CHANGE, IN ONE SENTENCE: rgb-status.cfg's three
-# [output_pin] sections (rgb_request_r/g/b, AUX-4 D23/D25/D27) used to drive
-# the MOSFET gates DIRECTLY off RAMPS 5V logic. They no longer do - as of
-# 2026-08-07 they are PURE VIRTUAL REQUEST FLAGS (same pattern as
-# siren_armed in smoke-alarm.cfg, nothing physically wired to those AVR
-# pins at all). The MOSFET gates are now driven from HERE, from three
-# Orange Pi GPIO pins, through an inverting KSP42(TA) pre-driver stage - see
-# "WHY A LEVEL SHIFTER" below. Klipper's only remaining job for RGB is to
-# set the three REQUEST flags via SET_PIN at the same lifecycle events
-# rgb-status.cfg already documents; THIS daemon polls those flags over
-# Moonraker (rgb_requested(), same moonraker_get() plumbing as alarm_source)
-# once per second and mirrors them onto the real GPIO-driven channels -
+# THE ARCHITECTURE, IN ONE SENTENCE: rgb-status.cfg's three [output_pin]
+# sections (rgb_request_r/g/b, AUX-4 D23/D25/D27) are PURE VIRTUAL REQUEST
+# FLAGS (same pattern as siren_armed in smoke-alarm.cfg - nothing physically
+# wired to those AVR pins at all); Klipper's only job for RGB is to set them
+# via SET_PIN at the lifecycle events rgb-status.cfg documents. THIS daemon
+# polls those flags over Moonraker (rgb_requested(), same moonraker_get()
+# plumbing as alarm_source) once per second and mirrors them onto the real
+# MOSFET gates, which it drives from three Orange Pi GPIO pins through an
+# inverting KSP42(TA) pre-driver stage - see "WHY A LEVEL SHIFTER" below -
 # except during a fire alarm, when it overrides them entirely (see below).
-# Consequence worth stating plainly: there is now up to ~1s of latency
-# between a lifecycle macro call (e.g. RGB_PRINTING) and the physical strip
-# actually changing color - the same 1s POLL_INTERVAL_S already used for the
-# siren, not a new number, but a new place it applies.
+# Consequence worth stating plainly: there is up to ~1s of latency between a
+# lifecycle macro call (e.g. RGB_PRINTING) and the physical strip actually
+# changing color - the same POLL_INTERVAL_S already used for the siren, not
+# a new number, but a new place it applies.
 #
 # WHY A LEVEL SHIFTER: Orange Pi GPIO is 3.3V logic. IRFZ44N's VGS(th) is
 # 2.0V min / 4.0V max (Infineon PD-94787B) - 3.3V is BELOW the worst-case
