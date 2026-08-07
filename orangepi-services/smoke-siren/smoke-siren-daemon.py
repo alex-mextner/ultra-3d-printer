@@ -98,16 +98,17 @@
 # native color-picker widget (both call the same SET_LED command - one
 # object, one path, not two). THIS daemon polls that color over Moonraker
 # (rgb_requested(), same moonraker_get() plumbing as alarm_source) once per
-# second, THRESHOLDS each channel at 0.5 (rgb-status.cfg's "DIMMING:
-# THRESHOLD, NOT SMOOTH" section - the physical MOSFETs are pure on/off, the
-# picker's fractional color is not), and mirrors the result onto the real
-# MOSFET gates, which it drives from three Orange Pi GPIO pins through an
-# inverting KSP42(TA) pre-driver stage - see "WHY A LEVEL SHIFTER" below -
-# except during a fire alarm, when it overrides them entirely (see below).
-# Consequence worth stating plainly: there is up to ~1s of latency between a
-# color change (lifecycle macro call or a Mainsail picker click) and the
-# physical strip actually changing color - the same POLL_INTERVAL_S already
-# used for the siren, not a new number, but a new place it applies.
+# second, and drives each channel through REAL software PWM (see the
+# "SOFTWARE PWM" section below) rather than a fixed on/off threshold, so the
+# picker's fractional brightness actually reaches the physical strip as
+# time-averaged brightness - except during a fire alarm, when it overrides
+# them entirely (see below). Consequence worth stating plainly: there is up
+# to ~1s of latency between a color/brightness change (lifecycle macro call
+# or a Mainsail picker click/drag) and the PWM thread's TARGET duty updating
+# - the same POLL_INTERVAL_S already used for the siren, not a new number,
+# but a new place it applies. The PWM thread itself then reaches that new
+# target within at most one PWM period (5ms at the chosen frequency - see
+# below), which is imperceptible next to the 1s poll latency that dominates.
 #
 # WHY A LEVEL SHIFTER: Orange Pi GPIO is 3.3V logic. IRFZ44N's VGS(th) is
 # 2.0V min / 4.0V max (Infineon PD-94787B) - 3.3V is BELOW the worst-case
@@ -140,6 +141,10 @@
 # lit). This is why the Gpio class below grows an active_low flag and a
 # set_on() method (see its docstring) - "on" and "GPIO high" are opposites
 # for these three pins, and that inversion has to be impossible to miss.
+# The PWM layer (RgbPwm, below) NEVER writes the raw GPIO level itself - it
+# only ever calls set_on(), the same inversion-aware method the alarm-blink
+# code already used pre-PWM - so the active_low math lives in exactly one
+# place regardless of whether a channel is being driven steady or PWM'd.
 #
 # RESISTOR MATH - both values chosen, not copied, using numbers already
 # established in this project tonight (electronics-fan.cfg's KSP42 table:
@@ -172,9 +177,14 @@
 #     already established in rgb-status.cfg's header for the ORIGINAL
 #     (direct-drive) design; the pull-up resistor plays the role the RAMPS
 #     pin's own ~40R source impedance used to play there. Microsecond-scale
-#     against lifecycle-event-rate switching (at most a few times per
-#     print) - no series gate resistor needed, same conclusion as before,
-#     different reason.
+#     against the ORIGINAL lifecycle-event-rate switching (at most a few
+#     times per print) - no series gate resistor needed there. Now that PWM
+#     toggles these gates up to 200x/second (see SOFTWARE PWM below), this
+#     same tau is still >100x smaller than the ~5ms PWM period, so it stays
+#     negligible - the gate fully charges/discharges in about 15-18us
+#     against a period two and a half orders of magnitude longer; this was
+#     re-checked specifically for the PWM case, not assumed to still hold
+#     just because it held for the slower original use.
 #   10k/10k was the pair suggested when this circuit was designed by hand on
 #   paper tonight; the math above confirms it rather than replacing it.
 #
@@ -213,6 +223,35 @@
 #   here than it did for the siren alone, because for an active_low pin
 #   unexporting (reverting to high-Z) means full brightness, not silence.
 #
+#   🔴 PWM ADDS A SECOND, NARROWER FAILURE MODE - read before assuming the
+#   above is the only way a channel can end up "wrong":
+#   The paragraph above covers a pin that was NEVER driven at all (true
+#   floating, no prior export/write). PWM introduces a second, genuinely
+#   different case: once this daemon HAS exported a pin and started
+#   actively PWM-toggling it, a process death that skips the finally: block
+#   (SIGKILL, an OOM-kill, a segfault - anything that doesn't run normal
+#   Python exception unwinding) freezes that pin at WHATEVER physical level
+#   its last sysfs write happened to leave it at. For a channel sitting at
+#   duty 0.0 or 1.0 (steady off, or steady on - the only values the
+#   lifecycle macros RGB_OFF/RGB_PREPARING/RGB_PRINTING ever request) this
+#   is no different from before PWM existed: one steady value, frozen at
+#   exactly that value, fully deterministic. But for a channel actively
+#   sitting at an intermediate duty (0<duty<1 - only reachable by hand,
+#   dragging Mainsail's brightness slider mid-color) the pin is being
+#   toggled up to PWM_FREQUENCY_HZ times a second, so a crash lands at some
+#   essentially arbitrary point in that channel's on/off cycle - the
+#   channel could freeze ON or OFF, NOT predictably "full brightness" like
+#   the true-floating case above. Scope this narrowly rather than let it
+#   sound worse than it is: it (a) can only happen to a channel that has
+#   already been successfully exported at least once - any crash before
+#   that point is still the fully-deterministic full-ON floating case
+#   above, unchanged by PWM; and (b) can only affect a channel actively
+#   mid-dim at the moment of death - this status light spends the
+#   overwhelming majority of its time at the lifecycle macros' steady 0/1
+#   values, where this new mode simply does not apply. Worst realistic case
+#   is one channel (not all three) stuck at an unpredictable on/off
+#   snapshot, not the three-channel full-white worst case above.
+#
 # GPIO PINS - verified LIVE 2026-08-07 via `gpioinfo` on gpiochip0 (the
 # sunxi H3 pinctrl chip - NOT gpiochip1, which is a separate 32-line chip
 # with its own overlapping line numbers; scoping to gpiochip0 mattered,
@@ -225,7 +264,10 @@
 #   BLUE  -> sysfs gpio18 = PA18   (line 18: `input`, unclaimed)
 # For comparison, the existing siren pin gpio110/PD14 showed
 # `output consumer=sysfs` in the same dump (this daemon's own export) -
-# confirms the scoping/arithmetic against a pin already known-good.
+# confirms the scoping/arithmetic against a pin already known-good. These
+# same three lines now also carry PWM (see SOFTWARE PWM below) - no pin
+# reassignment was needed for that, the circuit and pin choice are
+# unchanged, only the drive WAVEFORM on them changed.
 # Physical 40-pin-header contact numbers (as opposed to the sysfs line
 # numbers above, which are the ones actually verified live this session):
 # printer-status.md's "Свободные GPIO на Orange Pi" line already lists
@@ -256,14 +298,189 @@
 # FIRE ALARM OVERRIDE - reuses alarm_source() UNCHANGED, does not touch
 # rgb_strip's color_data or shutdown behavior at all. When alarm_source()
 # is not None, RED blinks at the exact same PULSE_HALF_PERIOD_S cadence as
-# the siren (same loop iteration drives both), GREEN and BLUE are forced
-# off, and the REQUEST-flag mirroring is skipped entirely - fire alarm wins
-# over whatever color was requested, unconditionally, for as long as
-# alarm_source() stays non-None. This inherits every property alarm_source()
-# already has (proven live 2026-08-06: independent of klippy hanging,
-# independent of the shutdown-command whitelist, degrades safely to "pin
-# held/left at its last known state" on a Moonraker outage) for free,
-# because it IS alarm_source() - no new detection logic was written.
+# the siren (same loop iteration drives both - this did NOT change when PWM
+# was added, see below), GREEN and BLUE are forced off, and the PWM thread
+# is told (via RgbPwm.set_alarm(True)) to stop touching gpio_r/g/b entirely
+# for as long as the override is active - fire alarm wins over whatever
+# color/brightness was requested, unconditionally. This inherits every
+# property alarm_source() already has (proven live 2026-08-06: independent
+# of klippy hanging, independent of the shutdown-command whitelist,
+# degrades safely to "pin held/left at its last known state" on a Moonraker
+# outage) for free, because it IS alarm_source() - no new detection logic
+# was written.
+#   HOW THE HANDOFF IS RACE-FREE: gpio_r/g/b's underlying sysfs writes are
+#   guarded by one lock (RgbPwm._lock), acquired individually around EVERY
+#   write either side makes - not held for a whole PWM period, and not held
+#   for the whole alarm-blink loop either. The PWM thread checks the alarm
+#   flag before EACH of the up to six writes it might make in a period, so
+#   a fire-alarm transition landing mid-period aborts that period's
+#   remaining writes within roughly one write's latency (tens of
+#   microseconds - see SOFTWARE PWM measurements below), not up to a whole
+#   period later. Worst-case bound either direction (alarm turning on, or
+#   releasing back to PWM) is about one PWM period, ~5ms at the chosen
+#   200Hz - see RgbPwm's docstring for the exact mechanism. ~5ms is far
+#   below anything perceptible on a status light, and two orders of
+#   magnitude smaller than the alarm's own up-to-1s DETECTION latency
+#   (alarm_source() is only polled once a second, unchanged by this work) -
+#   so it is not the bottleneck for how fast the override becomes visible.
+#   The siren pin itself (gpio110) is written directly by the main loop the
+#   entire time, exactly as before PWM existed - it was never touched by
+#   the PWM thread and has zero lock contention of any kind.
+# ===========================================================================
+# SOFTWARE PWM FOR REAL DIMMING - added 2026-08-07, same evening as the
+# [led]/color-picker work above, in response to: the picker's brightness
+# slider did nothing physically (any value above the old 0.5 threshold
+# snapped to full-on, below snapped to full-off) - confirmed live tonight
+# cycling red/green/blue/yellow/white/off correctly, but not dimming.
+# ===========================================================================
+# WHY SOFTWARE, NOT HARDWARE: checked live tonight, `ls /sys/class/pwm/` on
+# this Orange Pi is empty - no PWM chip/overlay is active, so there is no
+# hardware timer this daemon could hand duty-cycle generation off to. Real
+# dimming has to come from THIS process rapidly toggling each GPIO pin's
+# sysfs value file at a target duty cycle and letting human eye/camera
+# persistence average it into a brightness level - "software PWM" in the
+# literal sense, not Klipper's (irrelevant here - see next paragraph) and
+# not a kernel PWM driver.
+#
+# WHETHER KLIPPER'S [led] `hardware_pwm` FLAG MATTERS HERE: checked against
+# the actual source on this printer (~/klipper/klippy/extras/led.py,
+# class PrinterPWMLED / LEDHelper, 2026-08-07). `hardware_pwm` (config
+# default False; there is no config key literally named `pwm`) is passed
+# straight into `mcu_pin.setup_cycle_time(cycle_time, hardware_pwm)` and
+# affects ONLY how Klipper's firmware side would generate a PWM waveform on
+# red_pin/green_pin/blue_pin - which are the dummy, physically-unconnected
+# AUX-4 pins (see rgb-status.cfg). `get_status()` returns
+# `{'color_data': self.led_state}` where `led_state` is the raw
+# `(red,green,blue,white)` float tuple set by `cmd_SET_LED` - never
+# quantized, rounded, or otherwise touched by `hardware_pwm` anywhere in
+# this file. Conclusion, verified rather than assumed: `hardware_pwm`
+# cannot affect what this daemon reads from Moonraker either way, because
+# it only governs a PWM waveform on pins nothing is physically attached to.
+# rgb-status.cfg's `[led rgb_strip]` section was left unchanged - no config
+# edit was needed for real dimming to work, only this file and the daemon's
+# reading of color_data as a continuous float instead of thresholding it.
+#
+# HOW THE FREQUENCY WAS CHOSEN - measured, not assumed, on THIS board:
+#   Two throwaway scripts were run directly on the Orange Pi against a
+#   confirmed-free, confirmed-UNWIRED scratch pin (gpio200/PG8, physical
+#   header pin 32 - docs/printer-status.md, "Свободные GPIO на Orange Pi":
+#   "PG8/PG9 (32/36) — по-прежнему свободны") - toggling it has zero
+#   physical effect on anything, so this was safe to hammer without warning
+#   the user (unlike anything touching gpio18/19/21, which ARE wired to the
+#   live strip).
+#   1) Raw sysfs write latency, N=3000 each, two strategies:
+#        reopen-every-write (this file's ORIGINAL Gpio.set() - open()/
+#        write()/close() every toggle): mean 161us, median 133us,
+#        p95 276us, p99 377us, max 998us. CPU time per write: ~152us.
+#        keep-fd-open (open the value file ONCE, then seek(0)+write+flush
+#        per toggle - the standard fast sysfs-GPIO pattern): mean 19.4us,
+#        median 18.7us, p95 21.0us, p99 28.3us, max 122us. CPU time per
+#        write: ~18us.
+#      ~8x faster and ~8x less CPU per write with the fd kept open - this
+#      is why Gpio.export() below now opens the value file once and keeps
+#      it, and Gpio.set() now does seek+write+flush instead of reopening.
+#      This benefits the siren pin and the alarm-blink writes too (free
+#      win, not PWM-specific), though neither of those was frequent enough
+#      for the old cost to matter on its own.
+#   2) time.sleep() overshoot/jitter at PWM-relevant target intervals
+#      (N=1000 each, no GPIO involved, pure scheduler timing): at 5ms
+#      targets, mean overshoot 106.6us, median 99.2us, p95 150.4us,
+#      p99 192.5us, max (one outlier) 1140.9us. Broadly similar shape at
+#      1/2/8.33/10ms targets (means 89-116us, occasional single-sample
+#      spikes to 1-3ms, almost certainly other processes on this shared,
+#      RAM-constrained board getting scheduled ahead of this one - Klipper/
+#      Moonraker/KlipperScreen/crowsnest are all running at the same time,
+#      see CLAUDE.md).
+#   CHOSEN: PWM_FREQUENCY_HZ = 200 (period 5ms). Reasoning against the
+#   measured numbers above, not against a number remembered from other
+#   boards:
+#     - Typical sleep jitter (~100us) is about 2% of a 5ms period - not
+#       perceptible on a diffuse status light. The rare 1-3ms outlier spikes
+#       are a MINORITY of samples (roughly 1 in 1000 in this data) and
+#       affect at most a single ~5ms period out of many per second - far
+#       below anything the eye integrates as flicker, unlike e.g. an audio
+#       glitch where a single dropped sample is audible.
+#     - Worst-case write load per period is 6 writes (all 3 channels at a
+#       genuine intermediate duty: 3 "turn on" writes at period start + 3
+#       scheduled "turn off" writes later in the period - see RgbPwm). At
+#       the keep-fd-open p99 of ~28us each, 6 writes cost roughly
+#       ~170us worst-case-ish, under 4% of a 5ms period - comfortable
+#       margin, and this worst case only happens while multiple channels
+#       are simultaneously mid-dim, not during normal lifecycle colors
+#       (see RgbPwm's docstring for why 0/1 duty costs virtually nothing).
+#     - 200Hz sits inside the "100Hz-1kHz, common practical range for LED
+#       PWM dimming" band, on the more conservative (lower-frequency, more
+#       jitter headroom) side of it rather than pushed to the edge of what
+#       this board's write/sleep numbers could sustain - deliberately not
+#       maximized, because there is no benefit to this status light from
+#       going faster once flicker is already imperceptible, and every extra
+#       Hz is pure added CPU/write-syscall load for no visible gain.
+#     - This machine also has a webcam (rgb-status.cfg: "PRINTING (white)
+#       ... illumination for the webcam"). A PWM frequency with a long
+#       period relative to typical camera exposure time could in principle
+#       alias into visible banding; 5ms is short relative to a 30fps
+#       camera's usual >=8-10ms exposure at typical bench lighting, so
+#       multiple PWM cycles should average out within one frame. This is
+#       reasoning, not a webcam test performed tonight - flagged honestly
+#       rather than claimed as verified.
+#   NOT CHOSEN: something in the tens-of-Hz range (e.g. 60Hz) - would have
+#   left less margin over the observed jitter tail without buying anything,
+#   since even 200Hz already has comfortable headroom on this hardware.
+#
+# CPU IMPACT - measured, not just reasoned, without ever touching the live
+# strip: the exact RgbPwm class below (imported and run, not reimplemented)
+# was pointed at three more confirmed-free, confirmed-unwired scratch pins
+# (gpio2/PA2, gpio3/PA3, gpio200/PG8 - "Свободные GPIO на Orange Pi" again)
+# and run standalone for 8-second windows at three duty patterns, with this
+# PROCESS's own CPU time read from /proc/self/stat (utime+stime ticks)
+# before/after each window - measures the daemon's actual CPU consumption,
+# not a proxy:
+#   worst case (all 3 channels genuinely mid-duty, e.g. 0.5/0.3/0.7,
+#     maximizing writes/period): 11.50% of one core.
+#   steady full-on (1.0/1.0/1.0, matches RGB_PRINTING):    3.00% of one core.
+#   steady off     (0.0/0.0/0.0, matches RGB_OFF):          4.25% of one core.
+#   idle baseline (process alive, PWM thread not started):  0.00%.
+# Correction to an earlier assumption made before this was actually
+# measured: the steady cases are NOT near-zero the way the raw write-cost
+# argument alone would suggest (Gpio.set()'s cache does make the SYSCALL
+# count near-zero for a steady channel, that part held up) - what the
+# syscall argument missed is the fixed per-period Python bookkeeping this
+# thread pays 200 times a second regardless of duty (lock acquisitions,
+# a dict copy of the duty snapshot, monotonic() calls, constructing/sorting
+# the (usually empty) off-edge list). That bookkeeping, not the writes
+# themselves, is why steady-state sits at a real 3-4% instead of ~0%. Left
+# in this comment with the actual numbers, not hedged as "reasoned only",
+# because the first attempt at this estimate undersold it and this project
+# has already been asked once tonight not to repeat that pattern.
+# In absolute terms: worst case 11.5% of ONE of this board's four cores is
+# at most a few percent of total system capacity even in the pathological
+# case of three channels being dragged simultaneously (a rare, manual,
+# momentary state, not a steady operating point) - and the pre-PWM version
+# of this thread's work (a plain 1Hz poll) cost effectively 0%, so this is
+# a real, honestly-reported increase, not a free lunch, even though it
+# stays comfortably inside what a 512MB/4-core board run alongside Klipper/
+# Moonraker/KlipperScreen/crowsnest can absorb. Re-run scripts equivalent to
+# this session's rgb_pwm_cpu_test.py (not kept in this repo - ad hoc,
+# scratch-pin-only, safe to recreate) if PWM_FREQUENCY_HZ ever changes and
+# this number needs rechecking.
+#
+# THREADING MODEL - one dedicated thread (RgbPwm) drives all three channels
+# together, NOT one thread per channel. See RgbPwm's own docstring for the
+# full reasoning (GIL/scheduler cost of 3 independent sleep loops vs 1;
+# synchronized period boundaries avoiding inter-channel drift). The existing
+# 1Hz main loop is now reduced, for RGB, to: poll Moonraker, and hand the
+# PWM thread a new TARGET duty (pwm.set_duty(...)) or a new alarm-override
+# state (pwm.set_alarm(...)) - it no longer touches gpio_r/g/b directly
+# except during a fire alarm, where it still does, unchanged from before.
+#
+# HONESTY ABOUT PRECISION: this is Python + sysfs + a non-realtime Linux
+# kernel doing the toggling, not a hardware PWM peripheral or even a
+# microcontroller bit-banging in a tight uninterruptible loop. The jitter
+# numbers above are real and were left in this comment on purpose - this
+# design trades lab-grade duty-cycle accuracy for "good enough that a human
+# cannot see the difference on a diffuse status light," which is the actual
+# requirement here, not a claim that this is a precision PWM source suitable
+# for, say, driving a motor or measuring anything.
 # ===========================================================================
 import argparse
 import json
@@ -271,6 +488,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -280,14 +498,19 @@ MOONRAKER_BASE = "http://localhost:7125"  # localhost only - this runs ON the
 POLL_INTERVAL_S = 1.0        # how often Moonraker is asked, while quiet AND while alarming
 PULSE_HALF_PERIOD_S = 0.3    # ~300ms on / 300ms off while alarming
 HTTP_TIMEOUT_S = 3.0
-RGB_THRESHOLD = 0.5          # led rgb_strip's color_data is fractional
-                              # (0.0-1.0, from Mainsail's color-picker or a
-                              # macro); the physical MOSFETs are pure on/off.
-                              # >=0.5 on a channel -> that channel's real
-                              # MOSFET on, <0.5 -> off. See rgb-status.cfg's
-                              # "DIMMING: THRESHOLD, NOT SMOOTH" section for
-                              # the full reasoning - this is a documented,
-                              # intentional limitation, not an oversight.
+PWM_FREQUENCY_HZ = 200       # see "SOFTWARE PWM FOR REAL DIMMING" above for
+                              # the full measured basis (sysfs write latency
+                              # + time.sleep() jitter on THIS board) - not a
+                              # number carried over from general knowledge of
+                              # other Linux boards.
+PWM_PERIOD_S = 1.0 / PWM_FREQUENCY_HZ  # 0.005s = 5ms
+DUTY_SNAP_EPSILON = 0.01     # a requested duty within 1% of 0.0/1.0 (a
+                              # difference no human can see) snaps to exactly
+                              # 0.0/1.0 - keeps the "steady color costs one
+                              # write total, not one per period" property
+                              # (see RgbPwm docstring) even if the picker's
+                              # slider lands at, say, 0.995 instead of a
+                              # clean 1.0.
 SHUTDOWN_MARKER = "SMOKE ALARM"  # must match printer-configs/smoke-alarm.cfg
                                   # _SMOKE_ESTOP - see the CONTRACT note there
                                   # before ever changing this string.
@@ -301,9 +524,31 @@ logging.basicConfig(
 log = logging.getLogger("smoke-siren-daemon")
 
 
+def _snap_duty(value):
+    """Clip to [0.0, 1.0] and snap near-boundary values to exactly 0.0/1.0
+    (see DUTY_SNAP_EPSILON). Shared by RgbPwm.set_duty() - kept as a plain
+    function rather than a method since it has no state, just arithmetic."""
+    value = max(0.0, min(1.0, float(value)))
+    if value < DUTY_SNAP_EPSILON:
+        return 0.0
+    if value > 1.0 - DUTY_SNAP_EPSILON:
+        return 1.0
+    return value
+
+
 class Gpio:
     """Thin sysfs wrapper for exactly one output pin. See the module
     docstring for why sysfs and not libgpiod.
+
+    Keeps the sysfs value file open for the life of the process (opened once
+    in export(), never closed until the process exits) instead of
+    open()/write()/close() on every toggle - measured on this board
+    (SOFTWARE PWM section above) at ~8x lower latency and ~8x lower CPU per
+    write. This matters for every pin now, not just the PWM'd ones - it was
+    a straightforward win with no downside, since this file already commits
+    to never unexporting (see the comment below the class), so the fd's
+    lifetime already matches the pin's intended "stay exported and driven"
+    lifetime.
 
     active_low: this pin drives an inverting KSP42(TA) pre-driver stage
     (see the RGB STATUS LIGHT section of the module docstring) - GPIO HIGH
@@ -314,13 +559,17 @@ class Gpio:
     edit to this file) cannot accidentally call the raw set()/toggle() and
     light the strip backwards. set()/toggle() stay raw and physical,
     unaware of active_low - that is what the siren pin (active_low=False,
-    the default) still uses, completely unchanged from before RGB existed."""
+    the default) still uses, completely unchanged from before RGB existed.
+    RgbPwm (below) drives the RGB pins EXCLUSIVELY through set_on() too -
+    the PWM math never touches raw GPIO levels, so the inversion still
+    lives in exactly one place even under PWM."""
 
     def __init__(self, num, active_low=False):
         self.num = num
         self.active_low = active_low
         self.path = f"{GPIO_SYSFS}/gpio{num}"
         self._high = None  # unknown until first set()
+        self._fd = None    # opened once in export(), kept open - see above
 
     def export(self):
         if not os.path.isdir(self.path):
@@ -336,15 +585,23 @@ class Gpio:
                 raise OSError(f"gpio{self.num}: export did not create {self.path}")
         with open(f"{self.path}/direction", "w") as f:
             f.write("out")
+        if self._fd is None:
+            self._fd = open(f"{self.path}/value", "w")
 
     def set(self, high):
         """Raw physical write: True drives the sysfs pin HIGH, full stop.
         Bypasses active_low entirely - see set_on() for the logic-level
-        version an active_low pin (the three RGB pins) should actually use."""
+        version an active_low pin (the three RGB pins) should actually use.
+        Uses the persistent fd opened in export() - seek(0)+write+flush,
+        not open()/write()/close() (see class docstring for the measured
+        cost difference)."""
         if self._high == high:
-            return  # sysfs write is cheap, but no reason to do it every tick
-        with open(f"{self.path}/value", "w") as f:
-            f.write("1" if high else "0")
+            return  # sysfs write is cheap now, but still no reason to do it
+                     # every tick - this also caps a PWM channel steady at
+                     # duty 0.0/1.0 to about one real write, ever.
+        self._fd.seek(0)
+        self._fd.write("1" if high else "0")
+        self._fd.flush()
         self._high = high
 
     def set_on(self, on):
@@ -371,12 +628,196 @@ class Gpio:
     # exported-and-low also closes the high-Z window Restart=always would
     # otherwise reopen on every restart cycle. export() already no-ops
     # correctly when the directory exists, so this costs nothing on restart.
+    # The persistent value-fd added for PWM doesn't change any of this: it
+    # is closed automatically by the kernel when the process exits (crash or
+    # clean), same as any other fd - the PIN stays exported and at its last
+    # driven electrical level regardless, which is the property this
+    # comment is actually about.
     #
     # This matters MORE for the three RGB pins than it ever did for the
     # siren alone: they are active_low, so high-Z (unexported/undriven) does
     # NOT mean dark - see the BOOT-DEFAULT WARNING in the module docstring.
     # unexport()ing on stop would trade "held explicitly off" for "floating,
     # channel probably on" - the opposite of safe. Never add it here.
+
+
+class RgbPwm:
+    """Runs software PWM for the RGB channels from ONE dedicated thread,
+    decoupled from the 1Hz Moonraker-poll main loop. See the module
+    docstring's "SOFTWARE PWM FOR REAL DIMMING" section for the frequency
+    choice, the measured write-latency/jitter numbers it's based on, and
+    the CPU estimate.
+
+    ONE THREAD FOR ALL THREE CHANNELS, not one thread per channel - chosen
+    for two concrete reasons, not just "simpler":
+      1. GIL/scheduler cost: one Python thread doing event-driven
+         sleep-until-next-edge scheduling costs meaningfully less context-
+         switching and GIL handoff overhead on this 4-core-but-RAM-
+         constrained board than three threads independently spinning their
+         own sleep loops - fewer threads competing for the GIL to do
+         fundamentally the same class of work.
+      2. Correctness: a SHARED, synchronized period boundary means all
+         three channels restart together every cycle. Three independent
+         threads targeting the "same" nominal frequency would NOT stay in
+         phase with each other over time - separate time.sleep() calls
+         accumulate separate, uncorrelated jitter - which doesn't break
+         per-channel brightness (each channel's own average is still
+         correct) but adds needless complexity for zero benefit versus one
+         shared clock.
+      Per-channel PHASE doesn't need to be synchronized for correctness
+      (the eye integrates each channel's OWN time-average independently,
+      or a color camera's; there's no reason R/G/B need to transition at
+      literally the same instant) - the synchronization here is chosen for
+      simplicity and thread-count discipline, not because unsynchronized
+      channels would look wrong.
+
+    ALGORITHM - trailing-edge PWM, synchronized period: at the start of
+    period N (t0 + N*PWM_PERIOD_S), every channel with duty>0 is switched ON
+    (one write each); channels at a genuine intermediate duty (0<duty<1)
+    additionally get ONE scheduled OFF write later in that same period, at
+    period_start + duty*PWM_PERIOD_S; channels at duty>=1.0 simply never get
+    an OFF write and stay continuously on. Combined with Gpio.set()'s
+    existing "skip the write if state is unchanged" cache, this means a
+    channel steadily at duty 0.0 or 1.0 costs about ONE real sysfs write,
+    ever - not one per period. Concretely: the lifecycle macros
+    (RGB_OFF/RGB_PREPARING/RGB_PRINTING) only ever request exactly 0.0 or
+    1.0 per channel, so normal lifecycle operation costs the SAME near-zero
+    overhead the old on/off-only design had. The new per-period toggling
+    overhead is only ever paid while a channel is genuinely sitting at an
+    intermediate duty - i.e. only while someone is actively using the
+    Mainsail brightness slider on a non-pure hue.
+
+    FIRE-ALARM INTERLOCK: exactly one of {this thread, the main loop's
+    alarm-blink code} may write to a given RGB Gpio at any instant. Enforced
+    by _lock, acquired individually around EVERY write either side makes -
+    NOT held for a whole period and NOT held for the whole alarm-blink
+    sleep loop, so worst-case contention between the two writers is about
+    one write's duration (tens of microseconds - see the module docstring's
+    measured numbers), not a whole PWM period or a whole 300ms blink half-
+    cycle. set_alarm(True) is checked before EACH individual write this
+    thread makes (via _write()) - so a fire-alarm transition landing
+    mid-period aborts the REST of that period's writes within about one
+    write's latency, then this thread goes idle (see IDLE_POLL_S) until the
+    alarm clears. See the module docstring's FIRE ALARM OVERRIDE section
+    for the full race-freedom argument and the ~5ms worst-case bound either
+    direction."""
+
+    IDLE_POLL_S = 0.005  # while alarm-overridden, how often this thread
+                          # rechecks for release - bounds "how long can the
+                          # strip sit at its last alarm-branch state before
+                          # real PWM resumes driving it toward the requested
+                          # duty" to about this long. Deliberately a
+                          # separate constant from PWM_PERIOD_S (even though
+                          # it happens to equal it at the current frequency)
+                          # so a future change to PWM_FREQUENCY_HZ doesn't
+                          # silently change this bound too without a reader
+                          # noticing.
+
+    def __init__(self, channels, period_s):
+        self._channels = channels  # {"r": Gpio, "g": Gpio, "b": Gpio}
+        self._period_s = period_s
+        self._lock = threading.Lock()  # guards _duty, _alarm_active, AND
+                                        # every individual write to any of
+                                        # the three Gpio objects above - see
+                                        # class docstring, FIRE-ALARM
+                                        # INTERLOCK.
+        self._duty = {name: 0.0 for name in channels}
+        self._alarm_active = False
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="rgb-pwm", daemon=True
+        )
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        """Stop the PWM thread and wait for it to actually exit. Must be
+        called BEFORE any direct off-writes to the RGB Gpio objects (e.g.
+        in main()'s finally: block) - otherwise this thread could still be
+        mid-write when the direct writes happen, defeating the same
+        interlock the fire-alarm handoff relies on."""
+        self._stop_event.set()
+        self._thread.join(timeout=2.0)
+
+    def set_duty(self, r, g, b):
+        """Update the TARGET duty (0.0-1.0 per channel = fraction of each
+        period the channel should be logically ON). Takes effect at the
+        start of the next period, at most PWM_PERIOD_S (5ms) after this
+        call - not mid-period, so one call never produces a half-applied
+        period. See _snap_duty() for the near-0/near-1 snapping."""
+        with self._lock:
+            self._duty["r"] = _snap_duty(r)
+            self._duty["g"] = _snap_duty(g)
+            self._duty["b"] = _snap_duty(b)
+
+    def set_alarm(self, active):
+        """True: this thread stops touching gpio_r/g/b entirely (the main
+        loop's alarm-blink code takes over, unchanged). False: PWM resumes,
+        starting a FRESH period immediately (see _run()'s resync comment) -
+        no attempt to "catch up" periods skipped while overridden."""
+        with self._lock:
+            self._alarm_active = active
+
+    def _write(self, name, on):
+        """Write one channel's logical on/off state, UNLESS the alarm
+        override is active right now, in which case this writes nothing and
+        returns False so the caller aborts the rest of the current period
+        immediately. See class docstring, FIRE-ALARM INTERLOCK."""
+        with self._lock:
+            if self._alarm_active:
+                return False
+            self._channels[name].set_on(on)
+            return True
+
+    def _run(self):
+        period = self._period_s
+        t0 = time.monotonic()
+        while not self._stop_event.is_set():
+            with self._lock:
+                alarm = self._alarm_active
+                duty = dict(self._duty)
+
+            if alarm:
+                time.sleep(self.IDLE_POLL_S)
+                t0 = time.monotonic()  # resync on next non-alarm iteration -
+                                        # deliberately NOT accumulating a
+                                        # "how many periods did we miss"
+                                        # backlog to catch up on; the very
+                                        # next period just starts now.
+                continue
+
+            period_start = t0
+            now = time.monotonic()
+            if now < period_start:
+                time.sleep(period_start - now)
+
+            # Start-of-period writes: ON for any channel with duty>0
+            # (including duty>=1, which then gets no OFF write at all this
+            # period - continuously on), OFF for duty<=0.
+            aborted = False
+            for name, d in duty.items():
+                if not self._write(name, d > 0.0):
+                    aborted = True
+                    break
+
+            if not aborted:
+                # Scheduled OFF writes for genuine intermediate duties only,
+                # processed in time order.
+                offs = sorted(
+                    (period_start + d * period, name)
+                    for name, d in duty.items()
+                    if 0.0 < d < 1.0
+                )
+                for off_time, name in offs:
+                    now = time.monotonic()
+                    if now < off_time:
+                        time.sleep(off_time - now)
+                    if not self._write(name, False):
+                        aborted = True
+                        break
+
+            t0 = time.monotonic() if aborted else period_start + period
 
 
 def moonraker_get(path):
@@ -446,22 +887,24 @@ def rgb_requested():
     D23/D25/D27), nothing physically wired to them (same pattern as
     siren_armed) - Klipper only holds and reports the requested color.
     color_data is fractional (0.0-1.0 per channel, klippy/extras/led.py's
-    LEDHelper.get_status() returns {'color_data': [(r,g,b,w)]}); this
-    function THRESHOLDS each channel at RGB_THRESHOLD before returning it,
-    because the physical MOSFETs this daemon drives are pure on/off - see
-    rgb-status.cfg's "DIMMING: THRESHOLD, NOT SMOOTH" section.
-    Returns {"r": bool, "g": bool, "b": bool}, or None on ANY failure -
-    including "rgb-status.cfg isn't included in printer.cfg yet" or
-    "rgb_strip isn't defined". Confirmed LIVE against this exact printer:
-    querying an object Klipper doesn't know about returns HTTP 200 with an
-    EMPTY {} for that object's status (not an HTTP error, does not poison
-    other objects in the same query) - so this hits the KeyError/IndexError
-    branch below and returns None, same as a real Moonraker outage would.
-    The caller keeps the last known values in that case (initialized to
-    all-False = off, matching every other output_pin's startup default in
-    this project) - so running this daemon before rgb-status.cfg is
-    deployed, or before rgb_strip has ever been set, is inert and safe, not
-    a crash risk."""
+    LEDHelper.get_status() returns {'color_data': [(r,g,b,w)]}, confirmed
+    against source - never quantized or thresholded by Klipper itself, see
+    the module docstring's SOFTWARE PWM section for the hardware_pwm check).
+    Returns the RAW per-channel float (clipped to [0,1] defensively), for
+    RgbPwm.set_duty() to turn into real PWM - this function does NOT
+    threshold or snap it itself (see DUTY_SNAP_EPSILON / _snap_duty(),
+    applied downstream in set_duty()). Returns {"r": float, "g": float,
+    "b": float}, or None on ANY failure - including "rgb-status.cfg isn't
+    included in printer.cfg yet" or "rgb_strip isn't defined". Confirmed
+    LIVE against this exact printer: querying an object Klipper doesn't
+    know about returns HTTP 200 with an EMPTY {} for that object's status
+    (not an HTTP error, does not poison other objects in the same query) -
+    so this hits the KeyError/IndexError branch below and returns None,
+    same as a real Moonraker outage would. The caller keeps the last known
+    values in that case (initialized to all-0.0 = off, matching every other
+    output_pin's startup default in this project) - so running this daemon
+    before rgb-status.cfg is deployed, or before rgb_strip has ever been
+    set, is inert and safe, not a crash risk."""
     resp = moonraker_get("/printer/objects/query?led%20rgb_strip")
     if resp is None:
         return None
@@ -469,9 +912,9 @@ def rgb_requested():
         color = resp["result"]["status"]["led rgb_strip"]["color_data"][0]
         red, green, blue = color[0], color[1], color[2]
         return {
-            "r": float(red) >= RGB_THRESHOLD,
-            "g": float(green) >= RGB_THRESHOLD,
-            "b": float(blue) >= RGB_THRESHOLD,
+            "r": max(0.0, min(1.0, float(red))),
+            "g": max(0.0, min(1.0, float(green))),
+            "b": max(0.0, min(1.0, float(blue))),
         }
     except (KeyError, IndexError, TypeError, ValueError):
         return None
@@ -490,17 +933,18 @@ def main():
     parser.add_argument(
         "--gpio-r", type=int, default=21,
         help="sysfs GPIO number for the RGB red channel, active_low through "
-        "a KSP42(TA) level shifter (default 21 = PA21, physical pin 26)",
+        "a KSP42(TA) level shifter, software-PWM'd (default 21 = PA21, "
+        "physical pin 26)",
     )
     parser.add_argument(
         "--gpio-g", type=int, default=19,
-        help="sysfs GPIO number for the RGB green channel, active_low "
-        "(default 19 = PA19, physical pin 27)",
+        help="sysfs GPIO number for the RGB green channel, active_low, "
+        "software-PWM'd (default 19 = PA19, physical pin 27)",
     )
     parser.add_argument(
         "--gpio-b", type=int, default=18,
-        help="sysfs GPIO number for the RGB blue channel, active_low "
-        "(default 18 = PA18, physical pin 28)",
+        help="sysfs GPIO number for the RGB blue channel, active_low, "
+        "software-PWM'd (default 18 = PA18, physical pin 28)",
     )
     args = parser.parse_args()
 
@@ -525,10 +969,14 @@ def main():
     gpio_r.set_on(False)
     gpio_g.set_on(False)
     gpio_b.set_on(False)
+
+    pwm = RgbPwm({"r": gpio_r, "g": gpio_g, "b": gpio_b}, PWM_PERIOD_S)
+    pwm.start()
+
     log.info(
         f"Started, watching Moonraker at {MOONRAKER_BASE}, pulsing gpio{args.gpio} "
-        f"(siren), mirroring RGB requests onto gpio{args.gpio_r}/{args.gpio_g}/"
-        f"{args.gpio_b} (R/G/B, active_low)"
+        f"(siren), driving RGB via software PWM at {PWM_FREQUENCY_HZ}Hz onto "
+        f"gpio{args.gpio_r}/{args.gpio_g}/{args.gpio_b} (R/G/B, active_low)"
     )
 
     running = True
@@ -541,10 +989,12 @@ def main():
     signal.signal(signal.SIGINT, handle_stop)
 
     latched_source = None  # for edge-triggered logging only, not part of the contract
-    requested = {"r": False, "g": False, "b": False}  # last known REQUEST
-    # flags from rgb-status.cfg, mirrored onto the real channels while quiet.
-    # Starts all-off, matching every output_pin's value:0 startup default in
-    # this project - stays all-off until rgb_requested() first succeeds.
+    requested = {"r": 0.0, "g": 0.0, "b": 0.0}  # last known REQUESTED DUTY
+    # per channel (0.0-1.0), from rgb-status.cfg's [led rgb_strip]. Starts
+    # all-off, matching every output_pin's value:0 startup default in this
+    # project - stays all-off until rgb_requested() first succeeds. Only
+    # ever handed to pwm.set_duty() - the main loop no longer writes
+    # gpio_r/g/b directly except during a fire alarm (see below).
     red_blink_on = False  # blink phase for RED during a fire alarm
     last_poll = 0.0
 
@@ -561,7 +1011,7 @@ def main():
                             "RGB red blinking, green/blue forced off"
                         )
                     else:
-                        log.info("Alarm source quiet - pin held LOW, RGB back to requested state")
+                        log.info("Alarm source quiet - pin held LOW, RGB PWM resuming requested brightness")
                     latched_source = source
 
                 if latched_source is None:
@@ -572,6 +1022,14 @@ def main():
                     if new_requested is not None:
                         requested = new_requested
 
+            # Keep the PWM thread's alarm flag in lockstep with
+            # latched_source EVERY iteration (not just on transition) -
+            # cheap (one lock+bool set) and self-healing against any future
+            # edit that changes the polling cadence above. See RgbPwm's
+            # FIRE-ALARM INTERLOCK for why this is race-free against the
+            # direct writes in the branch below.
+            pwm.set_alarm(latched_source is not None)
+
             if latched_source is not None:
                 gpio_siren.toggle()
                 red_blink_on = not red_blink_on
@@ -581,18 +1039,21 @@ def main():
                 time.sleep(PULSE_HALF_PERIOD_S)
             else:
                 gpio_siren.set(False)
-                gpio_r.set_on(requested["r"])
-                gpio_g.set_on(requested["g"])
-                gpio_b.set_on(requested["b"])
+                pwm.set_duty(requested["r"], requested["g"], requested["b"])
                 time.sleep(POLL_INTERVAL_S)
     finally:
         # Runs on SIGTERM/SIGINT and on any unhandled exception alike -
         # systemctl stop/restart must never leave the buzzer stuck on OR
         # the strip stuck lit (see the BOOT-DEFAULT WARNING in the module
         # docstring for why "stuck lit" is the RGB failure mode to guard
-        # against here, not "stuck dark"). All four pins are left EXPORTED
-        # (see the comment on Gpio, above the class body) so they stay
-        # actively driven rather than reverting to high-Z.
+        # against here, not "stuck dark"). pwm.stop() runs FIRST and joins
+        # the PWM thread before any direct writes below, so there is no
+        # window where both this code and a still-running PWM thread could
+        # write to the same pin at once (same interlock principle as the
+        # fire-alarm handoff, applied to shutdown). All four pins are then
+        # left EXPORTED (see the comment on Gpio, above the class body) so
+        # they stay actively driven rather than reverting to high-Z.
+        pwm.stop()
         gpio_siren.set(False)
         gpio_r.set_on(False)
         gpio_g.set_on(False)
