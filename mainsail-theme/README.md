@@ -1,0 +1,44 @@
+# Mainsail sidebar link to the docs portal
+
+`navi.json` pins a link to this project's documentation portal
+(`http://192.168.11.160:8001/`, published by `scripts/serve-docs.sh`) into
+Mainsail's own sidebar navigation.
+
+## Mechanism (verified against Mainsail's own docs, 2026-08-15)
+
+Mainsail reads `.theme/navi.json` from the Klipper config directory
+(`~/printer_data/config/.theme/navi.json` on this machine) as a JSON array
+of `{title, href, target, position, icon}` entries — this is Mainsail's own
+supported custom-navigation mechanism
+(<https://docs.mainsail.xyz/features/custom-themes/custom-navigation>),
+**not** a Moonraker database setting — unlike printer name/dashboard layout
+(`printer-configs-snapshots/moonraker-db-mainsail-ui.json`,
+`scripts/export-mainsail-ui.sh`), which really is DB-backed. Don't conflate
+the two: this file has no Moonraker DB equivalent, and the DB snapshot
+script does not and cannot capture it.
+
+Mainsail reads this file at page load in the browser (fetched via
+Moonraker's file server) — no Klipper or Moonraker restart is needed to
+pick up a change, just a browser refresh.
+
+## Deploy
+
+No dedicated script yet (this is a single small file, low churn expected).
+Manual deploy, mirroring this repo's other machine-config-adjacent
+directories (`KlipperScreen-themes/`, `orangepi-services/`) that live
+outside `printer-configs/`'s auto-globbed deploy path on purpose:
+
+```bash
+ssh ultra@192.168.11.160 "mkdir -p ~/printer_data/config/.theme"
+scp mainsail-theme/navi.json ultra@192.168.11.160:~/printer_data/config/.theme/navi.json
+```
+
+Then refresh Mainsail in the browser (Ctrl+Shift+R / hard refresh, since
+browsers sometimes cache this file) to see it in the sidebar.
+
+## Not yet verified
+
+Deployed and the file is confirmed present on the device at the right
+path, but nobody has looked at the actual Mainsail sidebar in a browser to
+confirm it renders — no browser access from here. Check visually before
+considering this done.
