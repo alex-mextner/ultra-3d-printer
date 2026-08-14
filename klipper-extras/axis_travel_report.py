@@ -1,4 +1,6 @@
-# axis_travel_report.py - passive observer of real homing travel distance.
+# axis_travel_report.py - passive observer of real homing travel distance,
+# PLUS a MEASURE_HOME command that is the only way to actually get a
+# meaningful number out of it for a from-the-far-limit measurement.
 #
 # PURPOSE: expose the physical distance a stepper travels during a homing
 # move, before Klipper's own G28 code path (klippy/extras/homing.py) throws
@@ -8,71 +10,106 @@
 # its far mechanical limit by hand and homing toward the switch, instead of
 # a tape measure - see docs/printer-status.md for the "why".
 #
-# SOURCE OF TRUTH for this module's design: klippy/extras/homing.py on this
-# printer's own installed Klipper (git rev 7046bd00ef5c30dec6febc724f8d22
-# 967433c45c, read directly over SSH 2026-08-08 before writing any of this -
-# do not trust this comment blindly if the installed Klipper has since been
-# updated, re-read the real source):
+# =========================================================================
+# 2026-08-15 CORRECTION - the original design (SET_KINEMATIC_POSITION then
+# plain G28) does NOT work, and cannot ever work. Caught on the first real
+# test: measuring stepper_y (position_max 197, position_endstop 0) reported
+# start=295.500mm - exactly 1.5 * 197. Not noise: that is Klipper's own
+# internal safety-search-start formula, not our SET_KINEMATIC_POSITION value.
 #
-#   - HomingMove.homing_move() fires event "homing:homing_move_end" (self)
-#     AFTER toolhead.set_position() has already been called for this pass,
-#     but the per-stepper StepperPosition objects it built
-#     (self.stepper_positions) still hold the real numbers from BEFORE any
-#     position_endstop remapping:
-#       .start_cmd_pos - commanded position (mm) at the moment THIS PASS of
-#                        homing_move() began (set in StepperPosition.__init__
-#                        from stepper.get_mcu_position() / mcu_to_commanded_
-#                        position(), i.e. Klipper's own tracked position,
-#                        not anything this module computes independently)
-#       .trig_pos       - raw MCU step position at the endstop's precise
-#                        trigger time (StepperPosition.note_home_end(),
-#                        captured via stepper.get_past_mcu_position())
-#   - stepper.mcu_to_commanded_position(mcu_pos) (klippy/stepper.py:183)
-#     converts an MCU step count to a commanded mm position - reusing
-#     Klipper's own conversion, not a reimplementation.
-#   - A typical G28 fires homing_move_end TWICE per rail when
-#     homing_retract_dist is nonzero: once for the fast coarse pass, once for
-#     the slow retract-and-reapproach precision pass
-#     (Homing._do_home_rails, same file). This module keeps the FIRST pass's
-#     start_cmd_pos (the true starting point before any homing motion began
-#     in this G28) and always updates to the LATEST pass's trigger position
-#     (the more precise of the two) - so the reported travel reflects the
-#     full, full-precision distance across the whole G28, not just the short
-#     final retract hop.
+# Root cause, read directly from this printer's installed Klipper (SSH,
+# 2026-08-15 - re-read the real source if the installed Klipper has since
+# changed, do not trust this comment blindly):
+#
+#   klippy/kinematics/cartesian.py, CartKinematics.home_axis():
+#     forcepos = list(homepos)   # homepos[axis] = hi.position_endstop
+#     if hi.positive_dir:
+#         forcepos[axis] -= 1.5 * (hi.position_endstop - position_min)
+#     else:
+#         forcepos[axis] += 1.5 * (position_max - hi.position_endstop)
+#     homing_state.home_rails([rail], forcepos, homepos)
+#
+#   klippy/extras/homing.py, Homing._do_home_rails() -> _set_start_position():
+#     self.toolhead.set_position(startpos, homing_axes=homing_axes)
+#   This runs BEFORE the first HomingMove is even constructed, and
+#   OVERWRITES whatever toolhead position existed before G28 ran (including
+#   anything SET_KINEMATIC_POSITION had just set) with the synthesized
+#   forcepos above. StepperPosition.__init__ (same file) then captures
+#   start_cmd_pos AFTER this overwrite - so for a plain G28, start_cmd_pos
+#   is ALWAYS "position_endstop +/- 1.5*(configured range)", a value
+#   computed purely from config, carrying zero information about where the
+#   axis physically was. This is deliberate on Klipper's part: it's what
+#   lets G28 safely home an axis whose position is totally unknown, by
+#   guaranteeing the search move is long enough to reach the switch
+#   regardless of the (untrusted) starting point. It also means a plain G28
+#   can never be used to measure a real physical distance from wherever a
+#   human pushed the axis to - the "before" position it uses isn't real.
+#
+# THE FIX: bypass Homing._set_start_position() entirely by driving the
+# search move through PrinterHoming.manual_home() (same file), which calls
+# HomingMove.homing_move() DIRECTLY - the same primitive probe.py uses for
+# PROBE_CALIBRATE-style moves. manual_home() never touches toolhead position
+# before moving, so whatever SET_KINEMATIC_POSITION (or this module's own
+# MEASURE_HOME) set immediately prior is exactly what StepperPosition
+# captures as start_cmd_pos. See cmd_MEASURE_HOME below - this is now the
+# ONLY supported way to get a real number out of this module. The old
+# HOME_AND_MEASURE macro (printer-configs/axis-travel-measure.cfg) is kept
+# only as a one-line wrapper around MEASURE_HOME, unchanged from the
+# outside, fixed underneath.
+#
+# The passive homing:homing_move_end observer below (RESET_AXIS_TRAVEL_
+# REPORT / AXIS_TRAVEL_REPORT / get_status) is UNCHANGED and was never
+# itself buggy - it faithfully reports whatever start_cmd_pos Klipper's own
+# StepperPosition computed. The bug was entirely in what fed it: a plain
+# G28's start_cmd_pos is synthetic and physically meaningless, while
+# manual_home()'s is real. If you ever see a plain G28 (not MEASURE_HOME)
+# reported here, expect exactly "position_endstop +/- 1.5*range" and
+# nothing else - that is correct behavior for this module, not a fluke.
+# =========================================================================
+#
+# stepper.mcu_to_commanded_position(mcu_pos) (klippy/stepper.py) converts an
+# MCU step count to a commanded mm position - reusing Klipper's own
+# conversion, not a reimplementation.
 #
 # HARD CAVEAT, inherent to open-loop steppers with no position feedback, NOT
-# a gap in this module: the reported number is only correct if Klipper's own
-# commanded position was accurate at the moment THIS pass began. If the axis
-# was moved BY HAND (motor disabled, or forced against an enabled motor)
-# between the last trustworthy reference and this G28, Klipper has no way to
-# know it happened - and neither can this module, or any module. Fix:
-# immediately after finishing a manual reposition and before running G28,
-# run
-#   SET_KINEMATIC_POSITION <AXIS>=<any legal value> SET_HOMED=<axis>
-# The specific value does not matter and is not a measurement - it cancels
-# out of the reported delta (travel_mm = trigger_mm - start_mm) - it only
-# has to be a value Klipper's position_min/position_max will accept so the
-# following homing move is allowed to run at all.
+# a gap in this module: MEASURE_HOME's result is only correct if nobody
+# moves the axis by hand between finishing the manual reposition and
+# calling MEASURE_HOME. Klipper has no way to know a by-hand move happened,
+# and neither can this module, or any module - MEASURE_HOME's own internal
+# SET_KINEMATIC_POSITION-equivalent step is what re-establishes a trusted
+# reference at the moment it runs, not before.
 #
-# ZERO BEHAVIOR CHANGE: this module ONLY reads hmove.stepper_positions in an
-# event handler that fires after the real move has already physically
-# completed (toolhead.set_position() already ran). It never calls any
-# toolhead/stepper/kinematics method that could affect motion, speed,
-# retract distance, or the final reported position - it is a read-only
-# observer of data Klipper already computed for its own bookkeeping.
+# ZERO BEHAVIOR CHANGE to G28: the passive observer only reads
+# hmove.stepper_positions in an event handler that fires after the real
+# move has already physically completed - it never calls any
+# toolhead/stepper/kinematics method that could affect G28's motion, speed,
+# retract distance, or final reported position. MEASURE_HOME is a
+# deliberately SEPARATE, explicitly-invoked command with its own physical
+# motion (see below) - it never runs as a side effect of a normal G28.
 #
-# All recording work is wrapped in try/except Exception (see
-# _on_homing_move_end) because printer.send_event() (klippy/klippy.py:226-
-# 227, confirmed by reading it on this printer) does NOT catch handler
-# exceptions - it is a plain "[cb(*params) for cb in handlers]". An
-# unhandled exception escaping this module's handler would propagate up
-# through HomingMove.homing_move() and could abort the retract/second-pass
-# homing step for the axis being homed RIGHT NOW. On this machine G28 Z
-# drives the bed UP toward the nozzle (see docs/printer-status.md), so this
-# module must never be the thing that turns a normal homing move into an
-# aborted one. Hence: catch everything, log, never raise.
+# All passive recording work is wrapped in try/except Exception (see
+# _on_homing_move_end) because printer.send_event() (klippy/klippy.py)
+# does NOT catch handler exceptions - it is a plain
+# "[cb(*params) for cb in handlers]". An unhandled exception escaping this
+# module's passive handler would propagate up through HomingMove.
+# homing_move() and could abort the retract/second-pass homing step for
+# the axis being homed RIGHT NOW, including during a normal G28. On this
+# machine G28 Z drives the bed UP toward the nozzle (see
+# docs/printer-status.md), so the passive handler must never be the thing
+# that turns a normal homing move into an aborted one. Hence: catch
+# everything there, log, never raise.
+#
+# cmd_MEASURE_HOME is different: it is the active, explicitly-requested
+# operation itself (like G28 or FORCE_MOVE), so letting a real failure
+# (e.g. "No trigger on stepper_y after full movement") raise as a normal
+# gcode command_error is CORRECT here, not a bug to swallow - that is how
+# every other homing-family command in Klipper reports failure, and
+# swallowing it would hide a real problem (axis never reached the switch)
+# behind a fabricated-looking success.
 
 import logging
+
+AXIS_NAMES = ['x', 'y', 'z']
 
 class AxisTravelReport:
     def __init__(self, config):
@@ -89,6 +126,9 @@ class AxisTravelReport:
         gcode.register_command(
             'AXIS_TRAVEL_REPORT', self.cmd_AXIS_TRAVEL_REPORT,
             desc=self.cmd_AXIS_TRAVEL_REPORT_help)
+        gcode.register_command(
+            'MEASURE_HOME', self.cmd_MEASURE_HOME,
+            desc=self.cmd_MEASURE_HOME_help)
 
     def _on_homing_move_end(self, hmove):
         # MUST NOT raise - see module docstring "ZERO BEHAVIOR CHANGE".
@@ -109,9 +149,10 @@ class AxisTravelReport:
             rec = self.reports.get(name)
             if rec is None:
                 # First pass seen since the last reset: this is the only
-                # trustworthy "before any motion in this G28" reference,
+                # trustworthy "before any motion in this move" reference,
                 # so it is captured once and never overwritten by a later
-                # (retract/re-approach) pass.
+                # (retract/re-approach) pass. For MEASURE_HOME there is
+                # only ever one pass anyway (see cmd_MEASURE_HOME).
                 rec = {'start_mm': sp.start_cmd_pos, 'passes': 0}
                 self.reports[name] = rec
             rec['passes'] += 1
@@ -120,8 +161,8 @@ class AxisTravelReport:
 
     cmd_RESET_AXIS_TRAVEL_REPORT_help = (
         "Clear recorded axis-travel data (all steppers, or one via "
-        "STEPPER=<name>) before a fresh manual-reposition-then-home "
-        "measurement")
+        "STEPPER=<name>). MEASURE_HOME calls this itself for its own "
+        "stepper before moving - only needed by hand when using plain G28")
     def cmd_RESET_AXIS_TRAVEL_REPORT(self, gcmd):
         stepper = gcmd.get('STEPPER', None)
         if stepper is None:
@@ -146,6 +187,95 @@ class AxisTravelReport:
                 % (name, rec['start_mm'], rec['trigger_mm'],
                    rec['travel_mm'], rec['passes'],
                    '' if rec['passes'] == 1 else 'es'))
+
+    cmd_MEASURE_HOME_help = (
+        "MEASURE_HOME AXIS=<X|Y|Z> [MARGIN=<mm, default 1.0>] - home one "
+        "axis from a real, known reference near the end of its configured "
+        "range with NO endstop, and record the true physical travel to the "
+        "switch. Unlike plain G28, this does not go through Klipper's "
+        "synthetic forcepos start (see module docstring) - the reported "
+        "number is real. Requires the axis to already be physically pushed "
+        "by hand to its far mechanical limit before calling this.")
+    def cmd_MEASURE_HOME(self, gcmd):
+        axis_name = gcmd.get('AXIS').lower()
+        if axis_name not in AXIS_NAMES:
+            raise gcmd.error("MEASURE_HOME: AXIS must be one of X, Y, Z")
+        axis = AXIS_NAMES.index(axis_name)
+        margin = gcmd.get_float('MARGIN', 1.0, above=0.)
+
+        toolhead = self.printer.lookup_object('toolhead')
+        kin = toolhead.get_kinematics()
+        rail = kin.rails[axis]
+        hi = rail.get_homing_info()
+        position_min, position_max = rail.get_range()
+
+        # Anchor near whichever end of the CONFIGURED range has no
+        # endstop - same logic as cartesian.py's own forcepos formula
+        # (mirrored, not reused: that one is 1.5x-past-the-switch and
+        # meant for an UNTRUSTED start; this one only needs to sit inside
+        # the legal range on the far side, since the axis really is there,
+        # by the operator's own hand, when this command is called).
+        # hi.positive_dir is Klipper's own already-computed direction
+        # (klippy/stepper.py: inferred from position_endstop's side of the
+        # range unless overridden) - True means homing searches toward
+        # +coordinate (endstop on MAX, e.g. this machine's X), False means
+        # it searches toward -coordinate (endstop on MIN, e.g. Y and Z on
+        # this machine). Anchoring near the side homing moves AWAY from.
+        if hi.positive_dir:
+            anchor = position_min + margin
+        else:
+            anchor = position_max - margin
+
+        # Establish the real reference: this IS what SET_KINEMATIC_POSITION
+        # does under the hood (klippy/extras/force_move.py,
+        # cmd_SET_KINEMATIC_POSITION) - calling toolhead.set_position()
+        # directly here instead keeps the whole measurement atomic in one
+        # gcode command, with no separate SET_KINEMATIC_POSITION step for
+        # the caller to get wrong or forget.
+        curpos = toolhead.get_position()
+        startpos = list(curpos)
+        startpos[axis] = anchor
+        toolhead.set_position(startpos, homing_axes=axis_name)
+
+        # Clear any stale report for this stepper so AXIS_TRAVEL_REPORT
+        # below reflects only this measurement, not a leftover from an
+        # earlier plain-G28 or previous MEASURE_HOME call.
+        stepper_name = 'stepper_' + axis_name
+        self.reports.pop(stepper_name, None)
+
+        # Target position for the search: same position_endstop a plain
+        # G28 would land on, other axes left at their current (just-set)
+        # values - mirrors Homing._fill_coord()'s "None means keep
+        # current" behavior, done explicitly since manual_home() (unlike
+        # the G28 path) does not fill in Nones itself.
+        movepos = list(toolhead.get_position())
+        movepos[axis] = hi.position_endstop
+
+        # The actual fix: manual_home() (klippy/extras/homing.py,
+        # PrinterHoming.manual_home) calls HomingMove.homing_move()
+        # directly - the same primitive probe.py's PROBE_CALIBRATE uses -
+        # WITHOUT going through Homing._set_start_position()'s forcepos
+        # overwrite. One pass only, at hi.speed (this axis's already-
+        # cautious configured homing_speed, e.g. Y's 10 / Z's default 5 -
+        # same margin this project has used for every other first-move on
+        # this machine). Deliberately skips the coarse+retract two-pass
+        # dance a plain G28 does: that refinement exists for print-quality
+        # homing precision, not for a one-off measurement that gets a
+        # several-mm safety margin applied to it afterward anyway (see
+        # docs/printer-status.md for how X/Y position_max were set).
+        # check_triggered=True (Klipper's own default for a real homing
+        # move) means a failure to reach the switch raises a normal
+        # command_error, exactly like a plain G28 would - not swallowed.
+        homing = self.printer.lookup_object('homing')
+        rail_endstops = rail.get_endstops()
+        homing.manual_home(toolhead, rail_endstops, movepos, hi.speed,
+                            probe_pos=False, triggered=True,
+                            check_triggered=True)
+
+        # homing:homing_move_end already fired during manual_home() above
+        # and populated self.reports[stepper_name] via the normal passive
+        # path - just print it.
+        self.cmd_AXIS_TRAVEL_REPORT(gcmd)
 
     def get_status(self, eventtime):
         return {
