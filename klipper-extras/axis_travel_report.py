@@ -67,6 +67,66 @@
 # nothing else - that is correct behavior for this module, not a fluke.
 # =========================================================================
 #
+# 2026-08-15 CORRECTION #3 - the anchor formula above ("position_max -
+# margin" / "position_min + margin") was itself an invented number standing
+# in for a real one, and it broke on the very first axis where it mattered.
+# Caught live: MEASURE_HOME AXIS=Z failed with "No trigger on stepper_z
+# after full movement" after a real, complete ~188.5mm search (38s at Z's
+# 5mm/s homing_speed - matches position_max(190, still an unmeasured
+# PLACEHOLDER at [stepper_z]) - margin(1) - position_endstop(0.5) exactly).
+# Z's real travel is bigger than its own placeholder position_max - the
+# exact situation this tool exists to fix - so anchoring the search bound
+# to that same placeholder was circular: the number MEASURE_HOME is meant
+# to discover was also the thing limiting how far it was willing to look
+# for it.
+#
+# The user's fix, and it is correct: "должно работать аналогично хомингу!"
+# (it should work the same way normal homing does). Supporting evidence -
+# not just intuition: the very first-ever plain G28 Z on this machine,
+# run earlier the same session with this SAME placeholder position_max=190,
+# succeeded cleanly. Why: a plain G28's own forcepos search bound (see
+# "CORRECTION #1" above) is FAR more generous than "configured range minus
+# a 1mm margin" - re-confirmed fresh against the real installed Klipper
+# (klippy/kinematics/cartesian.py, CartKinematics.home_axis(), unchanged
+# since CORRECTION #1's citation):
+#
+#   position_min, position_max = rail.get_range()
+#   hi = rail.get_homing_info()
+#   homepos = [None, None, None, None]; homepos[axis] = hi.position_endstop
+#   forcepos = list(homepos)
+#   if hi.positive_dir:
+#       forcepos[axis] -= 1.5 * (hi.position_endstop - position_min)
+#   else:
+#       forcepos[axis] += 1.5 * (position_max - hi.position_endstop)
+#   homing_state.home_rails([rail], forcepos, homepos)
+#
+# For Z (positive_dir=False, position_endstop=0.5, position_max=190):
+# forcepos = 0.5 + 1.5*(190-0.5) = 284.75 - which is EXACTLY the number
+# this session independently observed in a raw toolhead-position query
+# during that first successful G28 Z, confirming this formula is what
+# actually ran and worked on this exact axis with this exact placeholder.
+#
+# So: MEASURE_HOME now computes its anchor with this IDENTICAL formula,
+# not a smaller hand-picked one - it borrows G28's own already-proven
+# search generosity instead of inventing a new, tighter number that has
+# to be independently re-justified. No manual per-call override parameter
+# was added for this: the whole point is that a human should not have to
+# supply a distance the code can already compute safely by copying a
+# formula this machine has already exercised successfully. (toolhead.
+# set_position() - called here and by SET_KINEMATIC_POSITION, see
+# klippy/extras/force_move.py cmd_SET_KINEMATIC_POSITION, re-read fresh -
+# performs no position_min/max range validation of its own, so an anchor
+# outside the configured range is exactly as legal here as it already is
+# for G28's own forcepos; nothing new is being relied on.)
+#
+# What did NOT change: CORRECTION #2's fix (raw MCU step counts for
+# travel_mm, never a re-derived commanded position) is completely
+# independent of what numeric value the anchor holds - the anchor's ONLY
+# job is giving the search move enough legal room to physically reach the
+# switch, exactly like forcepos does for G28. Nothing about how the real
+# trigger point gets captured or reported needed to change.
+# =========================================================================
+#
 # stepper.mcu_to_commanded_position(mcu_pos) (klippy/stepper.py) converts an
 # MCU step count to a commanded mm position - reusing Klipper's own
 # conversion, not a reimplementation.
@@ -266,19 +326,19 @@ class AxisTravelReport:
                    '' if rec['passes'] == 1 else 'es'))
 
     cmd_MEASURE_HOME_help = (
-        "MEASURE_HOME AXIS=<X|Y|Z> [MARGIN=<mm, default 1.0>] - home one "
-        "axis from a real, known reference near the end of its configured "
-        "range with NO endstop, and record the true physical travel to the "
-        "switch. Unlike plain G28, this does not go through Klipper's "
-        "synthetic forcepos start (see module docstring) - the reported "
-        "number is real. Requires the axis to already be physically pushed "
-        "by hand to its far mechanical limit before calling this.")
+        "MEASURE_HOME AXIS=<X|Y|Z> - home one axis from a real, known "
+        "reference positioned exactly like a plain G28's own forcepos "
+        "search-start (see module docstring, CORRECTION #3), and record "
+        "the true physical travel to the switch. Unlike plain G28, this "
+        "does not overwrite that reference before the move (see "
+        "CORRECTION #1) - the reported number is real. Requires the axis "
+        "to already be physically pushed by hand to its far mechanical "
+        "limit before calling this.")
     def cmd_MEASURE_HOME(self, gcmd):
         axis_name = gcmd.get('AXIS').lower()
         if axis_name not in AXIS_NAMES:
             raise gcmd.error("MEASURE_HOME: AXIS must be one of X, Y, Z")
         axis = AXIS_NAMES.index(axis_name)
-        margin = gcmd.get_float('MARGIN', 1.0, above=0.)
 
         toolhead = self.printer.lookup_object('toolhead')
         kin = toolhead.get_kinematics()
@@ -286,22 +346,29 @@ class AxisTravelReport:
         hi = rail.get_homing_info()
         position_min, position_max = rail.get_range()
 
-        # Anchor near whichever end of the CONFIGURED range has no
-        # endstop - same logic as cartesian.py's own forcepos formula
-        # (mirrored, not reused: that one is 1.5x-past-the-switch and
-        # meant for an UNTRUSTED start; this one only needs to sit inside
-        # the legal range on the far side, since the axis really is there,
-        # by the operator's own hand, when this command is called).
+        # Anchor = G28's OWN forcepos formula (cartesian.py, CartKinematics.
+        # home_axis(), quoted verbatim in CORRECTION #3 above) - not a
+        # smaller hand-picked distance. This machine's [stepper_*]
+        # position_min/position_max are themselves sometimes just
+        # placeholders (that's the whole reason this tool exists), so
+        # bounding the search to "configured range minus a margin" can
+        # come up short before reaching the real switch - confirmed live on
+        # Z. G28's 1.5x-past-the-endstop formula is already proven to work
+        # on this exact axis with this exact placeholder (see CORRECTION
+        # #3's 284.75 cross-check), so MEASURE_HOME borrows it exactly
+        # rather than inventing its own, tighter number.
         # hi.positive_dir is Klipper's own already-computed direction
         # (klippy/stepper.py: inferred from position_endstop's side of the
         # range unless overridden) - True means homing searches toward
         # +coordinate (endstop on MAX, e.g. this machine's X), False means
         # it searches toward -coordinate (endstop on MIN, e.g. Y and Z on
-        # this machine). Anchoring near the side homing moves AWAY from.
+        # this machine).
         if hi.positive_dir:
-            anchor = position_min + margin
+            anchor = hi.position_endstop - 1.5 * (hi.position_endstop
+                                                    - position_min)
         else:
-            anchor = position_max - margin
+            anchor = hi.position_endstop + 1.5 * (position_max
+                                                    - hi.position_endstop)
 
         # Establish the real reference: this IS what SET_KINEMATIC_POSITION
         # does under the hood (klippy/extras/force_move.py,
