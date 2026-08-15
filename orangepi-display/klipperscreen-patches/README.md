@@ -4053,3 +4053,72 @@ sudo systemctl restart KlipperScreen
 4. `python3 -m py_compile` чисто на `ks_includes/KlippyGtk.py`, сервис
    `active` на протяжении всей серии рестартов (около 8 подряд для
    промежуточных попыток фикса).
+
+## pid-calibrate-empty-target-popup.patch
+
+**Репорт пользователя (2026-08-15):** тапнул "Calibrate PID" на панели
+Temperature — визуально ничего не произошло. Живой `GET /server/gcode_store`
+на принтере подтвердил: команда `PID_CALIBRATE` не отправлялась вообще, ни
+разу — не ошибка связи, кнопка реально ничего не сделала.
+
+**Корневая причина**, найдена чтением `panels/temperature.py:619-621` и
+`ks_includes/widgets/keypad.py`: кнопка "Calibrate PID" — это `add_extra_button`
+на общем виджете `Keypad` (цифровая клавиатура выбора температуры). Её нажатие
+идёт через `Keypad._handle_extra_action()`:
+```python
+def _handle_extra_action(self, callback):
+    value = self.get_value() or 0
+    if isinstance(value, (int, float)):
+        callback(value)
+```
+`get_value()` возвращает `None`, если поле ввода пустое (`float("")` кидает
+`ValueError`) — но `None or 0` тихо подставляет `0`, и `pid_calibrate(0)`
+попадает на `if temp <= 0: return` без единого сообщения. То есть если тапнуть
+"Calibrate PID" ДО того как набрать цифры на клавиатуре — команда просто не
+уходит, без ошибки, без попапа, без строки в консоли. Ровно то, что видел
+пользователь: он, скорее всего, тапнул кнопку прежде чем ввести температуру.
+
+**Почему фикс НЕ в `keypad.py` (на уровне виджета), хотя баг там** — проверено,
+не предположено: `add_extra_button` используется в трёх местах
+(`panels/temperature.py` — "Calibrate PID", `panels/main_menu.py` — та же
+кнопка на мини-панели нагрева в дашборде, дублирующая реализация, не
+наследование, `panels/spool_editor.py` — кнопка "Restore"). У `spool_editor.py`
+другая семантика: `_restore_value(self, entry_val)` **вообще не использует**
+переданное значение — восстанавливает заранее известное число В поле ввода,
+именно для случая "пользователь ничего не вводил". Если бы `0`-fallback убрали
+на уровне виджета (заставив `_handle_extra_action` требовать непустой ввод), это
+сломало бы Restore, у которого пустой ввод — штатный, ожидаемый случай. Поэтому
+фикс — на уровне вызывающего кода (`pid_calibrate()`), не общего виджета: два
+разных места `panels/temperature.py` и `panels/main_menu.py` — точная копия друг
+друга (не наследование), значит фикс продублирован в обоих файлах.
+
+**Фикс:** одна строка в каждом файле, `self._screen.show_popup_message(_("Enter
+a target temperature first"))` перед `return` — тот же идиом
+`show_popup_message`, уже используемый несколькими строками выше в тех же
+файлах (`"Can't set above the maximum"`, `"Unknown Heater"`), ничего нового не
+изобретено.
+
+Применить на принтере:
+```
+cd /home/ultra/KlipperScreen
+git apply --check /path/to/pid-calibrate-empty-target-popup.patch
+git apply /path/to/pid-calibrate-empty-target-popup.patch
+python3 -m py_compile panels/temperature.py panels/main_menu.py
+sudo systemctl restart KlipperScreen
+```
+
+**Проверено 2026-08-15:** `python3 -m py_compile` (из venv KlipperScreen)
+чисто на обоих файлах перед заливкой; после заливки и рестарта сервис
+`active`, в логе `journalctl -u KlipperScreen` за 30с после рестарта ни одной
+строки `traceback`/`error`/`exception`. Klipper (`webhooks.state`) и текущее
+состояние нагрева/печати не затронуты рестартом KlipperScreen — отдельный,
+независимый сервис (`systemctl show KlipperScreen` не показывает
+`Requires`/`PartOf` на `klipper`/`moonraker`, только однонаправленный `After
+moonraker.service`). **Живая проверка самой кнопки (попап реально появляется
+при тапе без введённой температуры) НЕ проведена** — визуально на экране
+принтера это не проверялось, только код прочитан и синтаксис/рестарт сервиса
+подтверждены; стоит подтвердить глазами при следующем визите к станку.
+
+Отдельно: у `spool_editor.py`'s "Restore" тот же общий виджет `Keypad`, тот же
+`0`-fallback — но там это НЕ баг, это часть замысла (см. разбор выше), трогать
+не стал.

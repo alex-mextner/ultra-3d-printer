@@ -2034,7 +2034,7 @@ index 487c56a..8bad2fb 100644
          reset.set_hexpand(False)
  
 diff --git a/panels/main_menu.py b/panels/main_menu.py
-index f702390..928f863 100644
+index f702390..1aaa6b4 100644
 --- a/panels/main_menu.py
 +++ b/panels/main_menu.py
 @@ -15,14 +15,36 @@ class Panel(MenuPanel):
@@ -2292,7 +2292,21 @@ index f702390..928f863 100644
          visible = self._config.get_config().getboolean(
              f"graph {self._screen.state.printer_name}", device, fallback=True
          )
-@@ -235,10 +419,31 @@ class Panel(MenuPanel):
+@@ -219,6 +403,13 @@ class Panel(MenuPanel):
+ 
+     def pid_calibrate(self, temp):
+         if temp <= 0:
++            # 2026-08-15: identical fix to panels/temperature.py's own
++            # pid_calibrate() - this file duplicates that method rather than
++            # inheriting it (dashboard mini heater panel), so both copies
++            # need the same fix. See temperature.py's comment for the root
++            # cause (Keypad._handle_extra_action substitutes 0 for empty
++            # input).
++            self._screen.show_popup_message(_("Enter a target temperature first"))
+             return
+         heater = self.active_heater.split(" ", maxsplit=1)[-1]
+         if self.verify_max_temp(temp):
+@@ -235,10 +426,31 @@ class Panel(MenuPanel):
  
      def create_left_panel(self):
          self.labels["devices"] = Gtk.Grid(vexpand=False)
@@ -2325,7 +2339,7 @@ index f702390..928f863 100644
  
          self.labels["devices"].attach(name, 0, 0, 1, 1)
          self.labels["devices"].attach(temp, 1, 0, 1, 1)
-@@ -247,10 +452,34 @@ class Panel(MenuPanel):
+@@ -247,10 +459,34 @@ class Panel(MenuPanel):
  
          scroll = self._gtk.ScrolledWindow(steppers=False)
          scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -2361,7 +2375,7 @@ index f702390..928f863 100644
          self.left_panel.add(scroll)
  
          for d in self._printer.get_temp_devices():
-@@ -272,8 +501,13 @@ class Panel(MenuPanel):
+@@ -272,8 +508,13 @@ class Panel(MenuPanel):
              self.main_menu.attach(top, 0, 0, 1, 3)
              self.main_menu.attach(self.menu_scroll, 0, 3, 1, 2)
          else:
@@ -2377,7 +2391,7 @@ index f702390..928f863 100644
          self.main_menu.show_all()
          self.numpad_visible = False
          self._screen.base_panel.set_control_sensitive(False, control="back")
-@@ -332,8 +566,15 @@ class Panel(MenuPanel):
+@@ -332,8 +573,15 @@ class Panel(MenuPanel):
              self.main_menu.attach(top, 0, 0, 1, 2)
              self.main_menu.attach(self.labels["keypad"], 0, 2, 1, 2)
          else:
@@ -3209,7 +3223,7 @@ index 4396c93..7cffc7e 100644
          self.add_label_to_grid("", 0)
  
 diff --git a/panels/temperature.py b/panels/temperature.py
-index c004663..8f98b87 100644
+index c004663..ad40f3e 100644
 --- a/panels/temperature.py
 +++ b/panels/temperature.py
 @@ -31,7 +31,7 @@ class Panel(ScreenPanel):
@@ -3455,7 +3469,21 @@ index c004663..8f98b87 100644
  
      def change_temp_delta(self, widget, tempdelta):
          logging.info(f"### tempdelta {tempdelta}")
-@@ -493,7 +637,37 @@ class Panel(ScreenPanel):
+@@ -474,6 +618,13 @@ class Panel(ScreenPanel):
+ 
+     def pid_calibrate(self, temp):
+         if temp <= 0:
++            # 2026-08-15: was a silent no-op (Keypad._handle_extra_action
++            # substitutes 0 for an empty entry via `get_value() or 0`, so
++            # tapping "Calibrate PID" before typing a target sent nothing
++            # and showed nothing). Mirror the existing show_popup_message
++            # idiom used a few lines up in this same file rather than
++            # leaving the user guessing why the button did nothing.
++            self._screen.show_popup_message(_("Enter a target temperature first"))
+             return
+         heater = self.active_heater.split(" ", maxsplit=1)[-1]
+         if self.verify_max_temp(temp):
+@@ -493,7 +644,37 @@ class Panel(ScreenPanel):
          self.labels["devices"].get_style_context().add_class("heater-grid")
  
          name = Gtk.Label()
@@ -3494,7 +3522,7 @@ index c004663..8f98b87 100644
  
          self.labels["devices"].attach(name, 0, 0, 1, 1)
          self.labels["devices"].attach(temp, 1, 0, 1, 1)
-@@ -506,6 +680,7 @@ class Panel(ScreenPanel):
+@@ -506,6 +687,7 @@ class Panel(ScreenPanel):
          scroll.add(self.labels["devices"])
  
          self.left_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -3502,7 +3530,7 @@ index c004663..8f98b87 100644
          self.left_panel.add(scroll)
  
          self.popover_buttons = {
-@@ -546,7 +721,8 @@ class Panel(ScreenPanel):
+@@ -546,7 +728,8 @@ class Panel(ScreenPanel):
              self.grid.attach(top, 0, 0, 1, 3)
              self.grid.attach(self.create_right_panel(), 0, 3, 1, 2)
          else:
@@ -3512,7 +3540,7 @@ index c004663..8f98b87 100644
              self.grid.attach(self.create_right_panel(), 1, 0, 1, 1)
          self.grid.show_all()
          self.numpad_visible = False
-@@ -622,7 +798,8 @@ class Panel(ScreenPanel):
+@@ -622,7 +805,8 @@ class Panel(ScreenPanel):
              self.grid.attach(self.labels["keypad"], 0, 2, 1, 2)
          else:
              self.grid.remove_column(1)

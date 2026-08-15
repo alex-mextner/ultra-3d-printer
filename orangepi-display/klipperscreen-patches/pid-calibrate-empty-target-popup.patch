@@ -1,0 +1,32 @@
+--- a/panels/temperature.py
++++ b/panels/temperature.py
+@@ -618,6 +618,13 @@
+ 
+     def pid_calibrate(self, temp):
+         if temp <= 0:
++            # 2026-08-15: was a silent no-op (Keypad._handle_extra_action
++            # substitutes 0 for an empty entry via `get_value() or 0`, so
++            # tapping "Calibrate PID" before typing a target sent nothing
++            # and showed nothing). Mirror the existing show_popup_message
++            # idiom used a few lines up in this same file rather than
++            # leaving the user guessing why the button did nothing.
++            self._screen.show_popup_message(_("Enter a target temperature first"))
+             return
+         heater = self.active_heater.split(" ", maxsplit=1)[-1]
+         if self.verify_max_temp(temp):
+--- a/panels/main_menu.py
++++ b/panels/main_menu.py
+@@ -403,6 +403,13 @@
+ 
+     def pid_calibrate(self, temp):
+         if temp <= 0:
++            # 2026-08-15: identical fix to panels/temperature.py's own
++            # pid_calibrate() - this file duplicates that method rather than
++            # inheriting it (dashboard mini heater panel), so both copies
++            # need the same fix. See temperature.py's comment for the root
++            # cause (Keypad._handle_extra_action substitutes 0 for empty
++            # input).
++            self._screen.show_popup_message(_("Enter a target temperature first"))
+             return
+         heater = self.active_heater.split(" ", maxsplit=1)[-1]
+         if self.verify_max_temp(temp):
