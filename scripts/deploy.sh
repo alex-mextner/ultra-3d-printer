@@ -307,10 +307,23 @@ else
     fi
 fi
 
+# Бэкапы — в СОСЕДНЮЮ директорию, не в $REMOTE_DIR, и с ротацией (2026-08-16).
+# До этой правки .bak.<timestamp> копии копились прямо в printer_data/config/,
+# вперемешку с настоящими конфигами - за один этот день (много десятков
+# деплоев подряд, живая отладка PID/осей/Z) там накопилась помойка бэкапов,
+# из-за которой в веб-интерфейсе (Mainsail Configuration/файловый браузер,
+# который сканирует ровно printer_data/config/) не было видно сам printer.cfg
+# среди залежей .bak-файлов. BACKUP_DIR - сосед printer_data/config, а не
+# подкаталог внутри него: Moonraker's file_manager "config" root - это именно
+# printer_data/config, подкаталог внутри него ВСЁ РАВНО попал бы в тот же
+# браузер (просто вложенным), сосед - нет.
+BACKUP_DIR="printer_data/config-backups"
+BACKUP_KEEP=5    # хранить N последних бэкапов НА КАЖДЫЙ файл, остальные - удалять
 TS="$(ssh -n "$HOST" "date +%Y%m%d%H%M%S")"
+ssh -n "$HOST" "mkdir -p $BACKUP_DIR"
 for f in "${CHANGED[@]}"; do
-    echo "-> бэкап $f -> $f.bak.$TS"
-    ssh -n "$HOST" "cp $REMOTE_DIR/$f $REMOTE_DIR/$f.bak.$TS 2>/dev/null || true"
+    echo "-> бэкап $f -> $BACKUP_DIR/$f.bak.$TS (храню последние $BACKUP_KEEP)"
+    ssh -n "$HOST" "cp $REMOTE_DIR/$f $BACKUP_DIR/$f.bak.$TS 2>/dev/null || true; ls -1t $BACKUP_DIR/$f.bak.* 2>/dev/null | tail -n +\$(($BACKUP_KEEP + 1)) | xargs -r rm -f"
     echo "-> заливаю $f"
     scp "$LOCAL_DIR/$f" "$HOST:$REMOTE_DIR/$f"
 done
@@ -336,7 +349,7 @@ else
     echo "ВНИМАНИЕ: ready не дождались за 30с. Файлы УЖЕ залиты, Klipper не поднялся —
 скорее всего ошибка в конфиге. Смотри klippy.log и Mainsail:
   ssh $HOST 'tail -40 printer_data/logs/klippy.log'
-Откатиться можно бэкапами $REMOTE_DIR/*.bak.$TS, сделанными выше.
+Откатиться можно бэкапами $BACKUP_DIR/*.bak.$TS, сделанными выше.
 Нагреватели при этом выключены: они гаснут при рестарте и не включатся, пока
 Klipper не запустится." >&2
     exit 1
