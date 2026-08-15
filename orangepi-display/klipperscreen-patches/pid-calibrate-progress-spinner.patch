@@ -1,0 +1,117 @@
+--- a/screen.py
++++ b/screen.py
+@@ -1749,13 +1749,31 @@
+         if self.confirm is not None:
+             self.gtk.remove_dialog(self.confirm)
+         self.confirm = self.gtk.Dialog(
+-            "KlipperScreen", buttons, label, self._confirm_send_action_response, method, params
++            "KlipperScreen", buttons, label, self._confirm_send_action_response,
++            method, params, widget
+         )
+ 
+-    def _confirm_send_action_response(self, dialog, response_id, method, params):
++    def _confirm_send_action_response(self, dialog, response_id, method, params, widget=None):
++        # 2026-08-15: `widget` (the caller's own Gtk.Button, when it has one)
++        # used to be accepted by _confirm_send_action but never threaded any
++        # further - every caller's busy-indicator intent was silently
++        # dropped here, and _send_action always got a hardcoded None instead.
++        # _send_action already has a real, working busy/spinner mechanism
++        # for a Gtk.Button (see its own body) that only clears once the
++        # underlying printer.gcode.script call genuinely completes - this
++        # just lets that reach the button again. Concrete motivating case:
++        # panels/temperature.py's "Calibrate PID" confirm dialog gave the
++        # user zero feedback for the multi-minute duration of a real
++        # PID_CALIBRATE run (repro'd live, 2026-08-15) - passing None here
++        # was the reason, not a missing feature elsewhere.
++        # Safe for every existing caller: _send_action's own
++        # `isinstance(widget, Gtk.Button)` check means anything that isn't a
++        # real Button (including the pre-existing None from every caller
++        # that doesn't have one) behaves exactly as before - fire-and-
++        # forget, no busy indicator, no exception.
+         self.gtk.remove_dialog(dialog)
+         if response_id == Gtk.ResponseType.OK:
+-            self._send_action(None, method, params)
++            self._send_action(widget, method, params)
+ 
+     def _send_action(self, widget, method, params):
+         logging.info(f"{method}: {params}")
+--- a/panels/temperature.py
++++ b/panels/temperature.py
+@@ -630,7 +630,21 @@
+         if self.verify_max_temp(temp):
+             script = {"script": f"PID_CALIBRATE HEATER={heater} TARGET={temp}"}
+             self._screen._confirm_send_action(
+-                None,
++                # 2026-08-15: was None - gave the user zero feedback for the
++                # real multi-minute duration of a live PID_CALIBRATE (no
++                # spinner, no disabled state, nothing until it finished).
++                # Passing the actual button now (captured in show_numpad(),
++                # see self.pid_calibrate_btn) lets screen.py's own
++                # _send_action() busy/spinner mechanism - already built,
++                # already used elsewhere - show a real spinner on THIS
++                # button that clears exactly when Klipper's response to
++                # printer.gcode.script actually comes back, i.e. when the
++                # calibration genuinely finishes. Not a fabricated progress
++                # percentage - see screen.py's own comment on this same
++                # fix for why a real percentage isn't available from
++                # Klipper's PID_CALIBRATE at all (klippy/extras/
++                # pid_calibrate.py has no queryable progress state).
++                getattr(self, "pid_calibrate_btn", None),
+                 _("Initiate a PID calibration for:")
+                 + f" {heater} @ {temp} ºC"
+                 + "\n\n"
+@@ -787,11 +801,21 @@
+             self._printer.state not in ("printing", "paused")
+             and self._screen.printer.config[self.active_heater]["control"] == "pid"
+         ):
+-            self.labels["keypad"].add_extra_button(
++            # 2026-08-15: capture the returned button (add_extra_button only
++            # returns non-None the FIRST time it's called on a given Keypad
++            # instance - a `has_extra_button` guard makes every later call a
++            # no-op that returns None - so only overwrite the stored
++            # reference when we actually get a real one back, keeping the
++            # first-call button valid across repeat show_numpad() calls).
++            # pid_calibrate() uses this to give screen.py's busy/spinner
++            # mechanism a real button to work with instead of None.
++            btn = self.labels["keypad"].add_extra_button(
+                 self.pid_calibrate,
+                 icon="heat-up",
+                 label=_("Calibrate") + " PID",
+             )
++            if btn is not None:
++                self.pid_calibrate_btn = btn
+         self.labels["keypad"].clear()
+ 
+         if self._screen.vertical_mode:
+--- a/panels/main_menu.py
++++ b/panels/main_menu.py
+@@ -415,7 +415,9 @@
+         if self.verify_max_temp(temp):
+             script = {"script": f"PID_CALIBRATE HEATER={heater} TARGET={temp}"}
+             self._screen._confirm_send_action(
+-                None,
++                # 2026-08-15: same real-spinner fix as panels/temperature.py
++                # - see that file's comment on its own identical change.
++                getattr(self, "pid_calibrate_btn", None),
+                 _("Initiate a PID calibration for:")
+                 + f" {heater} @ {temp} ºC"
+                 + "\n\n"
+@@ -556,11 +558,17 @@
+             self._printer.state not in ("printing", "paused")
+             and self._screen.printer.config[self.active_heater]["control"] == "pid"
+         ):
+-            self.labels["keypad"].add_extra_button(
++            # 2026-08-15: same capture-the-button fix as panels/
++            # temperature.py's show_numpad() - see that file's comment for
++            # the full reasoning. This file duplicates pid_calibrate()
++            # rather than inheriting it, so it needs its own copy.
++            btn = self.labels["keypad"].add_extra_button(
+                 self.pid_calibrate,
+                 icon="heat-up",
+                 label=_("Calibrate") + " PID",
+             )
++            if btn is not None:
++                self.pid_calibrate_btn = btn
+         self.labels["keypad"].clear()
+ 
+         if self._screen.vertical_mode:
