@@ -106,6 +106,70 @@
 # every other homing-family command in Klipper reports failure, and
 # swallowing it would hide a real problem (axis never reached the switch)
 # behind a fabricated-looking success.
+#
+# =========================================================================
+# 2026-08-15 CORRECTION #2 - trigger_mm/travel_mm were STILL synthetic
+# after the manual_home() fix above, caught the same way: two live
+# MEASURE_HOME AXIS=Y runs, one after ~196mm of real carriage travel
+# (~19.5s wall time at homing_speed 10), one with the carriage already
+# sitting at the switch beforehand (0.34s wall time, negligible real
+# travel possible). Both reported the IDENTICAL "start=196.000mm
+# trigger=0.000mm travel=-196.000mm" - proof trigger_mm carried zero real
+# information; it was silently just re-deriving hi.position_endstop no
+# matter what actually happened physically.
+#
+# Root cause, re-read fresh from this printer's installed Klipper
+# (2026-08-15, same caveat as above - re-read the real source if it has
+# since changed):
+#
+#   klippy/extras/homing.py, HomingMove.homing_move(), non-probe branch
+#   (probe_pos=False - what manual_home() passes here):
+#     haltpos = trigpos = movepos
+#     ...
+#     self.toolhead.set_position(haltpos)   # <- BEFORE homing_move_end
+#     ...
+#     self.printer.send_event("homing:homing_move_end", self)
+#
+#   klippy/stepper.py, MCU_stepper.set_position() -> _set_mcu_position():
+#     mcu_pos_dist = mcu_pos * self._step_dist
+#     self._mcu_position_offset = mcu_pos_dist - self.get_commanded_position()
+#   where mcu_pos = self.get_mcu_position() = the CURRENT real raw step
+#   count at the moment set_position() is called.
+#
+# So: the instant a homing move's endstop triggers, Klipper's OWN final
+# self.toolhead.set_position(haltpos) call - which runs on every ordinary
+# non-probe homing move, ours included, and fires BEFORE our event handler
+# ever sees anything - recalibrates _mcu_position_offset so that whatever
+# raw step count the stepper is AT RIGHT THEN (which is, by construction,
+# essentially sp.trig_pos itself, since the move just stopped there) maps
+# to haltpos/movepos - which cmd_MEASURE_HOME sets to hi.position_endstop.
+# Calling stepper.mcu_to_commanded_position(sp.trig_pos) from our handler
+# AFTERWARD therefore returns ~hi.position_endstop by construction, for
+# ANY real trig_pos - the real physical trigger location has already been
+# thrown away by the time we read it, exactly the same class of bug as
+# CORRECTION #1, just one layer deeper.
+#
+# THE FIX: never call mcu_to_commanded_position(trig_pos) after the fact.
+# sp.start_pos and sp.trig_pos (klippy/extras/homing.py StepperPosition -
+# stepper.get_mcu_position() / stepper.get_past_mcu_position()) are RAW
+# MCU step counts, read straight from hardware/step-compress history at
+# capture time - neither goes through any offset and neither is retroactively
+# altered by a later set_position() call. Their difference, times the
+# stepper's get_step_dist() (klippy/stepper.py: self._rotation_dist /
+# self._steps_per_rotation, a fixed mm-per-step scalar that already carries
+# the correct sign because mcu_pos itself is a signed step count - proven by
+# mcu_to_commanded_position's own formula, mcu_pos * step_dist - offset,
+# needing no separate sign flip), is the true physical distance traveled
+# between this module's own reference point and the real endstop trigger -
+# entirely independent of whatever Klipper's internal commanded-position
+# bookkeeping does afterward. sp.start_cmd_pos (used for start_mm) is NOT
+# affected by this bug and needed no change: StepperPosition.__init__ reads
+# it via the SAME mcu_to_commanded_position() call, but that read happens at
+# the very top of homing_move(), before this method's own set_position()
+# calls have run even once - so it still uses the correct, not-yet-
+# recalibrated offset (ours, from cmd_MEASURE_HOME's own toolhead.
+# set_position(startpos, ...) call made just before manual_home() runs).
+# =========================================================================
 
 import logging
 
@@ -145,7 +209,6 @@ class AxisTravelReport:
             if sp.trig_pos is None or sp.start_cmd_pos is None:
                 continue
             name = sp.stepper_name
-            trig_mm = sp.stepper.mcu_to_commanded_position(sp.trig_pos)
             rec = self.reports.get(name)
             if rec is None:
                 # First pass seen since the last reset: this is the only
@@ -153,11 +216,25 @@ class AxisTravelReport:
                 # so it is captured once and never overwritten by a later
                 # (retract/re-approach) pass. For MEASURE_HOME there is
                 # only ever one pass anyway (see cmd_MEASURE_HOME).
-                rec = {'start_mm': sp.start_cmd_pos, 'passes': 0}
+                # start_pos (raw MCU steps) is kept alongside start_mm
+                # specifically so travel below can be computed from raw
+                # step counts on every pass, not just re-derived from a
+                # commanded-position conversion that a later pass's own
+                # set_position() call would have already corrupted - see
+                # "2026-08-15 CORRECTION #2" in the module docstring.
+                rec = {'start_mm': sp.start_cmd_pos,
+                       'start_pos': sp.start_pos, 'passes': 0}
                 self.reports[name] = rec
             rec['passes'] += 1
-            rec['trigger_mm'] = trig_mm
-            rec['travel_mm'] = trig_mm - rec['start_mm']
+            # Raw MCU step delta, NOT mcu_to_commanded_position(trig_pos) -
+            # see "2026-08-15 CORRECTION #2" above for why that call is
+            # unusable here (silently returns ~hi.position_endstop for any
+            # real trig_pos, confirmed live). sp.trig_pos and rec['start_pos']
+            # are both raw hardware step counts, immune to any set_position()
+            # recalibration that happens later in the same homing_move().
+            travel_mm = (sp.trig_pos - rec['start_pos']) * sp.stepper.get_step_dist()
+            rec['trigger_mm'] = rec['start_mm'] + travel_mm
+            rec['travel_mm'] = travel_mm
 
     cmd_RESET_AXIS_TRAVEL_REPORT_help = (
         "Clear recorded axis-travel data (all steppers, or one via "
