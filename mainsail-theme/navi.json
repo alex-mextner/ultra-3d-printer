@@ -3,18 +3,18 @@
     "title": "Документация (RAMPS/Klipper)",
     "href": "http://192.168.11.160:8001/",
     "target": "_blank",
-    "position": 90
+    "position": 51
   },
   {
     "title": "Профиль OrcaSlicer (скачать)",
     "href": "http://192.168.11.160/server/files/config/slicer-profile/ULTRA-mini.json",
     "target": "_blank",
-    "position": 91
+    "position": 52
   },
   {
     "title": "Как установить профиль в слайсер",
     "href": "http://192.168.11.160:8001/slicer-profile-install.html",
     "target": "_blank",
-    "position": 92
+    "position": 53
   }
 ]

@@ -54,9 +54,43 @@ scp mainsail-theme/navi.json ultra@192.168.11.160:~/printer_data/config/.theme/n
 Then refresh Mainsail in the browser (Ctrl+Shift+R / hard refresh, since
 browsers sometimes cache this file) to see it in the sidebar.
 
-## Not yet verified
+## Delivery to the browser IS verified (2026-08-16) — by nginx access log
 
-Deployed and the file is confirmed present on the device at the right
-path, but nobody has looked at the actual Mainsail sidebar in a browser to
-confirm it renders — no browser access from here. Check visually before
-considering this done.
+The user reported the links as missing. Every server-side link in the chain
+was checked and every one of them is correct:
+
+- Mainsail on this machine is **v2.18.2** (`~/mainsail/.version`, and
+  Moonraker's `machine/update/status`), and that build really does contain
+  the custom-navigation loader — `grep -rl navi.json ~/mainsail` hits
+  `assets/index-*.js`. Not a too-old-Mainsail problem.
+- nginx serves `root /home/ultra/mainsail;` — there is no second, stale
+  Mainsail install being served instead.
+- `GET /server/files/config/.theme/navi.json` → **200**, valid JSON, and
+  `server/files/list?root=config` includes `.theme/navi.json` (Moonraker does
+  not hide dot-directories, which is what the loader needs).
+- Moonraker's DB namespace `mainsail` has **no `navigation` key at all**, so
+  the per-entry `visible`/`position` overrides that Mainsail's Settings →
+  Navigation writes are absent and cannot be hiding anything.
+- `icon` is **optional**: the loader substitutes a default icon when the
+  field is missing, so leaving it out is not a cause. Cyrillic `title` is
+  fine too (the file is served as UTF-8 `application/json`).
+
+The decisive evidence is `/var/log/nginx/mainsail-access.log` (readable only
+as root): the user's own browsers fetch
+`GET /server/files/config/.theme/navi.json?timestamp=1786902708979` — the
+`timestamp` being the current file's mtime — repeatedly, including three
+times in the 11 minutes before the "I don't see it" report. The page really
+does load this file.
+
+## Why `position` is 51/52/53 and not 90/91/92
+
+Mainsail's built-in routes sit at fixed positions (read out of the bundle):
+dashboard 10, webcam 20, console 30, heightmap 40, G-Code Files 50,
+G-Code Viewer 60, History 70, Timelapse 80, **Machine 90**. The first version
+of this file used 90/91/92, which put all three custom links *dead last in
+the sidebar, below Machine* — delivered correctly and easy to miss entirely.
+They are now 51/52/53, i.e. grouped right after "G-Code Files", which is
+where a profile download and its install instructions belong anyway.
+
+Still true: Mainsail reads this file per page load, so a browser refresh is
+all that is needed after changing it — no Klipper/Moonraker restart.
