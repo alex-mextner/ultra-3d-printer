@@ -4,5 +4,11 @@
     "href": "http://192.168.11.160:8001/",
     "target": "_blank",
     "position": 90
+  },
+  {
+    "title": "Профиль OrcaSlicer (скачать)",
+    "href": "http://192.168.11.160/server/files/config/slicer-profile/ULTRA-mini.json",
+    "target": "_blank",
+    "position": 91
   }
 ]
