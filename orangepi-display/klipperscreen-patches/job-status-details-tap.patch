@@ -1,0 +1,62 @@
+--- a/panels/job_status.py
++++ b/panels/job_status.py
+@@ -9,7 +9,7 @@ from math import pi, sqrt, trunc
+ from statistics import median
+ from time import time
+
+-from gi.repository import GLib, Gtk, Pango
++from gi.repository import Gdk, GLib, Gtk, Pango
+
+ from ks_includes.KlippyGtk import find_widget
+ from ks_includes.screen_panel import ScreenPanel
+@@ -137,7 +137,29 @@ class Panel(ScreenPanel):
+         overlay.set_size_request(*(self._gtk.font_size * 5,) * 2)
+         overlay.add(self.labels["darea"])
+         overlay.add_overlay(box)
+-        self.grid.attach(overlay, 0, 0, 1, 1)
++        # 2026-08-16: "Details" affordance, requested by the user, implemented
++        # as a tap on the progress ring rather than a new button. This panel's
++        # button_grid is already full (4 buttons, column_homogeneous, no free
++        # column - see show_buttons_for_state) and every previous attempt to
++        # add screen real estate here has cost real pixels on a 320x240 panel
++        # already tuned to single digits (2026-07-31 comments throughout this
++        # file; the separate zcalibrate.py row attempt was reverted for the
++        # same reason). A click handler on existing space costs zero layout.
++        # Gtk.EventBox, not a bare DrawingArea event mask - a raw
++        # add_events()+"button-press-event" on the DrawingArea inside this
++        # Gtk.Overlay silently never fired in live testing (confirmed with
++        # debug logging + a real xdotool tap sweep on the actual device, zero
++        # hits across 6+ coordinates, while the exact same click mechanism
++        # DID open other real buttons like Fine Tuning normally) - EventBox is
++        # the standard, reliable GTK3 idiom for adding click handling to a
++        # non-button widget and does not have this issue. move_grid is the
++        # target because it is the densest single view already built (speed,
++        # accel, X/Y/Z, zoffset, height, layer) - the same view already
++        # reachable by tapping the small "z"/"speed" icon buttons below, this
++        # just gives the same destination a bigger, more obvious tap target.
++        details_tap = Gtk.EventBox()
++        details_tap.add(overlay)
++        details_tap.connect(
++            "button-press-event", lambda *_: self.switch_info(info=self.move_grid)
++        )
++        details_tap.set_tooltip_text(_("Tap for details"))
++        self.grid.attach(details_tap, 0, 0, 1, 1)
+
+         self.labels["thumbnail"] = self._gtk.Button("file")
+         self.labels["thumbnail"].set_hexpand(False)
+@@ -703,6 +725,15 @@ class Panel(ScreenPanel):
+             logging.info("resetting progress")
+             self._printer.data["virtual_sdcard"]["progress"] = 0
+         self.update_progress(0.0)
++        # 2026-08-16: force the minimal status_grid view for every new print.
++        # Confirmed by reading this whole file that nothing did this before -
++        # switch_info() was only ever called once, from __init__ - so a print
++        # started right after tapping into move_grid/extrusion_grid/time_grid
++        # (from this same session or a leftover view from a previous one,
++        # since this Panel instance persists across prints) would silently
++        # keep showing that denser view instead of defaulting to minimal, the
++        # opposite of what was asked for.
++        self.switch_info(info=self.status_grid)
+         self.set_state("printing")
+
+     def process_update(self, action, data):

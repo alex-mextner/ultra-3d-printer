@@ -1589,10 +1589,52 @@ index a47bf4c..62ef442 100644
          if action != "notify_status_update":
              return
 diff --git a/panels/job_status.py b/panels/job_status.py
-index 4e0c01a..dc800ce 100644
+index 4e0c01a..ebb6d34 100644
 --- a/panels/job_status.py
 +++ b/panels/job_status.py
-@@ -143,8 +143,38 @@ class Panel(ScreenPanel):
+@@ -9,7 +9,7 @@ from math import pi, sqrt, trunc
+ from statistics import median
+ from time import time
+ 
+-from gi.repository import GLib, Gtk, Pango
++from gi.repository import Gdk, GLib, Gtk, Pango
+ 
+ from ks_includes.KlippyGtk import find_widget
+ from ks_includes.screen_panel import ScreenPanel
+@@ -137,14 +137,70 @@ class Panel(ScreenPanel):
+         overlay.set_size_request(*(self._gtk.font_size * 5,) * 2)
+         overlay.add(self.labels["darea"])
+         overlay.add_overlay(box)
+-        self.grid.attach(overlay, 0, 0, 1, 1)
++        # 2026-08-16: "Details" affordance, requested by the user, implemented
++        # as a tap on the progress ring rather than a new button. This panel's
++        # button_grid is already full (4 buttons, column_homogeneous, no free
++        # column - see show_buttons_for_state) and every previous attempt to
++        # add screen real estate here has cost real pixels on a 320x240 panel
++        # already tuned to single digits (2026-07-31 comments throughout this
++        # file; the separate zcalibrate.py row attempt was reverted for the
++        # same reason). A click handler on existing space costs zero layout.
++        # Gtk.EventBox, not a bare DrawingArea event mask - a raw
++        # add_events()+"button-press-event" on the DrawingArea inside this
++        # Gtk.Overlay silently never fired in live testing (confirmed with
++        # debug logging + a real xdotool tap sweep on the actual device, zero
++        # hits across 6+ coordinates, while the exact same click mechanism
++        # DID open other real buttons like Fine Tuning normally) - EventBox is
++        # the standard, reliable GTK3 idiom for adding click handling to a
++        # non-button widget and does not have this issue. move_grid is the
++        # target because it is the densest single view already built (speed,
++        # accel, X/Y/Z, zoffset, height, layer) - the same view already
++        # reachable by tapping the small "z"/"speed" icon buttons below, this
++        # just gives the same destination a bigger, more obvious tap target.
++        details_tap = Gtk.EventBox()
++        details_tap.add(overlay)
++        details_tap.connect(
++            "button-press-event", lambda *_: self.switch_info(info=self.move_grid)
++        )
++        details_tap.set_tooltip_text(_("Tap for details"))
++        self.grid.attach(details_tap, 0, 0, 1, 1)
+ 
+         self.labels["thumbnail"] = self._gtk.Button("file")
          self.labels["thumbnail"].set_hexpand(False)
          self.labels["thumbnail"].get_style_context().add_class("printing-thumbnail")
          self.labels["thumbnail"].connect("clicked", self.show_fullscreen_thumbnail)
@@ -1632,7 +1674,7 @@ index 4e0c01a..dc800ce 100644
          self.current_extruder = self._printer.get_stat("toolhead", "extruder")
          if self.current_extruder:
              diameter = float(
-@@ -167,6 +197,8 @@ class Panel(ScreenPanel):
+@@ -167,6 +223,8 @@ class Panel(ScreenPanel):
          self.switch_info(info=self.status_grid)
          self.content.add(self.grid)
  
@@ -1641,7 +1683,7 @@ index 4e0c01a..dc800ce 100644
      def create_status_grid(self, widget=None):
          buttons = {
              "speed": self._gtk.Button("speed+", "-", None, self.bts, Gtk.PositionType.LEFT, 1),
-@@ -193,7 +225,13 @@ class Panel(ScreenPanel):
+@@ -193,7 +251,13 @@ class Panel(ScreenPanel):
              )
              self.buttons["extruder"][extruder].set_halign(Gtk.Align.START)
  
@@ -1656,7 +1698,7 @@ index 4e0c01a..dc800ce 100644
          nlimit = 2 if self._screen.width <= 500 else 3
          n = 0
          if nlimit > 2 and len(self._printer.get_tools()) == 2:
-@@ -259,20 +297,51 @@ class Panel(ScreenPanel):
+@@ -259,20 +323,51 @@ class Panel(ScreenPanel):
                              n += 1
                              break
  
@@ -1715,7 +1757,7 @@ index 4e0c01a..dc800ce 100644
          self.status_grid = info
  
      def create_extrusion_grid(self, widget=None):
-@@ -354,6 +423,20 @@ class Panel(ScreenPanel):
+@@ -354,6 +449,20 @@ class Panel(ScreenPanel):
          if not info:
              logging.debug("No info to attach")
              return
@@ -1736,7 +1778,7 @@ index 4e0c01a..dc800ce 100644
          if self._screen.vertical_mode:
              self.labels["info_grid"].remove_row(1)
              self.labels["info_grid"].attach(info, 0, 1, 1, 1)
-@@ -363,17 +446,44 @@ class Panel(ScreenPanel):
+@@ -363,17 +472,44 @@ class Panel(ScreenPanel):
          self.labels["info_grid"].show_all()
  
      def on_draw(self, da, ctx):
@@ -1786,7 +1828,7 @@ index 4e0c01a..dc800ce 100644
          ctx.stroke()
  
      def activate(self):
-@@ -391,17 +501,39 @@ class Panel(ScreenPanel):
+@@ -391,17 +527,39 @@ class Panel(ScreenPanel):
              self.animation_timeout = None
  
      def create_buttons(self):
@@ -1835,7 +1877,23 @@ index 4e0c01a..dc800ce 100644
              ),
          }
          self.buttons["cancel"].connect("clicked", self.cancel)
-@@ -902,6 +1034,11 @@ class Panel(ScreenPanel):
+@@ -535,6 +693,15 @@ class Panel(ScreenPanel):
+             logging.info("resetting progress")
+             self._printer.data["virtual_sdcard"]["progress"] = 0
+         self.update_progress(0.0)
++        # 2026-08-16: force the minimal status_grid view for every new print.
++        # Confirmed by reading this whole file that nothing did this before -
++        # switch_info() was only ever called once, from __init__ - so a print
++        # started right after tapping into move_grid/extrusion_grid/time_grid
++        # (from this same session or a leftover view from a previous one,
++        # since this Panel instance persists across prints) would silently
++        # keep showing that denser view instead of defaulting to minimal, the
++        # opposite of what was asked for.
++        self.switch_info(info=self.status_grid)
+         self.set_state("printing")
+ 
+     def process_update(self, action, data):
+@@ -902,6 +1069,11 @@ class Panel(ScreenPanel):
          self.content.show_all()
  
      def show_file_thumbnail(self):
@@ -2034,7 +2092,7 @@ index 487c56a..8bad2fb 100644
          reset.set_hexpand(False)
  
 diff --git a/panels/main_menu.py b/panels/main_menu.py
-index f702390..0e1eb37 100644
+index f702390..b9d268f 100644
 --- a/panels/main_menu.py
 +++ b/panels/main_menu.py
 @@ -15,14 +15,36 @@ class Panel(MenuPanel):
@@ -2348,7 +2406,7 @@ index f702390..0e1eb37 100644
  
          self.labels["devices"].attach(name, 0, 0, 1, 1)
          self.labels["devices"].attach(temp, 1, 0, 1, 1)
-@@ -247,10 +461,34 @@ class Panel(MenuPanel):
+@@ -247,15 +461,55 @@ class Panel(MenuPanel):
  
          scroll = self._gtk.ScrolledWindow(steppers=False)
          scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -2384,7 +2442,28 @@ index f702390..0e1eb37 100644
          self.left_panel.add(scroll)
  
          for d in self._printer.get_temp_devices():
-@@ -272,8 +510,13 @@ class Panel(MenuPanel):
+             self.add_device(d)
+ 
++        # ADDED 2026-08-16: persistent nozzle-diameter indicator, at the
++        # user's request after a real incident this session where printer.cfg
++        # had the wrong nozzle_diameter (0.4 configured, 0.6 physically
++        # mounted) for an unknown length of time. Deliberately a static label
++        # read once from self._printer.config (populated from Moonraker's
++        # configfile.config at connect, ks_includes/printer.py:38) - Klipper
++        # has no live nozzle-swap detection, so this shows the CONFIGURED
++        # value, same caveat as printer.cfg's own NOZZLE_STATUS macro. Placed
++        # below the device scroll, outside its Gtk.Grid, so it can't disturb
++        # that grid's already-finicky column geometry (see this repo's own
++        # dashboard-row-geometry.patch history for why that grid is fragile).
++        nozzle_dia = self._printer.config.get("extruder", {}).get("nozzle_diameter", "?")
++        self.labels["nozzle_diameter"] = Gtk.Label(label=_("Nozzle") + f": {nozzle_dia}mm")
++        self.labels["nozzle_diameter"].get_style_context().add_class("nozzle-diameter-label")
++        self.left_panel.pack_end(self.labels["nozzle_diameter"], False, False, 4)
++
+         return self.left_panel
+ 
+     def hide_numpad(self, widget=None):
+@@ -272,8 +526,13 @@ class Panel(MenuPanel):
              self.main_menu.attach(top, 0, 0, 1, 3)
              self.main_menu.attach(self.menu_scroll, 0, 3, 1, 2)
          else:
@@ -2400,7 +2479,7 @@ index f702390..0e1eb37 100644
          self.main_menu.show_all()
          self.numpad_visible = False
          self._screen.base_panel.set_control_sensitive(False, control="back")
-@@ -315,11 +558,17 @@ class Panel(MenuPanel):
+@@ -315,11 +574,17 @@ class Panel(MenuPanel):
              self._printer.state not in ("printing", "paused")
              and self._screen.printer.config[self.active_heater]["control"] == "pid"
          ):
@@ -2419,7 +2498,7 @@ index f702390..0e1eb37 100644
          self.labels["keypad"].clear()
  
          if self._screen.vertical_mode:
-@@ -332,8 +581,15 @@ class Panel(MenuPanel):
+@@ -332,8 +597,15 @@ class Panel(MenuPanel):
              self.main_menu.attach(top, 0, 0, 1, 2)
              self.main_menu.attach(self.labels["keypad"], 0, 2, 1, 2)
          else:
@@ -3623,10 +3702,30 @@ index c004663..ebbe83d 100644
          self.numpad_visible = True
          self.popover.popdown()
 diff --git a/panels/zcalibrate.py b/panels/zcalibrate.py
-index 573180a..68e3517 100644
+index 573180a..b85e7e2 100644
 --- a/panels/zcalibrate.py
 +++ b/panels/zcalibrate.py
-@@ -82,7 +82,15 @@ class Panel(ScreenPanel):
+@@ -13,6 +13,19 @@ class Panel(ScreenPanel):
+     widgets = {}
+     distances = [".01", ".05", ".1", ".5", "1", "5"]
+     distance = distances[-2]
++    # 2026-08-15: not a gcode command - a sentinel value added to the same
++    # dropdown as PROBE_CALIBRATE/Z_ENDSTOP_CALIBRATE/etc. (set_commands()
++    # below) so Fine Tuning (SET_GCODE_OFFSET babystepping, fine_tune.py)
++    # is reachable from here without an active print, without needing new
++    # vertical space in this panel's grid - a prior attempt added a new
++    # button row instead and the user confirmed live on the real 320x240
++    # screen it did not render (this panel's own documented layout budget,
++    # see printer-status.md, had only ~7px of slack left). Intercepted in
++    # start_calibration() before any of that method's real side effects
++    # (SET_GCODE_OFFSET Z=0 / BED_MESH_CLEAR / G28 / move-to-center all run
++    # BEFORE the selected command is sent - this sentinel must short-circuit
++    # ahead of all of that, not just replace the final gcode_script call).
++    FINE_TUNE_LABEL = "Fine Tuning (Z Offset)"
+ 
+     def __init__(self, screen, title):
+         title = title or _("Z Calibrate")
+@@ -82,7 +95,15 @@ class Panel(ScreenPanel):
          self.buttons = {
              "zpos": self._gtk.Button("z-farther", _("Raise Nozzle"), "color4"),
              "zneg": self._gtk.Button("z-closer", _("Lower Nozzle"), "color1"),
@@ -3643,7 +3742,7 @@ index 573180a..68e3517 100644
              "complete": self._gtk.Button("complete", _("Accept"), "color3"),
              "cancel": self._gtk.Button("cancel", _("Abort"), "color2"),
          }
-@@ -119,15 +127,29 @@ class Panel(ScreenPanel):
+@@ -119,15 +140,29 @@ class Panel(ScreenPanel):
                  ctx.add_class("horizontal_togglebuttons_active")
              distgrid.attach(self.widgets[i], j, 0, 1, 1)
  
@@ -3679,7 +3778,7 @@ index 573180a..68e3517 100644
          grid = Gtk.Grid(column_homogeneous=True)
          if self._screen.vertical_mode:
              zpos_row, zneg_row = (
-@@ -135,6 +157,9 @@ class Panel(ScreenPanel):
+@@ -135,6 +170,9 @@ class Panel(ScreenPanel):
                  if self._config.get_config()["main"].getboolean("invert_z", False)
                  else (1, 2)
              )
@@ -3689,7 +3788,7 @@ index 573180a..68e3517 100644
              grid.attach(self.buttons["zpos"], 0, zpos_row, 1, 1)
              grid.attach(self.buttons["zneg"], 0, zneg_row, 1, 1)
              grid.attach(start_box, 0, 0, 1, 1)
-@@ -150,11 +175,22 @@ class Panel(ScreenPanel):
+@@ -150,11 +188,22 @@ class Panel(ScreenPanel):
              )
              grid.attach(self.buttons["zpos"], 0, zpos_row, 1, 1)
              grid.attach(self.buttons["zneg"], 0, zneg_row, 1, 1)
@@ -3713,6 +3812,35 @@ index 573180a..68e3517 100644
 +            grid.attach(distances, 0, 3, 3, 1)
  
          self.content.add(grid)
+ 
+@@ -180,6 +229,8 @@ class Panel(ScreenPanel):
+         if "AXIS_TWIST_COMPENSATION_CALIBRATE" in self._printer.available_commands:
+             commands.append({"AXIS_TWIST_COMPENSATION_CALIBRATE"})
+ 
++        commands.append({self.FINE_TUNE_LABEL})
++
+         # Custom commands
+         if self.ks_printer_cfg is not None:
+             if custom_config := self.ks_printer_cfg.get("zcalibrate_custom_commands", None):
+@@ -212,6 +263,19 @@ class Panel(ScreenPanel):
+             return
+         command = model[iterable][0]
+ 
++        if command == self.FINE_TUNE_LABEL:
++            # Pure screen navigation, not a calibration run - must return
++            # here, before SET_GCODE_OFFSET/BED_MESH_CLEAR/G28/move-to-
++            # center below, all of which are real physical/state actions
++            # that every other dropdown entry deliberately triggers.
++            # Also must NOT disable start/dropdown the way a real
++            # calibration does just below (those only re-enable via
++            # buttons_not_calibrating(), driven by Klipper's real
++            # manual_probe.is_active state - a plain navigation never
++            # sets that, so disabling here would strand the panel).
++            self.menu_item_clicked(widget, {"panel": "fine_tune"})
++            return
++
+         self.buttons["start"].set_sensitive(False)
+         self.dropdown.set_sensitive(False)
  
 diff --git a/screen.py b/screen.py
 index 4efa3ac..99992cf 100755
@@ -5696,28 +5824,3 @@ index 91f526b..7c7d37c 100644
  .filament_sensor {
      border-radius: 3em;
  }
---- a/panels/main_menu.py	2026-08-16 17:33:20.992142800 +0000
-+++ b/panels/main_menu.py	2026-08-16 17:33:59.791956400 +0000
-@@ -494,6 +494,22 @@
-         for d in self._printer.get_temp_devices():
-             self.add_device(d)
- 
-+        # ADDED 2026-08-16: persistent nozzle-diameter indicator, at the
-+        # user's request after a real incident this session where printer.cfg
-+        # had the wrong nozzle_diameter (0.4 configured, 0.6 physically
-+        # mounted) for an unknown length of time. Deliberately a static label
-+        # read once from self._printer.config (populated from Moonraker's
-+        # configfile.config at connect, ks_includes/printer.py:38) - Klipper
-+        # has no live nozzle-swap detection, so this shows the CONFIGURED
-+        # value, same caveat as printer.cfg's own NOZZLE_STATUS macro. Placed
-+        # below the device scroll, outside its Gtk.Grid, so it can't disturb
-+        # that grid's already-finicky column geometry (see this repo's own
-+        # dashboard-row-geometry.patch history for why that grid is fragile).
-+        nozzle_dia = self._printer.config.get("extruder", {}).get("nozzle_diameter", "?")
-+        self.labels["nozzle_diameter"] = Gtk.Label(label=_("Nozzle") + f": {nozzle_dia}mm")
-+        self.labels["nozzle_diameter"].get_style_context().add_class("nozzle-diameter-label")
-+        self.left_panel.pack_end(self.labels["nozzle_diameter"], False, False, 4)
-+
-         return self.left_panel
- 
-     def hide_numpad(self, widget=None):
