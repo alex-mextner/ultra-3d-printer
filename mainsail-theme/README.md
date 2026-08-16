@@ -15,6 +15,12 @@
    `scripts/deploy.sh` on every deploy, so this link always points at
    whatever's current - no separate update step needed when the profile
    changes, only when the LIST of links itself changes.
+3. ADDED 2026-08-16: a link to `docs/slicer-profile-install.html` (published
+   by `scripts/serve-docs.sh`, same doc portal as the first entry) - real,
+   per-slicer, per-OS instructions for where to put the downloaded profile
+   from entry 2, and which slicers (OrcaSlicer only) actually accept the file
+   directly vs. which don't (PrusaSlicer/SuperSlicer, Cura - different formats,
+   documented honestly rather than implying a universal file-drop).
 
 ## Mechanism (verified against Mainsail's own docs, 2026-08-15)
 

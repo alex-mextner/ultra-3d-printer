@@ -10,5 +10,11 @@
     "href": "http://192.168.11.160/server/files/config/slicer-profile/ULTRA-mini.json",
     "target": "_blank",
     "position": 91
+  },
+  {
+    "title": "Как установить профиль в слайсер",
+    "href": "http://192.168.11.160:8001/slicer-profile-install.html",
+    "target": "_blank",
+    "position": 92
   }
 ]

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Как поставить сгенерированный профиль принтера в слайсер</title>
+<link rel="stylesheet" href="portal.css">
+
+<header class="topbar">
+  <a class="brand" href="./">RAMPS · Klipper — портал</a>
+  <nav>
+    <a href="./">Индекс</a>
+    <a href="ramps-diagnostics.html">Диагностика</a>
+    <a href="reference.html">Схемы и пиноуты</a>
+    <a href="slicer-profile-install.html" aria-current="page">Профиль в слайсер</a>
+  </nav>
+</header>
+
+<div class="hero">
+  <div class="eyebrow">Методика · применимо к любой машине на Klipper + Moonraker</div>
+  <h1>Как поставить сгенерированный профиль принтера в слайсер</h1>
+  <p class="lede"><a href="https://github.com/alex-mextner/klipper-to-orcaslicer">klipper_to_orcaslicer.py</a> генерирует профиль принтера прямо из живого конфига Klipper (размер стола, диаметр сопла, скорости/ускорения) и кладёт его на сам принтер, откуда файл можно скачать через Mainsail. Дальше — куда его положить и что переживает установку, а что нет. По слайсерам это сильно отличается, ниже — честно, без «просто скопируйте файл» там, где это неправда.</p>
+  <div class="context-strip">
+    <div><span class="k">Формат файла</span><span class="v">JSON-профиль печатной машины OrcaSlicer (вендор «Custom»)</span></div>
+    <div><span class="k">Совместимо напрямую</span><span class="v">Только OrcaSlicer</span></div>
+    <div><span class="k">PrusaSlicer / SuperSlicer / Cura</span><span class="v">Другой формат — файл не подходит, см. ниже</span></div>
+    <div><span class="k">Главное правило</span><span class="v">Слайсер нужно полностью перезапустить, не просто переоткрыть проект</span></div>
+  </div>
+</div>
+
+<div class="wrap single">
+<main>
+
+<div class="content-group">
+<section id="download">
+  <h2>Откуда взять файл</h2>
+  <p>На принтере с этим порталом (или любом другом, где развёрнут <code>klipper_to_orcaslicer.py</code>) файл лежит под Moonraker-корнем <code>config</code> и доступен двумя способами из Mainsail:</p>
+  <ul>
+    <li>Файловый браузер Mainsail → <strong>Config Files</strong> → папка со слайсер-профилем.</li>
+    <li>Прямая ссылка-скачивание в сайдбаре Mainsail (если она настроена через <code>.theme/navi.json</code> — см. <code>mainsail-theme/README.md</code> в репозитории этого проекта) — Moonraker отдаёт файл с заголовком <code>Content-Disposition: attachment</code>, то есть браузер сразу предложит сохранить, а не откроет как текст.</li>
+  </ul>
+  <div class="callout key">
+    <span class="ctitle">Это снимок, не живая связь</span>
+    <p>Скачанный файл отражает конфиг Klipper на момент генерации. Если конфиг принтера изменился (поменяли сопло, скорости и т.п.) — файл нужно перекачать заново и переустановить в слайсер. Никакой слайсер сейчас не умеет сам «подтягивать» изменения с принтера в реальном времени — это не недоработка конкретно этого инструмента, а ограничение всей экосистемы Klipper/слайсеров на сегодня.</p>
+  </div>
+</section>
+</div>
+
+<div class="content-group">
+<section id="orcaslicer">
+  <h2>OrcaSlicer — работает напрямую</h2>
+  <span class="tag meter">проверено вживую, не только по документации</span>
+  <p class="section-intro">Файл — это ровно формат профиля печатной машины OrcaSlicer (вендор <code>Custom</code>), поэтому его достаточно положить в пользовательскую папку профилей и перезапустить приложение.</p>
+
+  <div class="scroll-x">
+  <table>
+    <thead><tr><th>ОС</th><th>Куда класть файл</th></tr></thead>
+    <tbody>
+      <tr><td>Windows</td><td><code>%APPDATA%\OrcaSlicer\user\default\machine\</code></td></tr>
+      <tr><td>macOS</td><td><code>~/Library/Application Support/OrcaSlicer/user/default/machine/</code></td></tr>
+      <tr><td>Linux</td><td><code>~/.config/OrcaSlicer/user/default/machine/</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p><code>default</code> — это папка профиля «без входа в облачную синхронизацию»; если когда-либо логинились в аккаунт OrcaSlicer, вместо <code>default</code> может быть папка с числовым ID — тогда ищите её рядом. Имя самого файла (например <code>ULTRA-mini.json</code>) не обязано совпадать с тем, что покажет OrcaSlicer в списке — имя профиля берётся из поля <code>name</code> внутри файла, не из имени файла на диске.</p>
+
+  <div class="callout warn">
+    <span class="ctitle">Перезапуск обязателен</span>
+    <p>OrcaSlicer читает эту папку только при старте, а не постоянно — простое сохранение проекта или переключение вкладки не подхватит новый/изменённый файл. Перезапустите приложение целиком. Проверено на практике: после перезапуска OrcaSlicer сам пересохраняет файл в своём каноническом виде (переупорядочивает поля, добавляет свои значения по умолчанию для того, что не было указано) — это нормальное поведение и заодно подтверждение, что профиль реально загрузился.</p>
+  </div>
+
+  <p>Если профиль наследуется (поле <code>inherits</code>) от базового пресета вроде <code>MyKlipper 0.6 nozzle</code> — такой пресет должен реально существовать среди системных профилей OrcaSlicer (обычно ставится вместе с самим приложением, вендор <code>Custom</code>). Несуществующий родитель — частая причина, почему профиль не подхватывается или подхватывается с пустыми полями.</p>
+</section>
+</div>
+
+<div class="content-group">
+<section id="prusaslicer">
+  <h2>PrusaSlicer / SuperSlicer — файл НЕ подходит напрямую</h2>
+  <span class="tag warn">несовместимый формат — не пытайтесь просто скопировать</span>
+  <p>PrusaSlicer и его форк SuperSlicer хранят профили в формате <code>.ini</code> (простой текст «ключ=значение»), а не в JSON, который использует OrcaSlicer. Это не вопрос «переименовать расширение» — структура полей и то, как считаются проценты/абсолютные значения для некоторых настроек, у слайсеров разное. Готового официального конвертера нет; существуют сторонние скрипты сообщества для обратного направления (PrusaSlicer/SuperSlicer → OrcaSlicer), но не для OrcaSlicer → PrusaSlicer, и точность не гарантирована.</p>
+  <p><strong>Что реально сделать:</strong> открыть скачанный JSON-файл текстом (или собрать статус-макросом <code>NOZZLE_STATUS</code> на самом принтере) и руками перенести числа — размер стола, диаметр сопла, максимальные скорости/ускорения — в PrusaSlicer через <em>Printer Settings → General/Custom G-code/Machine limits</em>. Дольше, чем импорт файла, но единственный надёжный путь без стороннего конвертера.</p>
+</section>
+</div>
+
+<div class="content-group">
+<section id="cura">
+  <h2>Cura — файл НЕ подходит напрямую</h2>
+  <span class="tag warn">несовместимый формат</span>
+  <p>Cura описывает машины файлами <code>.def.json</code> собственной схемы (движок Cura, не Slic3r-семейство) — структура полей другая, прямого импорта JSON-профиля OrcaSlicer в Cura нет.</p>
+  <p><strong>Что реально сделать:</strong> завести принтер через мастер Cura <em>Settings → Printer → Add Printer → Add a non-networked printer → Custom</em>, вписав те же числа (стол, сопло, скорости) вручную из скачанного профиля. Как и с PrusaSlicer — не «поставить файл», а один раз перенести значения.</p>
+</section>
+</div>
+
+</main>
+</div>
+
+<footer>
+  <div class="mono"><a href="./">← к индексу портала</a> · генератор профиля — <a href="https://github.com/alex-mextner/klipper-to-orcaslicer">klipper_to_orcaslicer.py</a> · состояние конкретной машины — в <code>docs/printer-status.md</code> в репозитории, не здесь</div>
+</footer>
+
+<script>
+(function(){
+  document.querySelectorAll('section[id]').forEach(function(sec){
+    var h2 = sec.querySelector(':scope > h2');
+    if(!h2 || h2.querySelector('.heading-anchor')) return;
+    var a = document.createElement('a');
+    a.href = '#' + sec.id;
+    a.className = 'heading-anchor';
+    a.textContent = '#';
+    a.setAttribute('aria-label', 'Прямая ссылка на раздел «' + h2.textContent.trim() + '»');
+    h2.appendChild(a);
+  });
+})();
+</script>
+</html>

@@ -39,6 +39,7 @@ PAGES=(
     index.html
     ramps-diagnostics.html
     reference.html
+    slicer-profile-install.html
     portal.css
 )
 # «tmc2209 pinout.webp» отсюда убран 2026-08-03 вместе с картинкой распиновки
