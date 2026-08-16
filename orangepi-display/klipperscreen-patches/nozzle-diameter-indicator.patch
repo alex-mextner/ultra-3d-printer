@@ -1,0 +1,25 @@
+--- a/panels/main_menu.py	2026-08-16 17:33:20.992142800 +0000
++++ b/panels/main_menu.py	2026-08-16 17:33:59.791956400 +0000
+@@ -494,6 +494,22 @@
+         for d in self._printer.get_temp_devices():
+             self.add_device(d)
+ 
++        # ADDED 2026-08-16: persistent nozzle-diameter indicator, at the
++        # user's request after a real incident this session where printer.cfg
++        # had the wrong nozzle_diameter (0.4 configured, 0.6 physically
++        # mounted) for an unknown length of time. Deliberately a static label
++        # read once from self._printer.config (populated from Moonraker's
++        # configfile.config at connect, ks_includes/printer.py:38) - Klipper
++        # has no live nozzle-swap detection, so this shows the CONFIGURED
++        # value, same caveat as printer.cfg's own NOZZLE_STATUS macro. Placed
++        # below the device scroll, outside its Gtk.Grid, so it can't disturb
++        # that grid's already-finicky column geometry (see this repo's own
++        # dashboard-row-geometry.patch history for why that grid is fragile).
++        nozzle_dia = self._printer.config.get("extruder", {}).get("nozzle_diameter", "?")
++        self.labels["nozzle_diameter"] = Gtk.Label(label=_("Nozzle") + f": {nozzle_dia}mm")
++        self.labels["nozzle_diameter"].get_style_context().add_class("nozzle-diameter-label")
++        self.left_panel.pack_end(self.labels["nozzle_diameter"], False, False, 4)
++
+         return self.left_panel
+ 
+     def hide_numpad(self, widget=None):
