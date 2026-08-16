@@ -350,6 +350,26 @@ done
 
 if [ "$ok" -eq 1 ]; then
     echo "OK: printer/info вернул ready."
+
+    # Держим OrcaSlicer-профиль свежим на каждый деплой - ADDED 2026-08-16.
+    # klipper-to-orcaslicer (github.com/alex-mextner/klipper-to-orcaslicer,
+    # склонирован на принтере в ~/klipper-to-orcaslicer, обновляется через
+    # [update_manager klipper-to-orcaslicer] в moonraker.conf) читает ЖИВОЙ
+    # конфиг через Moonraker (не файл - чтобы не разойтись с #*# SAVE_CONFIG
+    # блоком) и кладёт JSON в printer_data/config/slicer-profile/ - это тот
+    # же $REMOTE_DIR, что Mainsail уже показывает как "Config Files" (тот же
+    # приём, что и с backups/ выше), так что новый файл виден и скачиваем
+    # прямо из веб-интерфейса без SSH. Не критично для деплоя - если генерация
+    # упадёт (принтер только что перезапустился, Moonraker мог не успеть
+    # прогреться), не роняем весь деплой из-за косметического файла.
+    echo "== Обновляю OrcaSlicer-профиль (slicer-profile/) =="
+    # ВАЖНО: путь для редиректа - через ~/, не голый $REMOTE_DIR - после cd в
+    # клон relative path иначе резолвится от ~/klipper-to-orcaslicer, а не от
+    # домашней директории (реально ловил эту ошибку живьём: "No such file or
+    # directory", 2026-08-16).
+    ssh -n "$HOST" "mkdir -p ~/$REMOTE_DIR/slicer-profile && cd ~/klipper-to-orcaslicer && python3 klipper_to_orcaslicer.py --host 127.0.0.1 --name 'ULTRA mini' > ~/$REMOTE_DIR/slicer-profile/ULTRA-mini.json" \
+        && echo "   ok: $REMOTE_DIR/slicer-profile/ULTRA-mini.json" \
+        || echo "   ПРЕДУПРЕЖДЕНИЕ: не удалось обновить профиль (не критично, старый файл остался как был)"
 else
     echo "ВНИМАНИЕ: ready не дождались за 30с. Файлы УЖЕ залиты, Klipper не поднялся —
 скорее всего ошибка в конфиге. Смотри klippy.log и Mainsail:
