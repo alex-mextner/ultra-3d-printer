@@ -258,12 +258,15 @@ fi
 
 echo
 echo "== Что изменится (diff локальной версии с той, что реально стоит на принтере) =="
+REMOTE_SNAP="$(mktemp -d)"
+trap 'rm -rf "$REMOTE_SNAP"' EXIT
 CHANGED=()
 for f in "${FILES[@]}"; do
     if [ ! -f "$LOCAL_DIR/$f" ]; then
         continue
     fi
     remote_content="$(ssh -n -o ConnectTimeout=8 "$HOST" "cat $REMOTE_DIR/$f 2>/dev/null" || true)"
+    printf '%s\n' "$remote_content" > "$REMOTE_SNAP/$f"
     if [ "$remote_content" != "$(cat "$LOCAL_DIR/$f")" ]; then
         echo "--- $f отличается ---"
         diff <(echo "$remote_content") "$LOCAL_DIR/$f" || true
@@ -274,6 +277,53 @@ done
 if [ ${#CHANGED[@]} -eq 0 ]; then
     echo "Изменений нет, деплоить нечего."
     exit 0
+fi
+
+# --- ЖЁСТКИЙ ГЕЙТ: не затереть блок #*# SAVE_CONFIG принтера (ДОБАВЛЕН 2026-08-16) ---
+#
+# ИНЦИДЕНТ, который к этому привёл. Заливка ниже - это ОБЫЧНЫЙ scp поверх файла, то есть
+# полная замена. Всё, что Klipper дописывает в конец printer.cfg САМ (блок
+# "#*# <---- SAVE_CONFIG ---->"), при этом исчезает молча. А туда попадают результаты
+# ровно тех калибровок, ради которых всё и делается: PID нагревателей, Z-офсет после
+# Z_OFFSET_APPLY_ENDSTOP, bed mesh. 2026-08-16 пользователь в процессе печати поднял
+# Z-офсет на +0.5 и нажал Save на экране - Klipper записал position_endstop = 0.000 в
+# автосейв и закомментировал исходную строку в теле файла. В репозитории на тот момент
+# лежала версия БЕЗ автосейва, и любой следующий deploy.sh стёр бы и Z-офсет, и
+# откалиброванный PID экструдера, причём без единого сообщения об ошибке: Klipper
+# спокойно поднялся бы в ready на старых числах.
+#
+# ПОЧЕМУ ИМЕННО ОТКАЗ, А НЕ АВТОМАТИЧЕСКОЕ СЛИЯНИЕ. Дописать чужой автосейв к локальному
+# файлу технически несложно, но это было бы враньё: репозиторий - источник истины, и
+# правильная реакция на "на принтере есть калибровка, которой нет в git" - это забрать её
+# в git и закоммитить осознанно, а не тихо протащить мимо истории. Плюс автосейв может
+# конфликтовать с телом файла (Klipper комментирует перекрытые опции), и разруливать это
+# вслепую скриптом - как раз тот класс "умных" действий, который в этом проекте уже
+# приводил к потере данных.
+AUTOSAVE_LOST=()
+for f in "${CHANGED[@]}"; do
+    remote_auto="$(grep '^#\*#' "$REMOTE_SNAP/$f" 2>/dev/null || true)"
+    local_auto="$(grep '^#\*#' "$LOCAL_DIR/$f" 2>/dev/null || true)"
+    if [ -n "$remote_auto" ] && [ "$remote_auto" != "$local_auto" ]; then
+        AUTOSAVE_LOST+=("$f")
+    fi
+done
+
+if [ ${#AUTOSAVE_LOST[@]} -ne 0 ]; then
+    echo >&2
+    echo "ОТКАЗ: на принтере есть блок #*# SAVE_CONFIG, которого нет (или который другой)" >&2
+    echo "в локальной версии — деплой стёр бы результаты калибровок." >&2
+    echo "Затронутые файлы: ${AUTOSAVE_LOST[*]}" >&2
+    echo >&2
+    echo "Так бывает после КАЖДОГО осознанного SAVE_CONFIG на самом принтере (кнопка Save" >&2
+    echo "на экране, PID_CALIBRATE, Z_OFFSET_APPLY_ENDSTOP, BED_MESH_CALIBRATE)." >&2
+    echo "Что делать — забрать калибровку с принтера в репозиторий и закоммитить:" >&2
+    for f in "${AUTOSAVE_LOST[@]}"; do
+        echo "  scp $HOST:~/$REMOTE_DIR/$f printer-configs/$f" >&2
+    done
+    echo "  git diff printer-configs/    # посмотреть, что именно приехало" >&2
+    echo "  git commit -- printer-configs/ && git push" >&2
+    echo "После этого запустить деплой снова." >&2
+    exit 1
 fi
 
 echo
