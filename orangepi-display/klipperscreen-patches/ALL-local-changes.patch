@@ -4393,7 +4393,7 @@ index 573180a..b85e7e2 100644
          self.dropdown.set_sensitive(False)
  
 diff --git a/screen.py b/screen.py
-index 4efa3ac..9482b27 100755
+index 4efa3ac..83fa12a 100755
 --- a/screen.py
 +++ b/screen.py
 @@ -60,6 +60,58 @@ class AppState:
@@ -5181,29 +5181,13 @@ index 4efa3ac..9482b27 100755
  
      def _send_action(self, widget, method, params):
          logging.info(f"{method}: {params}")
-@@ -1425,10 +2110,807 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -1425,10 +2110,791 @@ class KlipperScreen(Gtk.ApplicationWindow):
  
      def _key_press_event(self, widget, event):
          keyval_name = Gdk.keyval_name(event.keyval)
 -        if keyval_name == "Escape":
 -            self._menu_go_back(home=True)
 -        elif keyval_name == "BackSpace" and len(self._cur_panels) > 1 and self.keyboard is None:
-+        if keyval_name == "F9":  # TEMP DEV HOOK 2026-08-17 - REMOVE
-+            self.show_panel("job_status")
-+            return True
-+        if keyval_name in ("F10", "F11", "F12") and "job_status" in self.panels:
-+            _st = {"F10": "printing", "F11": "paused", "F12": "error"}[keyval_name]
-+            self.panels["job_status"].set_state(_st)
-+            self.show_all()
-+            return True
-+        if keyval_name == "F8" and "job_status" in self.panels:  # TEMP DEV HOOK
-+            _p = self.panels["job_status"]
-+            _p.update_filename("OrcaCube_v2_0.2mm_PETG_Generic Klipper Printer_58m50s.gcode")
-+            _p.update_progress(0.45)
-+            _p._markup(_p.buttons["m_left"], "<span size='x-large' weight='bold'>1h 05m</span>")
-+            _p._set_layer_markup("42/150")
-+            self.show_all()
-+            return True
 +        handled = False
 +        # Key tracing (2026-08-01). Until now only the screensaver branch
 +        # below logged anything, so from the log alone "the key never
