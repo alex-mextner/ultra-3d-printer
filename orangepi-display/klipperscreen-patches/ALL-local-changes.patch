@@ -1589,7 +1589,7 @@ index a47bf4c..62ef442 100644
          if action != "notify_status_update":
              return
 diff --git a/panels/job_status.py b/panels/job_status.py
-index 4e0c01a..dabaf53 100644
+index 4e0c01a..a119578 100644
 --- a/panels/job_status.py
 +++ b/panels/job_status.py
 @@ -9,7 +9,7 @@ from math import pi, sqrt, trunc
@@ -1601,14 +1601,13 @@ index 4e0c01a..dabaf53 100644
  
  from ks_includes.KlippyGtk import find_widget
  from ks_includes.screen_panel import ScreenPanel
-@@ -52,6 +52,28 @@ class Panel(ScreenPanel):
+@@ -52,6 +52,27 @@ class Panel(ScreenPanel):
          self.move_grid = None
          self.time_grid = None
          self.extrusion_grid = None
 +        self.minimal_grid = None
 +        self.current_info = None
 +        self.stack = None
-+        self.thumb_size = 0
 +        # button -> the Gtk.Label inside it that carries the VALUE. The
 +        # detailed page's readouts are no longer "icon + one label", they are
 +        # "caption left, value right" (see _readout), and Gtk.Button.set_label()
@@ -1630,7 +1629,7 @@ index 4e0c01a..dabaf53 100644
          self.idex = False
  
          data = [
-@@ -110,9 +132,66 @@ class Panel(ScreenPanel):
+@@ -110,9 +131,66 @@ class Panel(ScreenPanel):
              else:
                  continue
              self.fans[fan] = {"name": name, "speed": "-"}
@@ -1698,7 +1697,7 @@ index 4e0c01a..dabaf53 100644
          self.labels["lcdmessage"] = Gtk.Label(no_show_all=True)
          self.labels["lcdmessage"].get_style_context().add_class("printing-status")
  
-@@ -123,28 +202,83 @@ class Panel(ScreenPanel):
+@@ -123,28 +201,83 @@ class Panel(ScreenPanel):
          fi_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.CENTER)
          fi_box.add(self.labels["file"])
          fi_box.add(self.labels["lcdmessage"])
@@ -1748,7 +1747,7 @@ index 4e0c01a..dabaf53 100644
 +        details_tap.connect(
 +            "button-press-event", lambda *_: self.switch_info(info=self.move_grid)
 +        )
-+        details_tap.set_tooltip_text(_("Tap for details"))
++        # No tooltip here either, same reason as in _tile.
 +        self.details_tap = details_tap
 +        # Second progress bar: the same drawing code as the minimal page, but a
 +        # widget can only have one parent, so the detailed page needs its own.
@@ -1798,25 +1797,42 @@ index 4e0c01a..dabaf53 100644
          self.current_extruder = self._printer.get_stat("toolhead", "extruder")
          if self.current_extruder:
              diameter = float(
-@@ -157,43 +291,741 @@ class Panel(ScreenPanel):
-         self.buttons["button_grid"] = Gtk.Grid(
-             row_homogeneous=True, column_homogeneous=True, vexpand=False
-         )
-+        # 2026-08-17 rev 2, and this is what buys the model its size. This row
-+        # is 47px of a 212px content area -- 22% of the screen -- and while a
-+        # job is running the minimal page needs that height far more than it
-+        # needs a second copy of Pause/Cancel: the page carries its own compact
-+        # pause/cancel/details strip inside the bottom band (see
-+        # create_minimal_grid). The full row comes straight back the moment the
-+        # job is over (can_close), because THEN it carries things that exist
-+        # nowhere else: Save Z Probe/Endstop, Restart, Main Menu.
-+        # no_show_all, not a bare hide(): show_all() is called on this panel
-+        # from at least three places outside it (attach_panel, _screen.show_all
-+        # after a tool change, show_buttons_for_state itself), and every one of
-+        # them would resurrect the row. See _sync_button_row for why revealing
-+        # it again has to lift the flag first.
-+        self.buttons["button_grid"].set_no_show_all(True)
-         self.grid.attach(self.buttons["button_grid"], 0, 3, 4, 1)
+@@ -152,48 +285,820 @@ class Panel(ScreenPanel):
+             )
+             self.fila_section = pi * ((diameter / 2) ** 2)
+ 
++        # 2026-08-17, FINAL shape of the action row -- and the short version is
++        # that there is no longer a separate action row at all.
++        #
++        # Three rejected revisions got here, all of them mine, all of them
++        # variations on "a full-width row of buttons under the page":
++        #   * two-line text buttons, ~47px -- «кнопки внизу текстами и в 2
++        #     строки»;
++        #   * icon over a one-line caption, ~50px -- «кнопки стали и с текстами
++        #     и иконками и заняли много места»;
++        #   * bare icon tiles with the focused one's name in a floating pill --
++        #     «нивкоем случае текст на фокус, все будет прыгать».
++        # And then the actual instruction: «еще раз уже был правильный
++        # интерфейс с компактными кнопками-иконками справа-низу. просто его
++        # используй везде. не надо ничего нового».
++        #
++        # He is right, and the thing he is pointing at already existed IN THIS
++        # PANEL: the compact icon strip at the bottom right of the minimal page
++        # (_action_button, .js-action). So that strip is now the only action
++        # control this panel has, in every state -- it just gains and loses
++        # buttons as the state changes. Nothing new was designed for this.
++        #
++        # What that deletes: Gtk.Grid button_grid, its no_show_all dance, the
++        # show/hide-per-page logic, and the whole class of "two buttons on one
++        # screen styled two different ways" the user had already reported once.
++        # What it buys the model: the row was 47px of a 212px content area and
++        # it is now zero -- the strip lives on a line the page already had.
+         self.buttons = {}
+         self.create_buttons()
+-        self.buttons["button_grid"] = Gtk.Grid(
+-            row_homogeneous=True, column_homogeneous=True, vexpand=False
+-        )
+-        self.grid.attach(self.buttons["button_grid"], 0, 3, 4, 1)
  
          self.create_status_grid()
          self.create_extrusion_grid()
@@ -1847,9 +1863,10 @@ index 4e0c01a..dabaf53 100644
 +        # content area and leave the old one untouched, so nothing that was
 +        # tuned to single pixels in 2026-07-31 has to be re-tuned.
 +        #
-+        # button_grid stays OUTSIDE the stack: Pause/Cancel/Fine Tuning/
-+        # Settings are wanted on both pages, and show_buttons_for_state() then
-+        # needs no changes at all (it is state logic, not layout).
++        # There is no separate button row outside the stack any more: the
++        # actions live in the minimal page's own bottom-right icon strip (see
++        # create_buttons), and the detailed page reaches them with one press of
++        # its back arrow or of BackSpace.
 +        # h/vhomogeneous are off so each page requests its own size; with them
 +        # on (the default) the taller page dictates the height of both and the
 +        # panel can overflow the 240px screen.
@@ -1879,12 +1896,6 @@ index 4e0c01a..dabaf53 100644
 +        self.show_minimal()
          self.content.add(self.grid)
  
-+    def _markup(self, button, markup):
-+        # Pango markup into a button's own label, surviving the set_label() that
-+        # would otherwise flatten it back to plain text on the next status tick.
-+        if label := find_widget(button, Gtk.Label):
-+            label.set_markup(markup)
-+
 +    def _set_value(self, button, text):
 +        # Detailed-page readouts are a caption/value pair, not a single label
 +        # (see _readout), so set_label() on the button would destroy the
@@ -1936,11 +1947,24 @@ index 4e0c01a..dabaf53 100644
 +        return button
 +
 +    def _action_button(self, key, icon, style, on_click, args=None):
-+        # Compact icon-only button for the minimal page's bottom band. Icon-only
-+        # on purpose: this strip has ~110px of width to spend after the
-+        # progress readout, and these three are the glyphs a printer UI is
-+        # allowed to assume (pause bars, cross, info) -- unlike "Fine Tuning",
-+        # which is why the FULL button row below is still words, not icons.
++        # THE button of this panel. Every action lives in one compact
++        # bottom-right icon strip built from this factory, in every state --
++        # see create_buttons for why this particular control and no other.
++        #
++        # No label and no tooltip. No label because «только иконки, без
++        # подписей»; no tooltip because GTK draws one as a dark slab that
++        # covers a third of a 320x240 screen the moment the mouse pointer comes
++        # to rest (caught on a live screenshot, a black rectangle over the Fan
++        # and Left readouts). And no caption-on-focus either, which was tried
++        # and rejected on sight: «нивкоем случае текст на фокус, все будет
++        # прыгать» -- a label that appears and disappears with the focus moves
++        # the layout under the user on every single press.
++        #
++        # no_show_all, because which buttons exist depends on the print state
++        # (show_buttons_for_state) and this panel is show_all()'d from several
++        # places outside itself -- attach_panel, _screen.show_all() after a
++        # tool change, show_buttons_for_state's own call. Any of them would
++        # otherwise put Pause back on a finished job.
 +        button = self._gtk.Button(icon, None, style, 0.8)
 +        button.set_hexpand(False)
 +        button.set_vexpand(False)
@@ -1997,11 +2021,11 @@ index 4e0c01a..dabaf53 100644
 +        # 2026-07-31 -- while KlippyGtk's own content_height says 224. The 12px
 +        # difference is exactly what sliced the "Fine Tuning" label off the
 +        # bottom edge the last time this page was sized off content_height.
-+        # 212 = 28 (top band) + ~148 (image) + 36 (bottom band), and the
-+        # 47px Pause/Cancel/Fine Tuning/Menu row is NOT in that budget: it is
-+        # hidden while a job runs (see _sync_button_row) and its function is
-+        # covered by the three compact buttons in the bottom band. That row was
-+        # 22% of the screen spent on a duplicate.
++        # 212 = 28 (top band) + ~148 (image) + 36 (bottom band). There is no
++        # separate 47px action row in that budget in ANY state: the actions are
++        # compact icons sharing the bottom band's second line with the
++        # percentage and the file name (see create_buttons). That row used to be
++        # 22% of the screen, permanently.
 +        #
 +        # The 148 is a starting request only. The real allocation is whatever
 +        # GTK hands the image container, and _on_thumb_area_allocate re-decodes
@@ -2009,17 +2033,27 @@ index 4e0c01a..dabaf53 100644
 +        # against a theme change or a different screen.
 +        # =====================================================================
 +
-+        # --- top band: the one number you walk across the room for -----------
++        # --- top band: how the job is going ----------------------------------
++        # Time remaining at the top of the scale, then the two readings that
++        # answer "is it going normally" at the bottom of it, right-aligned
++        # against the same edge. Putting layer and temperatures HERE rather than
++        # in the bottom strip is what leaves the strip enough width for a
++        # Details button with its word on it -- the user's original complaint
++        # about the details view was that it was an invisible tap zone, and an
++        # unlabelled glyph is only half a fix for that.
 +        self.labels["m_time"] = Gtk.Label(label="-", xalign=0.0)
 +        self.labels["m_time"].get_style_context().add_class("js-xl")
-+        self.labels["m_file"] = Gtk.Label(
-+            label="", xalign=1.0, hexpand=True, ellipsize=Pango.EllipsizeMode.END
++        self.labels["m_layer"] = Gtk.Label(label="", xalign=1.0)
++        self.labels["m_layer"].get_style_context().add_class("js-caption")
++        self.labels["m_temps"] = Gtk.Label(
++            label="", xalign=1.0, ellipsize=Pango.EllipsizeMode.END
 +        )
-+        self.labels["m_file"].get_style_context().add_class("js-caption")
++        self.labels["m_temps"].get_style_context().add_class("js-caption")
 +        top = Gtk.Box(spacing=8)
 +        top.set_size_request(-1, 28)
 +        top.pack_start(self.labels["m_time"], False, False, 0)
-+        top.pack_start(self.labels["m_file"], True, True, 0)
++        top.pack_end(self.labels["m_temps"], False, False, 0)
++        top.pack_end(self.labels["m_layer"], False, False, 0)
 +
 +        # --- the image, and its stand-in when the slicer embedded no preview --
 +        # A Gtk.DrawingArea that blits the pixbuf, NOT a Gtk.Image, and not the
@@ -2085,34 +2119,37 @@ index 4e0c01a..dabaf53 100644
 +
 +        self.labels["minimal_progress_text"] = Gtk.Label(label="0%", xalign=0.0)
 +        self.labels["minimal_progress_text"].get_style_context().add_class("js-caption")
-+        self.labels["m_layer"] = Gtk.Label(label="", xalign=0.0)
-+        self.labels["m_layer"].get_style_context().add_class("js-caption")
-+        self.labels["m_temps"] = Gtk.Label(
-+            label="", xalign=0.0, ellipsize=Pango.EllipsizeMode.END
++        self.labels["m_file"] = Gtk.Label(
++            label="", xalign=0.0, hexpand=True, ellipsize=Pango.EllipsizeMode.END
 +        )
-+        self.labels["m_temps"].get_style_context().add_class("js-caption")
++        self.labels["m_file"].get_style_context().add_class("js-caption")
 +
-+        # Pause and Resume are two buttons, not one that changes its icon: the
-+        # icon lives in a GdkPixbuf baked at construction time by KlippyGtk, so
-+        # swapping it at runtime means rebuilding the button anyway. Visibility
-+        # is driven by state in _sync_minimal_actions.
++        # THE action strip: compact icons, hard against the bottom-right
++        # corner. Every action this panel has lives here, in every state --
++        # which buttons are IN it changes with the state, how it looks never
++        # does. Pause and Resume are two buttons rather than one that swaps its
++        # glyph because KlippyGtk bakes the icon into a GdkPixbuf at
++        # construction time; swapping it at runtime means rebuilding the button
++        # anyway. Order is fixed so a button never moves sideways when its
++        # neighbour appears: destructive-first would put Cancel under the
++        # thumb that just pressed Pause.
 +        actions = Gtk.Box(spacing=2, halign=Gtk.Align.END)
-+        actions.pack_start(self._action_button("m_pause", "pause", "color1", self.pause), 0, 0, 0)
-+        actions.pack_start(self._action_button("m_resume", "resume", "color1", self.resume), 0, 0, 0)
-+        actions.pack_start(self._action_button("m_cancel", "stop", "color2", self.cancel), 0, 0, 0)
-+        # THE button the user asked for ("при печати на экране пусть будет
-+        # кнопка с подробностями"). Icon-only here because the strip is narrow,
-+        # but it is a real, permanently visible, focusable button -- not the
-+        # invisible tap zone that the first attempt at this shipped.
-+        details = self._action_button("m_details", "info", "color3", self.show_detailed)
-+        details.set_tooltip_text(_("Details"))
-+        actions.pack_start(details, 0, 0, 0)
-+        self.buttons["details"] = details
-+
++        for key in (
++            "pause",
++            "resume",
++            "cancel",
++            "save_offset_endstop",
++            "save_offset_probe",
++            "restart",
++            "fine_tune",
++            "control",
++            "details",
++            "menu",
++        ):
++            actions.pack_start(self.buttons[key], False, False, 0)
 +        strip = Gtk.Box(spacing=8)
 +        strip.pack_start(self.labels["minimal_progress_text"], False, False, 0)
-+        strip.pack_start(self.labels["m_layer"], False, False, 0)
-+        strip.pack_start(self.labels["m_temps"], True, True, 0)
++        strip.pack_start(self.labels["m_file"], True, True, 0)
 +        strip.pack_start(actions, False, False, 0)
 +
 +        bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -2267,52 +2304,88 @@ index 4e0c01a..dabaf53 100644
 +            return None
 +        return cols[0], rows[0], cols[-1], rows[-1]
 +
-+    def _sync_button_row(self):
-+        # The full Pause/Cancel/Fine Tuning/Menu row is 47px of a 212px screen.
-+        # While a job runs the minimal page spends that height on the model
-+        # instead and offers the same actions as icons in its bottom band; the
-+        # moment the job is over the row comes back, because then it carries
-+        # Save Z / Restart / Main Menu, which exist nowhere else.
-+        grid = self.buttons["button_grid"]
-+        if self.stack is None:
-+            return
-+        if self.stack.get_visible_child_name() == "minimal" and not self.can_close:
-+            grid.hide()
-+            return
-+        # gtk_widget_show_all() returns immediately on a widget with
-+        # no_show_all set (that flag is what stops the panel-wide show_all()
-+        # calls from resurrecting this row), so revealing it has to lift the
-+        # flag for the duration of the call. A plain .show() would reveal an
-+        # EMPTY row -- the children attached by show_buttons_for_state() have
-+        # never been shown.
-+        grid.set_no_show_all(False)
-+        grid.show_all()
-+        grid.set_no_show_all(True)
++    # Which buttons the action strip carries in each print state. Everything
++    # upstream expressed by tearing a Gtk.Grid down and re-attaching four
++    # children per state is expressed here as membership of a set -- the strip
++    # itself never changes, only what is in it. That is the "одинаково во всех
++    # состояниях" requirement made structural instead of remembered.
++    #
++    # `standby` here means "no job running", which covers complete, cancelled,
++    # error and a fresh boot alike; the Z-offset pair is added to it
++    # conditionally, since it depends on the offset and on what the firmware
++    # actually supports.
++    ACTIONS_BY_STATE = {
++        "printing": ("pause", "cancel", "fine_tune", "control", "details"),
++        "paused": ("resume", "cancel", "fine_tune", "control", "details"),
++        "cancelling": ("resume", "cancel", "restart", "details", "menu"),
++        "idle": ("restart", "details", "menu"),
++    }
++    # Every key the strip can hold, in no particular order -- _sync_actions
++    # iterates this to decide what to hide, so a button missing from here would
++    # simply never turn off again.
++    ACTION_KEYS = (
++        "pause",
++        "resume",
++        "cancel",
++        "fine_tune",
++        "control",
++        "restart",
++        "menu",
++        "details",
++        "save_offset_endstop",
++        "save_offset_probe",
++    )
 +
-+    def _sync_minimal_actions(self):
-+        # Pause/Resume/Cancel only mean anything while a job is live. Showing
-+        # them greyed out afterwards is noise on a page whose whole point is
-+        # that it shows the minimum.
-+        live = self.state in ("printing", "paused", "cancelling")
-+        for key, visible in (
-+            ("m_pause", self.state == "printing"),
-+            ("m_resume", self.state == "paused"),
-+            ("m_cancel", live),
-+            ("m_details", True),
-+        ):
++    def _sync_actions(self):
++        wanted = set(self.ACTIONS_BY_STATE.get(self.state, self.ACTIONS_BY_STATE["idle"]))
++        if self.state in ("printing", "paused", "cancelling"):
++            self.can_close = False
++        else:
++            # Post-job: offer to write the live Z offset back to the config, but
++            # only if there is one and only for the mechanism this firmware
++            # actually has. Asking Klipper (available_commands) rather than
++            # assuming: this machine's z_offset_guard module can reject
++            # Z_OFFSET_APPLY_ENDSTOP outright.
++            offset = self._printer.get_stat("gcode_move", "homing_origin")
++            self.zoffset = float(offset[2]) if offset else 0
++            if self.zoffset != 0:
++                if "Z_OFFSET_APPLY_ENDSTOP" in self._printer.available_commands:
++                    wanted.add("save_offset_endstop")
++                if "Z_OFFSET_APPLY_PROBE" in self._printer.available_commands:
++                    wanted.add("save_offset_probe")
++            if not self.filename:
++                wanted.discard("restart")
++            self.can_close = True
++
++        for key in self.ACTION_KEYS:
 +            button = self.buttons.get(key)
 +            if button is None:
 +                continue
-+            if visible:
++            if key in wanted:
++                # no_show_all is what stops the panel-wide show_all() calls from
++                # putting Pause back on a finished job, and gtk_widget_show_all()
++                # returns immediately on a widget carrying that flag -- so it has
++                # to come off for the duration of the call. .show() alone would
++                # reveal a button whose icon child has never been shown.
 +                button.set_no_show_all(False)
 +                button.show_all()
 +                button.set_no_show_all(True)
++                button.set_sensitive(True)
 +            else:
 +                button.hide()
++        if self.state == "cancelling":
++            # A cancel is in flight: the spinner replaces the icon (this works
++            # again now that these buttons HAVE icons -- KlippyGtk only builds
++            # the Gtk.Spinner for a button with an image), and nothing that
++            # would race the cancel stays pressable.
++            self._gtk.Button_busy(self.buttons["cancel"], True)
++            self.disable_button("resume", "restart", "menu")
++        else:
++            self._gtk.Button_busy(self.buttons["cancel"], False)
 +
 +    def show_minimal(self, widget=None):
 +        self.stack.set_visible_child_name("minimal")
-+        self._sync_button_row()
++        self._sync_actions()
 +
 +    def show_detailed(self, widget=None, info=None):
 +        # widget is the clicked button when this is used as a signal handler,
@@ -2321,7 +2394,7 @@ index 4e0c01a..dabaf53 100644
 +        # has to tolerate being a widget rather than a grid.
 +        self.switch_info(info=info if isinstance(info, Gtk.Widget) else self.status_grid)
 +        self.stack.set_visible_child_name("detailed")
-+        self._sync_button_row()
++        self._sync_actions()
 +
 +    def back(self):
 +        # 2026-08-17 -- THE ESCAPE HATCH. Bug report, verbatim: "кажется в
@@ -2442,17 +2515,26 @@ index 4e0c01a..dabaf53 100644
 +        total = self.labels["total_layers"].get_text()
 +        current = self.labels["layer"].get_text()
 +        if current not in ("-", "") and total not in ("-", ""):
-+            self._set_layer_markup(current.replace(" ", ""))
++            self._set_layer_text(current.replace(" ", ""))
 +            return
 +        layer_count = self.file_metadata.get("layer_count")
 +        layer_height = self.file_metadata.get("layer_height")
 +        first = self.file_metadata.get("first_layer_height", layer_height)
 +        if not layer_count or not layer_height:
-+            self._set_layer_markup("-")
++            self._set_layer_text("-")
++            return
++        if self.state == "complete":
++            # Reported: "L 0/150" on a finished job looks wrong, and it is. The
++            # fallback below derives the layer from the CURRENT Z, and a
++            # finished print has already lifted/parked the head -- or, in the
++            # UI-only test states, never moved it at all -- so Z says nothing
++            # about how far the job got. The job completing is the better
++            # source: every layer was printed.
++            self._set_layer_text(f"{layer_count}/{layer_count}")
 +            return
 +        derived = int((self.pos_z - float(first)) / float(layer_height)) + 1
 +        derived = min(max(derived, 0), int(layer_count))
-+        self._set_layer_markup(f"{derived}/{layer_count}")
++        self._set_layer_text(f"{derived}/{layer_count}")
 +
 +    def update_minimal_temps(self):
 +        # One caption-sized line in the bottom band, both readings in it. On
@@ -2469,7 +2551,7 @@ index 4e0c01a..dabaf53 100644
 +        if "m_temps" in self.labels:
 +            self.labels["m_temps"].set_label("  ".join(parts))
 +
-+    def _set_layer_markup(self, value):
++    def _set_layer_text(self, value):
 +        # Bottom band of the minimal page, sharing one caption-sized line with
 +        # the percentage and the temperatures. "L" and not "Layer": the strip
 +        # has ~150px before the action buttons start, and the number is the
@@ -2544,16 +2626,16 @@ index 4e0c01a..dabaf53 100644
              self.labels[extruder] = Gtk.Label(label="-")
 -            self.buttons["extruder"][extruder] = self._gtk.Button(
 -                f"extruder-{i}", "", None, self.bts, Gtk.PositionType.LEFT, 1
--            )
--            self.buttons["extruder"][extruder].set_label(self.labels[extruder].get_text())
--            self.buttons["extruder"][extruder].connect(
--                "clicked", self.menu_item_clicked, {"panel": "temperature", "extra": extruder}
 +            name = _("Nozzle") if len(self._printer.get_tools()) == 1 else f"T{i}"
 +            self.buttons["extruder"][extruder] = self._readout(
 +                f"extruder_readout_{i}",
 +                name,
 +                (self.menu_item_clicked, {"panel": "temperature", "extra": extruder}),
              )
+-            self.buttons["extruder"][extruder].set_label(self.labels[extruder].get_text())
+-            self.buttons["extruder"][extruder].connect(
+-                "clicked", self.menu_item_clicked, {"panel": "temperature", "extra": extruder}
+-            )
 -            self.buttons["extruder"][extruder].set_halign(Gtk.Align.START)
  
 -        self.labels["temp_grid"] = Gtk.Grid(column_homogeneous=True)
@@ -2561,7 +2643,7 @@ index 4e0c01a..dabaf53 100644
          nlimit = 2 if self._screen.width <= 500 else 3
          n = 0
          if nlimit > 2 and len(self._printer.get_tools()) == 2:
-@@ -212,21 +1044,13 @@ class Panel(ScreenPanel):
+@@ -212,21 +1117,13 @@ class Panel(ScreenPanel):
          for dev in self._printer.get_heaters():
              if n >= nlimit:
                  break
@@ -2588,7 +2670,7 @@ index 4e0c01a..dabaf53 100644
              self.labels["temp_grid"].attach(self.buttons["heater"][dev], n, 0, 1, 1)
              n += 1
          extra_item = not self._show_heater_power
-@@ -244,37 +1068,37 @@ class Panel(ScreenPanel):
+@@ -244,37 +1141,37 @@ class Panel(ScreenPanel):
                                  nlimit += 1
                              if n >= nlimit:
                                  break
@@ -2645,7 +2727,7 @@ index 4e0c01a..dabaf53 100644
      def create_extrusion_grid(self, widget=None):
          goback = self._gtk.Button("back", None, "color1", self.bts, Gtk.PositionType.TOP, False)
          goback.connect("clicked", self.switch_info, self.status_grid)
-@@ -354,6 +1178,23 @@ class Panel(ScreenPanel):
+@@ -354,6 +1251,23 @@ class Panel(ScreenPanel):
          if not info:
              logging.debug("No info to attach")
              return
@@ -2669,7 +2751,7 @@ index 4e0c01a..dabaf53 100644
          if self._screen.vertical_mode:
              self.labels["info_grid"].remove_row(1)
              self.labels["info_grid"].attach(info, 0, 1, 1, 1)
-@@ -362,25 +1203,23 @@ class Panel(ScreenPanel):
+@@ -362,25 +1276,22 @@ class Panel(ScreenPanel):
              self.labels["info_grid"].attach(info, 1, 0, 1, 1)
          self.labels["info_grid"].show_all()
  
@@ -2702,12 +2784,11 @@ index 4e0c01a..dabaf53 100644
 +        # Hence both halves: screen.py for the entry, activate() for the
 +        # return, deactivate() to put them back for every other panel.
 +        self._screen.base_panel.clear_titlebar_items()
-+        self._sync_button_row()
-+        self._sync_minimal_actions()
++        self._sync_actions()
  
      def deactivate(self):
          if self.flow_timeout is not None:
-@@ -389,19 +1228,56 @@ class Panel(ScreenPanel):
+@@ -389,30 +1300,73 @@ class Panel(ScreenPanel):
          if self.animation_timeout is not None:
              GLib.source_remove(self.animation_timeout)
              self.animation_timeout = None
@@ -2719,28 +2800,29 @@ index 4e0c01a..dabaf53 100644
 +        self._screen.base_panel.show_titlebar_items()
  
      def create_buttons(self):
-+        # 2026-07-31 height fix, part 2 of 2 (numbers in
-+        # create_status_grid). These live in a 4-column homogeneous row, so
-+        # each button gets ~71px of width -- narrow enough that every label
-+        # here except "Pause"/"Cancel" needs two text lines. With an icon
-+        # stacked on top as well the row measured 72px minimum height, but
-+        # after the title row (40px) and info_grid (120px, post-fix) only 52px
-+        # of the 212px content height is left. Dropping the image is what buys
-+        # the missing 25px: a text-only two-line button is ~47px.
++        # Every action this panel offers, built by the SAME factory as the
++        # pause/cancel/details buttons that were already at the bottom right of
++        # the minimal page -- because that is the control the user pointed at:
++        # «уже был правильный интерфейс с компактными кнопками-иконками
++        # справа-внизу. просто его используй везде. не надо ничего нового».
 +        #
-+        # Icon-less labelled buttons are an idiom KlippyGtk already applies on
-+        # its own -- Button() unconditionally clears image_name when
-+        # font_size_type == "max" and a label is present -- and the labels here
-+        # are unambiguous words. The alternative that keeps the icons is
-+        # lines=1, which at 71px ellipsizes "Main Menu" to "Main Me..." and
-+        # "Fine Tuning" to "Fine Tu...": on a screen this small a fully
-+        # readable word beats a recognisable glyph above a truncated one.
++        # Checked before reusing it, rather than assumed:
++        #   * upstream KlipperScreen's job_status has a 4-column full-width grid
++        #     of TEXT buttons (git show HEAD:panels/job_status.py) -- that is
++        #     the thing being replaced, not the thing being restored;
++        #   * the pre-session file on the device (/tmp/job_status.py.pre-
++        #     fullscreen) has the same full-width text row, so nothing was lost
++        #     that has to be dug back out;
++        #   * main_menu's bottom nav row is icons, but full-width and centred,
++        #     and base_panel's action bar is icons but vertical down the LEFT
++        #     edge. Neither is "справа-внизу".
++        # The bottom-right compact strip in this panel is the only thing that
++        # matches the description, and it is the one he saw and approved.
 +        #
-+        # KNOWN TRADE-OFF: KlippyGtk.Button() only creates the Gtk.Spinner when
-+        # it is given an image, so Button_busy() can no longer spin `cancel`
-+        # while a cancel is in flight. It still calls set_sensitive(False), so
-+        # the button visibly greys out -- the state is still communicated, just
-+        # without the animation.
++        # Key names are upstream's on purpose: enable_button/disable_button and
++        # Button_busy address these by name, and Button_busy in particular only
++        # finds a Gtk.Spinner if the button was built WITH an image -- which,
++        # unlike the text-button revisions, these are.
          self.buttons = {
 -            "cancel": self._gtk.Button("stop", _("Cancel"), "color2"),
 -            "control": self._gtk.Button("settings", _("Settings"), "color3"),
@@ -2750,30 +2832,56 @@ index 4e0c01a..dabaf53 100644
 -            "restart": self._gtk.Button("refresh", _("Restart"), "color3"),
 -            "resume": self._gtk.Button("resume", _("Resume"), "color1"),
 -            "save_offset_probe": self._gtk.Button("home-z", _("Save Z") + "\n" + "Probe", "color1"),
-+            "cancel": self._gtk.Button(None, _("Cancel"), "color2"),
-+            # 2026-08-17: was _("Settings"). This button does not open settings
-+            # -- it opens the __print menu ("Print Control": Temperature, Fan,
-+            # Extrude, Console, Network, Settings, ...), i.e. it is the way OFF
-+            # the print screen while a job is running, and it is the only one
-+            # the panel itself offers in that state. The user hunting for an
-+            # exit walked right past it twice and hit the emergency stop
-+            # instead (log 2026-08-17 11:31-11:32), which is a fair reading of
-+            # a button labelled "Settings". Naming it for what it does costs
-+            # nothing and is half of the fix; back() is the other half.
-+            "control": self._gtk.Button(None, _("Menu"), "color3"),
-+            "fine_tune": self._gtk.Button(None, _("Fine Tuning"), "color4"),
-+            "menu": self._gtk.Button(None, _("Main Menu"), "color4"),
-+            "pause": self._gtk.Button(None, _("Pause"), "color1"),
-+            "restart": self._gtk.Button(None, _("Restart"), "color3"),
-+            "resume": self._gtk.Button(None, _("Resume"), "color1"),
-+            "save_offset_probe": self._gtk.Button(None, _("Save Z") + "\n" + "Probe", "color1"),
-             "save_offset_endstop": self._gtk.Button(
+-            "save_offset_endstop": self._gtk.Button(
 -                "home-z", _("Save Z") + "\n" + "Endstop", "color2"
-+                None, _("Save Z") + "\n" + "Endstop", "color2"
++            "pause": self._action_button("pause", "pause", "color1", self.pause),
++            "resume": self._action_button("resume", "resume", "color1", self.resume),
++            "cancel": self._action_button("cancel", "stop", "color2", self.cancel),
++            "fine_tune": self._action_button(
++                "fine_tune", "fine-tune", "color4", self.menu_item_clicked, {"panel": "fine_tune"}
++            ),
++            # Not "Settings": this opens the __print menu (Temperature, Fan,
++            # Extrude, Console, ...), i.e. the way OFF this screen during a job.
++            # The user hunting for an exit walked past it twice when it was
++            # labelled Settings and hit the emergency stop instead (log
++            # 2026-08-17 11:31-11:32). back() is the other half of that fix.
++            "control": self._action_button(
++                "control", "settings", "color3", self._screen._go_to_submenu, ""
++            ),
++            "restart": self._action_button("restart", "refresh", "color3", self.restart),
++            "menu": self._action_button("menu", "main", "color4", self.close_panel),
++            # Two DIFFERENT glyphs, and that is not decoration: with no captions
++            # anywhere in this strip, two buttons carrying the same icon side by
++            # side would be genuinely unusable. The endstop variant gets the
++            # homing glyph, the probe variant the bed-levelling one, which is
++            # the device each actually writes its offset for.
++            "save_offset_endstop": self._action_button(
++                "save_offset_endstop", "home-z", "color2", self.save_offset, "endstop"
              ),
++            "save_offset_probe": self._action_button(
++                "save_offset_probe", "bed-level", "color1", self.save_offset, "probe"
++            ),
++            # The visible way into the detailed view that the user asked for
++            # ("при печати на экране пусть будет кнопка с подробностями"),
++            # replacing the invisible tap zone the first attempt shipped. Same
++            # factory, same strip, same look as everything else -- he has
++            # already reported once that Details and Main Menu looked like two
++            # different kinds of button.
++            "details": self._action_button("details", "info", "color3", self.show_detailed),
          }
-         self.buttons["cancel"].connect("clicked", self.cancel)
-@@ -535,6 +1411,18 @@ class Panel(ScreenPanel):
+-        self.buttons["cancel"].connect("clicked", self.cancel)
+-        self.buttons["control"].connect("clicked", self._screen._go_to_submenu, "")
+-        self.buttons["fine_tune"].connect("clicked", self.menu_item_clicked, {"panel": "fine_tune"})
+-        self.buttons["menu"].connect("clicked", self.close_panel)
+-        self.buttons["pause"].connect("clicked", self.pause)
+-        self.buttons["restart"].connect("clicked", self.restart)
+-        self.buttons["resume"].connect("clicked", self.resume)
+-        self.buttons["save_offset_probe"].connect("clicked", self.save_offset, "probe")
+-        self.buttons["save_offset_endstop"].connect("clicked", self.save_offset, "endstop")
+ 
+     def save_offset(self, widget, device):
+         sign = "+" if self.zoffset > 0 else "-"
+@@ -535,6 +1489,18 @@ class Panel(ScreenPanel):
              logging.info("resetting progress")
              self._printer.data["virtual_sdcard"]["progress"] = 0
          self.update_progress(0.0)
@@ -2792,7 +2900,7 @@ index 4e0c01a..dabaf53 100644
          self.set_state("printing")
  
      def process_update(self, action, data):
-@@ -562,9 +1450,18 @@ class Panel(ScreenPanel):
+@@ -562,9 +1528,18 @@ class Panel(ScreenPanel):
                      digits=0,
                  )
                  if x in self.buttons["extruder"]:
@@ -2813,7 +2921,7 @@ index 4e0c01a..dabaf53 100644
  
          if "display_status" in data and "message" in data["display_status"]:
              if data["display_status"]["message"]:
-@@ -596,9 +1493,12 @@ class Panel(ScreenPanel):
+@@ -596,9 +1571,12 @@ class Panel(ScreenPanel):
          if "gcode_move" in data:
              if "gcode_position" in data["gcode_move"]:
                  self.pos_z = round(float(data["gcode_move"]["gcode_position"][2]), 2)
@@ -2829,7 +2937,7 @@ index 4e0c01a..dabaf53 100644
                  )
              if "extrude_factor" in data["gcode_move"]:
                  self.extrusion = round(float(data["gcode_move"]["extrude_factor"]) * 100)
-@@ -617,7 +1517,11 @@ class Panel(ScreenPanel):
+@@ -617,7 +1595,11 @@ class Panel(ScreenPanel):
                  self.labels["req_speed"].set_label(
                      f"{self.speed}% {self.vel:3.0f}/{self.req_speed:3.0f} {mms_unit}"
                  )
@@ -2842,7 +2950,7 @@ index 4e0c01a..dabaf53 100644
              if "homing_origin" in data["gcode_move"]:
                  self.zoffset = float(data["gcode_move"]["homing_origin"][2])
                  self.labels["zoffset"].set_label(f"{self.zoffset:.3f} {self.mm}")
-@@ -650,7 +1554,11 @@ class Panel(ScreenPanel):
+@@ -650,7 +1632,11 @@ class Panel(ScreenPanel):
                  self.labels["req_speed"].set_label(
                      f"{self.speed}% {self.vel:3.0f}/{self.req_speed:3.0f} {mms_unit}"
                  )
@@ -2855,7 +2963,7 @@ index 4e0c01a..dabaf53 100644
              if "live_extruder_velocity" in data["motion_report"]:
                  self.flowstore.append(
                      self.fila_section * float(data["motion_report"]["live_extruder_velocity"])
-@@ -660,7 +1568,7 @@ class Panel(ScreenPanel):
+@@ -660,7 +1646,7 @@ class Panel(ScreenPanel):
              self.fans[fan]["speed"] = f"{self._printer.get_fan_speed(fan) * 100:3.0f}%"
              fan_label += f" {self.fans[fan]['name']}{self.fans[fan]['speed']}"
          if fan_label:
@@ -2864,7 +2972,7 @@ index 4e0c01a..dabaf53 100644
          if "print_stats" in data:
              if "state" in data["print_stats"]:
                  self.set_state(
-@@ -690,11 +1598,15 @@ class Panel(ScreenPanel):
+@@ -690,11 +1676,15 @@ class Panel(ScreenPanel):
                          f"{self.labels['total_layers'].get_text()}"
                      )
              if "total_duration" in data["print_stats"]:
@@ -2883,7 +2991,7 @@ index 4e0c01a..dabaf53 100644
  
      def update_flow(self):
          if not self.flowstore:
-@@ -702,7 +1614,7 @@ class Panel(ScreenPanel):
+@@ -702,7 +1692,7 @@ class Panel(ScreenPanel):
          self.flowrate = median(self.flowstore)
          self.flowstore = []
          self.labels["flowrate"].set_label(f"{self.flowrate:.1f} {self.mms3}")
@@ -2892,7 +3000,7 @@ index 4e0c01a..dabaf53 100644
          return True
  
      def update_time_left(self):
-@@ -719,9 +1631,13 @@ class Panel(ScreenPanel):
+@@ -719,9 +1709,13 @@ class Panel(ScreenPanel):
              else self._printer.get_stat("virtual_sdcard", "progress")
          )
  
@@ -2909,7 +3017,7 @@ index 4e0c01a..dabaf53 100644
  
          last_time = self.file_metadata["last_time"] if "last_time" in self.file_metadata else 0
          slicer_time = (
-@@ -767,11 +1683,12 @@ class Panel(ScreenPanel):
+@@ -767,11 +1761,12 @@ class Panel(ScreenPanel):
              progress = min(max(print_duration / estimated, 0), 1)
              self.labels["est_time"].set_label(self.format_time(estimated))
              self.labels["time_left"].set_label(self.format_eta(estimated, print_duration))
@@ -2927,7 +3035,7 @@ index 4e0c01a..dabaf53 100644
          self.update_progress(progress)
  
      def estimate_time(
-@@ -807,7 +1724,9 @@ class Panel(ScreenPanel):
+@@ -807,7 +1802,9 @@ class Panel(ScreenPanel):
      def update_progress(self, progress: float):
          self.progress = progress
          self.labels["progress_text"].set_label(f"{trunc(progress * 100)}%")
@@ -2938,7 +3046,7 @@ index 4e0c01a..dabaf53 100644
  
      def set_state(self, state, msg=""):
          if state == "printing":
-@@ -817,7 +1736,7 @@ class Panel(ScreenPanel):
+@@ -817,7 +1814,7 @@ class Panel(ScreenPanel):
          elif state == "complete":
              self.update_progress(1)
              self._screen.set_panel_title(_("Complete"))
@@ -2947,7 +3055,7 @@ index 4e0c01a..dabaf53 100644
              self._add_timeout(self._config.get_main_config().getint("job_complete_timeout", 0))
          elif state == "error":
              self._screen.set_panel_title(_("Error"))
-@@ -834,9 +1753,25 @@ class Panel(ScreenPanel):
+@@ -834,9 +1831,25 @@ class Panel(ScreenPanel):
              self._screen.set_panel_title(_("Standby"))
          if self.state != state:
              logging.debug(f"Changing job_status state from '{self.state}' to '{state}'")
@@ -2973,16 +3081,75 @@ index 4e0c01a..dabaf53 100644
          self.show_buttons_for_state()
  
      def _add_timeout(self, timeout):
-@@ -900,8 +1835,24 @@ class Panel(ScreenPanel):
-             self.enable_button("menu")
-             self.can_close = True
+@@ -845,63 +1858,29 @@ class Panel(ScreenPanel):
+             GLib.timeout_add_seconds(timeout, self.close_panel)
+ 
+     def show_buttons_for_state(self):
+-        self.buttons["button_grid"].remove_row(0)
+-        self.buttons["button_grid"].insert_row(0)
+-        if self.state == "printing":
+-            self.buttons["button_grid"].attach(self.buttons["pause"], 0, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["cancel"], 1, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["fine_tune"], 2, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["control"], 3, 0, 1, 1)
+-            self.enable_button("pause", "cancel")
+-            self._gtk.Button_busy(self.buttons["cancel"], False)
+-            self.can_close = False
+-        elif self.state == "paused":
+-            self.buttons["button_grid"].attach(self.buttons["resume"], 0, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["cancel"], 1, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["fine_tune"], 2, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["control"], 3, 0, 1, 1)
+-            self.enable_button("resume", "cancel")
+-            self._gtk.Button_busy(self.buttons["cancel"], False)
+-            self.can_close = False
+-        elif self.state == "cancelling":
+-            self.buttons["button_grid"].attach(self.buttons["resume"], 0, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["cancel"], 1, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["restart"], 2, 0, 1, 1)
+-            self.buttons["button_grid"].attach(self.buttons["menu"], 3, 0, 1, 1)
+-            self._gtk.Button_busy(self.buttons["cancel"], True)
+-            self.disable_button("resume", "restart", "menu")
+-            self.can_close = False
+-        else:
+-            offset = self._printer.get_stat("gcode_move", "homing_origin")
+-            self.zoffset = float(offset[2]) if offset else 0
+-            if self.zoffset != 0:
+-                if "Z_OFFSET_APPLY_ENDSTOP" in self._printer.available_commands:
+-                    self.buttons["button_grid"].attach(
+-                        self.buttons["save_offset_endstop"], 0, 0, 1, 1
+-                    )
+-                else:
+-                    self.buttons["button_grid"].attach(Gtk.Label(), 0, 0, 1, 1)
+-                if "Z_OFFSET_APPLY_PROBE" in self._printer.available_commands:
+-                    self.buttons["button_grid"].attach(
+-                        self.buttons["save_offset_probe"], 1, 0, 1, 1
+-                    )
+-                else:
+-                    self.buttons["button_grid"].attach(Gtk.Label(), 1, 0, 1, 1)
+-            else:
+-                self.buttons["button_grid"].attach(Gtk.Label(), 0, 0, 1, 1)
+-                self.buttons["button_grid"].attach(Gtk.Label(), 1, 0, 1, 1)
+-
+-            if self.filename:
+-                self.buttons["button_grid"].attach(self.buttons["restart"], 2, 0, 1, 1)
+-                self.enable_button("restart")
+-            else:
+-                self.disable_button("restart")
+-            self.buttons["button_grid"].attach(self.buttons["menu"], 3, 0, 1, 1)
+-            self.enable_button("menu")
+-            self.can_close = True
++        # Kept under upstream's name because set_state() and the panel's own
++        # lifecycle call it, but there is no grid to tear down and rebuild any
++        # more -- see _sync_actions.
++        self._sync_actions()
          self.content.show_all()
-+        # AFTER show_all(), always: show_all() is what makes the freshly
-+        # attached buttons above visible, and it is also what would put the
-+        # whole row back on the minimal page during a print. These two calls
-+        # are the only place that decides what is actually on screen.
-+        self._sync_button_row()
-+        self._sync_minimal_actions()
++        # AFTER show_all(), always. show_all() is what makes newly revealed
++        # buttons draw, and it is also the call that would put every hidden
++        # button back on screen; running the sync on both sides of it is what
++        # makes the result deterministic.
++        self._sync_actions()
++
  
      def show_file_thumbnail(self):
 +        # 2026-08-17: the minimal page always wants the image - it IS the page.
@@ -2998,7 +3165,7 @@ index 4e0c01a..dabaf53 100644
          if self._screen.vertical_mode:
              max_width = self._screen.width * 0.9
              max_height = self._screen.height / 4
-@@ -923,6 +1874,43 @@ class Panel(ScreenPanel):
+@@ -923,6 +1902,43 @@ class Panel(ScreenPanel):
          if image := find_widget(self.labels["thumbnail"], Gtk.Image):
              image.set_from_pixbuf(pixbuf)
  
@@ -3042,7 +3209,7 @@ index 4e0c01a..dabaf53 100644
      def show_fullscreen_thumbnail(self, widget):
          width = self._screen.width * 0.9
          height = self._screen.height * 0.75
-@@ -957,9 +1945,38 @@ class Panel(ScreenPanel):
+@@ -957,9 +1973,38 @@ class Panel(ScreenPanel):
              "complete": self.labels["file"].get_label(),
              "current": self.labels["file"].get_label(),
          }
@@ -3081,7 +3248,7 @@ index 4e0c01a..dabaf53 100644
          if self.labels["file"].get_layout().is_ellipsized():
              self.filename_label["current"] = self.filename_label["current"][1:]
              self.labels["file"].set_label(self.filename_label["current"] + " " * 6)
-@@ -996,6 +2013,7 @@ class Panel(ScreenPanel):
+@@ -996,6 +2041,7 @@ class Panel(ScreenPanel):
              self.labels["filament_total"].set_label(
                  f"{float(self.file_metadata['filament_total']) / 1000:.1f} m"
              )

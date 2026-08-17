@@ -307,3 +307,13 @@ button:active {
     min-height: 0;
     min-width: 0;
 }
+
+/* Nothing further: the print screen's actions are .js-action above, and there
+ * is deliberately no second button style on this panel. Three full-width rows
+ * were built and rejected in turn -- two-line text («кнопки внизу текстами и в
+ * 2 строки»), icon over a caption («кнопки стали и с текстами и иконками и
+ * заняли много места»), and bare icon tiles with the focused one's name in a
+ * floating pill («нивкоем случае текст на фокус, все будет прыгать»). The
+ * instruction that settled it was to stop designing rows and reuse the compact
+ * bottom-right icon strip that was already there, which is what .js-action is.
+ */
