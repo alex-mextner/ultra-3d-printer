@@ -232,11 +232,18 @@ class ZOffsetGuard:
             logging.exception(
                 "z_offset_guard: cannot read the pending SAVE_CONFIG state on"
                 " this Klipper - the SAVE_CONFIG backstop is DISABLED")
-            self.gcode.respond_info(
-                "z_offset_guard: НЕ ВИЖУ ожидающее состояние SAVE_CONFIG на"
-                " этой версии Klipper — бэкстоп на SAVE_CONFIG ОТКЛЮЧЁН"
-                " (обёртка Z_OFFSET_APPLY_ENDSTOP работает). Смотри"
-                " klippy.log; вероятно поменялся configfile.py.")
+            try:
+                self.gcode.respond_info(
+                    "z_offset_guard: НЕ ВИЖУ ожидающее состояние SAVE_CONFIG"
+                    " на этой версии Klipper — бэкстоп на SAVE_CONFIG"
+                    " ОТКЛЮЧЁН (обёртка Z_OFFSET_APPLY_ENDSTOP работает)."
+                    " Смотри klippy.log; вероятно поменялся configfile.py.")
+            except Exception:
+                # Reporting a degraded guard must never itself abort startup -
+                # klippy:connect runs before the gcode output path is fully
+                # exercised, and the log line above is the real record anyway.
+                logging.exception("z_offset_guard: could not report the"
+                                  " disabled backstop over gcode")
 
         prev_save = self.gcode.register_command('SAVE_CONFIG', None)
         if prev_save is None:

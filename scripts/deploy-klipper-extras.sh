@@ -49,10 +49,30 @@
 # also the correct ORDER for a first install: this script first, deploy.sh
 # second.
 #
+# --no-restart, AND WHY THE GATES CHANGE SHAPE WITH IT. Everything dangerous
+# about this script is the RESTART, not the copy: POST /printer/restart kills
+# heaters and aborts motion. Copying a .py changes nothing under a running
+# Klipper - the module was imported at startup and the file on disk is not read
+# again until the next restart, which is exactly why the header above says a
+# module file on its own is inert. So with --no-restart:
+#   * print_stats.state printing/paused STAYS A HARD BLOCK - scribbling module
+#     files around during a real print is not something to normalise, even when
+#     it is technically inert;
+#   * idle_timeout.state == Printing drops to a WARNING, because with no restart
+#     there is no motion to cut off mid-move, which is the entire reason that
+#     gate exists.
+# This is not a convenience hatch. It is what makes the install order this
+# script's own header prescribes (this script first, then deploy.sh) cost ONE
+# restart instead of two - and on this machine that matters concretely: the fan
+# supervisors re-pin idle_timeout to "Printing" within ~12s of every restart and
+# hold it for the full 600s idle_timeout, so a second restart-and-wait cycle is
+# ten minutes of nothing.
+#
 # Usage:
 #   scripts/deploy-klipper-extras.sh              # diff + confirm in terminal
 #   scripts/deploy-klipper-extras.sh --dry-run    # checks + diff only
 #   scripts/deploy-klipper-extras.sh --yes        # unattended (hard gates stay on)
+#   scripts/deploy-klipper-extras.sh --no-restart # copy only, leave Klipper alone
 set -euo pipefail
 
 HOST="${PRINTER_HOST:-ultra@192.168.11.160}"
@@ -65,15 +85,22 @@ LOCAL_EXTRAS_DIR="$REPO_DIR/klipper-extras"
 
 ASSUME_YES=0
 DRY_RUN=0
+NO_RESTART=0
 
 usage() {
     cat <<'EOF'
-Использование: scripts/deploy-klipper-extras.sh [--yes|-y] [--dry-run] [--help]
+Использование: scripts/deploy-klipper-extras.sh [--yes|-y] [--dry-run] [--no-restart] [--help]
 
   (без флагов)  показать diff и спросить подтверждение в терминале
   --yes, -y     автономный режим: не спрашивать. Жёсткие проверки
                 (идёт печать / выполняется gcode) при этом НЕ отключаются.
   --dry-run     прогнать проверки и показать diff, ничего не заливать
+  --no-restart  только скопировать .py, Klipper НЕ перезапускать. Модуль
+                подхватится следующим рестартом — например тем, который
+                сделает обычный deploy.sh, заливая конфиг с его [секцией].
+                В этом режиме проверка idle_timeout=Printing становится
+                ПРЕДУПРЕЖДЕНИЕМ (без рестарта нечего обрывать), а блокировка
+                по идущей печати остаётся жёсткой.
   --help, -h    эта справка
 
 Заливает klipper-extras/*.py в ~/klipper-extras-local/ на принтере и
@@ -87,6 +114,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -y|--yes)     ASSUME_YES=1 ;;
         --dry-run)    DRY_RUN=1 ;;
+        --no-restart) NO_RESTART=1 ;;
         -h|--help)    usage; exit 0 ;;
         *)            echo "Неизвестный аргумент: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -183,9 +211,19 @@ else
 Проверь руками: curl '$API/printer/objects/query?idle_timeout'"
     echo "  idle_timeout.state = $IDLE_STATE"
     if [ "$IDLE_STATE" = "Printing" ]; then
-        die "СТОП: прямо сейчас выполняется gcode (idle_timeout.state=Printing).
+        if [ "$NO_RESTART" -eq 1 ]; then
+            echo "  ПРЕДУПРЕЖДЕНИЕ: idle_timeout=Printing (кто-то шлёт gcode —"
+            echo "  на этой машине это обычно надзиратели вентиляторов, а не"
+            echo "  движение). С --no-restart это не блокирует: рестарта не"
+            echo "  будет, а .py уже импортирован — файл на диске Klipper"
+            echo "  перечитает только на следующем старте."
+        else
+            die "СТОП: прямо сейчас выполняется gcode (idle_timeout.state=Printing).
 Это может быть ручной G28 или перемещение из Mainsail — рестарт Klipper оборвёт
-движение посреди хода. Дождись окончания."
+движение посреди хода. Дождись окончания.
+(Если рестарт не нужен — модуль всё равно подхватится следующим стартом —
+запусти с --no-restart.)"
+        fi
     fi
 
     # Ещё одна жёсткая проверка, которой нет в deploy.sh и которая нужна именно
@@ -278,9 +316,14 @@ else
         die "Терминала для подтверждения нет (неинтерактивный запуск).
 Если это осознанный автономный деплой — перезапусти с --yes."
     fi
-    echo "Дальше: заливка .py в ~/$REMOTE_STAGE_DIR + симлинки в $REMOTE_EXTRAS_DIR,"
-    echo "затем рестарт Klipper."
-    echo "Рестарт погасит все нагреватели и оборвёт любое текущее движение."
+    echo "Дальше: заливка .py в ~/$REMOTE_STAGE_DIR + симлинки в $REMOTE_EXTRAS_DIR."
+    if [ "$NO_RESTART" -eq 1 ]; then
+        echo "--no-restart: Klipper НЕ перезапускается, модуль подхватится"
+        echo "следующим стартом."
+    else
+        echo "Затем рестарт Klipper — он погасит все нагреватели и оборвёт любое"
+        echo "текущее движение."
+    fi
     answer=""
     read -r -p "Продолжить? [y/N] " answer < /dev/tty || answer=""
     if [ "$answer" != "y" ] && [ "$answer" != "Y" ]; then
@@ -296,6 +339,16 @@ for f in "${CHANGED[@]}"; do
     ssh -n -o ConnectTimeout=8 "$HOST" \
         "ln -sfn \$HOME/$REMOTE_STAGE_DIR/$f \$HOME/$REMOTE_EXTRAS_DIR/$f"
 done
+
+if [ "$NO_RESTART" -eq 1 ]; then
+    echo
+    echo "== Готово, Klipper НЕ перезапускался (--no-restart) =="
+    echo "Файлы на месте, но СТАРАЯ версия модуля всё ещё в памяти Klipper."
+    echo "Подхватится следующим стартом — например тем, который сделает"
+    echo "scripts/deploy.sh, заливая конфиг с [секцией] этого модуля."
+    ssh -n -o ConnectTimeout=8 "$HOST" "ls -la $REMOTE_EXTRAS_DIR | grep '^l'" || true
+    exit 0
+fi
 
 echo
 echo "== Перезапускаю Klipper и жду 'ready' =="
