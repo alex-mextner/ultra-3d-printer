@@ -1,0 +1,574 @@
+--- a/panels/job_status.py
++++ b/panels/job_status.py
+@@ -52,6 +52,12 @@
+         self.move_grid = None
+         self.time_grid = None
+         self.extrusion_grid = None
++        self.minimal_grid = None
++        self.minimal_temps = {}
++        self.current_info = None
++        self.stack = None
++        self.thumb_size = 0
++        self.total_duration = 0
+         self.idex = False
+ 
+         data = [
+@@ -123,7 +129,10 @@
+         fi_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.CENTER)
+         fi_box.add(self.labels["file"])
+         fi_box.add(self.labels["lcdmessage"])
+-        self.grid.attach(fi_box, 1, 0, 3, 1)
++        # 2026-08-17: not attached to self.grid directly any more -- it is part
++        # of the "detailed" page of the Gtk.Stack assembled at the end of
++        # __init__ (see the big comment there).
++        self.fi_box = fi_box
+ 
+         self.labels["darea"] = Gtk.DrawingArea()
+         self.labels["darea"].connect("draw", self.on_draw)
+@@ -133,18 +142,29 @@
+         self.labels["progress_text"].get_style_context().add_class("printing-progress-text")
+         box.add(self.labels["progress_text"])
+ 
+-        overlay = Gtk.Overlay(hexpand=True)
+-        overlay.set_size_request(*(self._gtk.font_size * 5,) * 2)
++        # 2026-08-17 ring/filename collision fix. The ring is drawn to fill its
++        # whole DrawingArea (see on_draw), and with hexpand=True that area was
++        # the entire grid cell, ~93px wide as measured on the live screen --
++        # wider than the ~71px column -- so the right arc of the ellipse was
++        # painted straight over the first character of the filename next to it
++        # (visible in every 2026-08-16/17 print screenshot). Fixing it in
++        # on_draw would have been wrong: the DrawingArea really was that wide,
++        # the ring was just honouring it. Pinning the overlay to a fixed,
++        # centred 66x36 keeps the ring inside its own column whatever the grid
++        # decides the column is, and 66x36 still leaves a ~57x27 hole, more
++        # than the ~45x22 that a bold 3-digit "100%" needs at this theme's
++        # 14px base font.
++        overlay = Gtk.Overlay(hexpand=False, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
++        overlay.set_size_request(66, 36)
+         overlay.add(self.labels["darea"])
+         overlay.add_overlay(box)
+-        # 2026-08-16: "Details" affordance, requested by the user, implemented
+-        # as a tap on the progress ring rather than a new button. This panel's
+-        # button_grid is already full (4 buttons, column_homogeneous, no free
+-        # column - see show_buttons_for_state) and every previous attempt to
+-        # add screen real estate here has cost real pixels on a 320x240 panel
+-        # already tuned to single digits (2026-07-31 comments throughout this
+-        # file; the separate zcalibrate.py row attempt was reverted for the
+-        # same reason). A click handler on existing space costs zero layout.
++        # 2026-08-16: extra tap target on the progress ring. It used to be the
++        # ONLY way into the details view, which the user rightly rejected on
++        # 2026-08-17 ("кнопка", not an invisible hot spot) -- there is now a
++        # real labelled button for that (see create_minimal_grid), and this
++        # ring lives on the details page itself, where it is just a shortcut
++        # from the overview into the densest sub-view. Kept because it costs
++        # zero layout and the muscle memory is already there.
+         # Gtk.EventBox, not a bare DrawingArea event mask - a raw
+         # add_events()+"button-press-event" on the DrawingArea inside this
+         # Gtk.Overlay silently never fired in live testing (confirmed with
+@@ -163,7 +183,7 @@
+             "button-press-event", lambda *_: self.switch_info(info=self.move_grid)
+         )
+         details_tap.set_tooltip_text(_("Tap for details"))
+-        self.grid.attach(details_tap, 0, 0, 1, 1)
++        self.details_tap = details_tap
+ 
+         self.labels["thumbnail"] = self._gtk.Button("file")
+         self.labels["thumbnail"].set_hexpand(False)
+@@ -219,10 +239,279 @@
+         self.create_extrusion_grid()
+         self.create_time_grid()
+         self.create_move_grid()
+-        self.grid.attach(self.labels["info_grid"], 0, 1, 4, 2)
++        self.create_minimal_grid()
++
++        # 2026-08-17: the job screen is now TWO pages in a Gtk.Stack, not one
++        # dense screen. Requested verbatim: "хочу чтобы экран при печати
++        # показывал по умолчанию минимум информации и модель" +
++        # "при печати на экране пусть будет кнопка с подробностями которая
++        # будет открыть текущий экран с подробностями".
++        #
++        #   "minimal"  (default, see show_minimal) - the model thumbnail as the
++        #              main element plus the four numbers that matter while
++        #              standing in front of the machine (nozzle, bed, layer,
++        #              time left) and a progress bar. Everything else moved to:
++        #   "detailed" - byte-for-byte the screen that existed before: progress
++        #              ring, filename, and the status/move/extrusion/time
++        #              sub-views of info_grid.
++        #
++        # Why a Stack and not another switch_info() sub-view: switch_info swaps
++        # only column 1 of info_grid, so the ring + filename header would stay
++        # on screen and the thumbnail would get whatever is left of the 284px
++        # -- which is exactly the layout that was measured NOT to fit
++        # (see show_thumbnail below). Two pages give the minimal view the whole
++        # content area and leave the old one untouched, so nothing that was
++        # tuned to single pixels in 2026-07-31 has to be re-tuned.
++        #
++        # button_grid stays OUTSIDE the stack: Pause/Cancel/Fine Tuning/
++        # Settings are wanted on both pages, and show_buttons_for_state() then
++        # needs no changes at all (it is state logic, not layout).
++        # h/vhomogeneous are off so each page requests its own size; with them
++        # on (the default) the taller page dictates the height of both and the
++        # panel can overflow the 240px screen.
++        detailed = Gtk.Grid(column_homogeneous=True)
++        detailed.attach(self.details_tap, 0, 0, 1, 1)
++        # 3 columns -> 2 for the filename: the 4th is the visible way back to
++        # the minimal page. The name is a marquee (animate_label) anyway, so it
++        # loses nothing that was readable in the first place.
++        detailed.attach(self.fi_box, 1, 0, 2, 1)
++        detailed.attach(self.buttons["to_minimal"], 3, 0, 1, 1)
++        detailed.attach(self.labels["info_grid"], 0, 1, 4, 2)
++
++        self.stack = Gtk.Stack(vexpand=True, hhomogeneous=False, vhomogeneous=False)
++        self.stack.add_named(self.minimal_grid, "minimal")
++        self.stack.add_named(detailed, "detailed")
++        self.grid.attach(self.stack, 0, 0, 4, 3)
++
+         self.switch_info(info=self.status_grid)
++        self.show_minimal()
+         self.content.add(self.grid)
+ 
++    def create_minimal_grid(self):
++        # 2026-08-17: the minimal (default) print page. Layout budget on this
++        # 320x240 landscape panel, all measured numbers from the 2026-07-31
++        # tuning session in this same file: 284px of content width (320 minus
++        # the 34px action bar) and ~212px of content height (240 minus the
++        # title bar), of which the action button row takes ~47px. So this page
++        # has ~284x165 to work with:
++        #
++        #   +--------------------+---------------------------+
++        #   |                    | nozzle   210/210 deg      |
++        #   |  model thumbnail   | bed       60/60 deg       |
++        #   |    ~112x112        | layer      42/150         |
++        #   |                    | left        1h 05m        |
++        #   +--------------------+---------------------------+
++        #   | [========== 45% =========]        [ Details ]  |
++        #   +--------------------+---------------------------+
++        #
++        # The four readouts are the same icon+label buttons the old status grid
++        # uses (30px per row there, measured), so 4 rows ~= 120px, and the
++        # thumbnail is sized to the same order of magnitude on purpose - the
++        # model is meant to be the biggest thing on the screen.
++        self.thumb_size = int(min(self._gtk.content_height * 0.5, self._screen.width * 0.35))
++        self.labels["big_thumbnail"] = self._gtk.Button("file")
++        self.labels["big_thumbnail"].get_style_context().add_class("printing-thumbnail")
++        self.labels["big_thumbnail"].set_hexpand(False)
++        self.labels["big_thumbnail"].set_vexpand(True)
++        # +14: .printing-thumbnail adds .5em of margin on each side (base.css).
++        self.labels["big_thumbnail"].set_size_request(self.thumb_size + 14, -1)
++        self.labels["big_thumbnail"].connect("clicked", self.show_fullscreen_thumbnail)
++
++        # Readouts. Nozzle/bed keep the same click target as on the detailed
++        # page (the temperature panel); layer and time open the detailed page
++        # straight on the sub-view that expands them.
++        # No halign=START here, unlike the detailed page's status grid: there
++        # the buttons share a row and shrink-wrapping their text is what keeps
++        # two of them from painting over each other (2026-07-31 fix), here each
++        # row is alone in its column, so filling it gives a finger-sized tap
++        # target and one aligned card per line instead of four ragged blobs
++        # against the thumbnail.
++        self.minimal_temps = {}
++        readouts = Gtk.Grid(row_homogeneous=True, hexpand=True)
++        row = 0
++        for extruder in self._printer.get_tools():
++            if extruder != self._printer.get_stat("toolhead", "extruder"):
++                continue
++            button = self._gtk.Button(
++                f"extruder-{self._printer.get_tools().index(extruder)}",
++                "-",
++                None,
++                self.bts,
++                Gtk.PositionType.LEFT,
++                1,
++            )
++            button.connect(
++                "clicked", self.menu_item_clicked, {"panel": "temperature", "extra": extruder}
++            )
++            self.minimal_temps[extruder] = button
++            readouts.attach(button, 0, row, 1, 1)
++            row += 1
++        for dev in self._printer.get_heaters():
++            if dev != "heater_bed":
++                continue
++            button = self._gtk.Button("bed", "-", None, self.bts, Gtk.PositionType.LEFT, 1)
++            button.connect(
++                "clicked", self.menu_item_clicked, {"panel": "temperature", "extra": dev}
++            )
++            self.minimal_temps[dev] = button
++            readouts.attach(button, 0, row, 1, 1)
++            row += 1
++        self.buttons["m_layer"] = self._gtk.Button(
++            "hashtag", "-", None, self.bts, Gtk.PositionType.LEFT, 1
++        )
++        self.buttons["m_layer"].connect("clicked", self.show_detailed, self.move_grid)
++        readouts.attach(self.buttons["m_layer"], 0, row, 1, 1)
++        self.buttons["m_left"] = self._gtk.Button(
++            "hourglass", "-", None, self.bts, Gtk.PositionType.LEFT, 1
++        )
++        self.buttons["m_left"].connect("clicked", self.show_detailed, self.time_grid)
++        readouts.attach(self.buttons["m_left"], 0, row + 1, 1, 1)
++
++        top = Gtk.Box(spacing=0)
++        top.pack_start(self.labels["big_thumbnail"], False, False, 0)
++        top.pack_start(readouts, True, True, 0)
++
++        # Progress: a plain horizontal bar, not a second copy of the ring. The
++        # ring needs a square-ish cell to stay readable (it already had to be
++        # turned into an ellipse to survive this screen, see on_draw) while a
++        # bar is happy in the 30px strip left over under the thumbnail, and it
++        # reads at a glance from across the room, which is the whole point of
++        # this page.
++        self.labels["progress_bar"] = Gtk.DrawingArea()
++        self.labels["progress_bar"].set_size_request(-1, 14)
++        self.labels["progress_bar"].set_valign(Gtk.Align.CENTER)
++        self.labels["progress_bar"].set_hexpand(True)
++        self.labels["progress_bar"].connect("draw", self.on_draw_bar)
++        self.labels["minimal_progress_text"] = Gtk.Label(label="0%")
++        self.labels["minimal_progress_text"].get_style_context().add_class("printing-progress-text")
++
++        # THE button the user asked for: labelled, in the flow of the page, on
++        # the default view. The old invisible tap zone on the ring is still
++        # there but is no longer the only way in.
++        self.buttons["details"] = self._gtk.Button(
++            "info", _("Details"), "color3", self.bts, Gtk.PositionType.LEFT, 1
++        )
++        self.buttons["details"].set_hexpand(False)
++        self.buttons["details"].connect("clicked", self.show_detailed)
++        self.buttons["to_minimal"] = self._gtk.Button(
++            "back", None, "color1", self.bts, Gtk.PositionType.TOP, False
++        )
++        self.buttons["to_minimal"].connect("clicked", self.show_minimal)
++
++        bottom = Gtk.Box(spacing=8)
++        bottom.pack_start(self.labels["progress_bar"], True, True, 0)
++        bottom.pack_start(self.labels["minimal_progress_text"], False, False, 0)
++        bottom.pack_start(self.buttons["details"], False, False, 0)
++
++        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
++        page.get_style_context().add_class("printing-info")
++        page.pack_start(top, True, True, 0)
++        page.pack_start(bottom, False, False, 0)
++        self.minimal_grid = page
++
++    def show_minimal(self, widget=None):
++        self.stack.set_visible_child_name("minimal")
++
++    def show_detailed(self, widget=None, info=None):
++        self.switch_info(info=info or self.status_grid)
++        self.stack.set_visible_child_name("detailed")
++
++    def back(self):
++        # 2026-08-17 -- THE ESCAPE HATCH. Bug report, verbatim: "кажется в
++        # некоторых режимах из него невозможно выйти. я даже сделал экстренный
++        # стоп просто чтобы перезагрузить экран". Confirmed from the device's
++        # own KlipperScreen.log, 11:31:57 - 11:32:19: four BackSpace presses,
++        # each logged as "#### Menu go back", each doing nothing, then
++        # `MoonrakerApi.emergency_stop`. He had to kill the printer to get off
++        # this screen. Mechanism: state_printing() opens this panel with
++        # remove_all=True, so _cur_panels == ["job_status"] and _menu_go_back()
++        # takes its len<=1 branch, which only re-seats focus; and while a job
++        # is running show_buttons_for_state() offers Pause/Cancel/Fine Tuning/
++        # Settings -- no Main Menu, can_close False. So on a 5-button pad with
++        # no touchscreen there was literally no exit but the estop, and the
++        # only other one he found was to CANCEL THE PRINT (log 11:40:43).
++        #
++        # base_panel.back() consults this method for both the physical back
++        # button (BackSpace) and the action-bar arrow, and falls through to
++        # _menu_go_back() when it returns False -- so implementing it here
++        # fixes both inputs without touching screen.py. It never returns False:
++        # every view of this panel now leads somewhere.
++        if self.stack.get_visible_child_name() == "detailed":
++            if self.current_info is not self.status_grid:
++                # deepest level: a move/time/extrusion table -> its overview
++                self.switch_info(info=self.status_grid)
++                return True
++            self.show_minimal()
++            return True
++        if self.can_close:
++            self.close_panel()
++            return True
++        # Printing, paused or cancelling: the job owns the screen and closing
++        # the panel outright would leave no way back to it. Same destination as
++        # the panel's own "Menu" button instead - the __print menu, pushed ON
++        # TOP of this panel, so it has a real way back (this panel becomes the
++        # parent) and it is where Temperature/Fan/Extrude/Console/Settings live
++        # during a print.
++        self.open_menu()
++        return True
++
++    def open_menu(self, widget=None):
++        self._screen._go_to_submenu(None, "")
++
++    def on_draw_bar(self, da, ctx):
++        w = da.get_allocated_width()
++        h = da.get_allocated_height()
++        ctx.set_source_rgb(0.13, 0.13, 0.13)
++        ctx.rectangle(0, 0, w, h)
++        ctx.fill()
++        # Same red as the progress ring on the detailed page (on_draw).
++        ctx.set_source_rgb(0.718, 0.110, 0.110)
++        ctx.rectangle(0, 0, w * min(max(self.progress, 0), 1), h)
++        ctx.fill()
++
++    @staticmethod
++    def format_time_short(seconds):
++        # screen_panel.format_time() spells the units out ("14 minutes"), which
++        # is why the elapsed/left buttons on the detailed page were rendering
++        # as "7 mi..." and "14 minut..." in a ~116px cell (seen in the live
++        # 2026-08-17 screenshots). These readouts are glanced at, not read, so
++        # this panel uses a compact form everywhere a time has to share a row.
++        if seconds is None or seconds < 1:
++            return "-"
++        seconds = int(seconds)
++        days, seconds = divmod(seconds, 86400)
++        hours, seconds = divmod(seconds, 3600)
++        minutes, seconds = divmod(seconds, 60)
++        if days:
++            return f"{days}d {hours}h"
++        if hours:
++            return f"{hours}h {minutes:02d}m"
++        if minutes:
++            return f"{minutes}m"
++        return f"{seconds}s"
++
++    def update_minimal_layer(self):
++        # print_stats.info.current_layer only exists if the slicer emits
++        # SET_PRINT_STATS_INFO -- checked on this machine's own files
++        # (OrcaSlicer 2.4.2, 2026-08-17): it does NOT, so upstream's layer
++        # readout is permanently "-" here. Moonraker's metadata does carry
++        # layer_count/layer_height/first_layer_height, so derive the current
++        # layer from Z the same way Mainsail does when the slicer is silent.
++        total = self.labels["total_layers"].get_text()
++        current = self.labels["layer"].get_text()
++        if current not in ("-", "") and total not in ("-", ""):
++            self.buttons["m_layer"].set_label(current.replace(" ", ""))
++            return
++        layer_count = self.file_metadata.get("layer_count")
++        layer_height = self.file_metadata.get("layer_height")
++        first = self.file_metadata.get("first_layer_height", layer_height)
++        if not layer_count or not layer_height:
++            self.buttons["m_layer"].set_label("-")
++            return
++        derived = int((self.pos_z - float(first)) / float(layer_height)) + 1
++        derived = min(max(derived, 0), int(layer_count))
++        self.buttons["m_layer"].set_label(f"{derived}/{layer_count}")
++
+ 
+ 
+     def create_status_grid(self, widget=None):
+@@ -449,6 +738,9 @@
+         if not info:
+             logging.debug("No info to attach")
+             return
++        # 2026-08-17: remembered so back() knows how deep the user is (see
++        # back() for why an exit has to exist from every single view).
++        self.current_info = info
+         # 2026-07-31: where the thumbnail IS shown (portrait, or a screen
+         # >=480px wide -- see show_thumbnail in __init__), it still has to get
+         # out of the way of the three secondary views. It costs 50px, and
+@@ -551,7 +843,16 @@
+         # without the animation.
+         self.buttons = {
+             "cancel": self._gtk.Button(None, _("Cancel"), "color2"),
+-            "control": self._gtk.Button(None, _("Settings"), "color3"),
++            # 2026-08-17: was _("Settings"). This button does not open settings
++            # -- it opens the __print menu ("Print Control": Temperature, Fan,
++            # Extrude, Console, Network, Settings, ...), i.e. it is the way OFF
++            # the print screen while a job is running, and it is the only one
++            # the panel itself offers in that state. The user hunting for an
++            # exit walked right past it twice and hit the emergency stop
++            # instead (log 2026-08-17 11:31-11:32), which is a fair reading of
++            # a button labelled "Settings". Naming it for what it does costs
++            # nothing and is half of the fix; back() is the other half.
++            "control": self._gtk.Button(None, _("Menu"), "color3"),
+             "fine_tune": self._gtk.Button(None, _("Fine Tuning"), "color4"),
+             "menu": self._gtk.Button(None, _("Main Menu"), "color4"),
+             "pause": self._gtk.Button(None, _("Pause"), "color1"),
+@@ -693,15 +994,18 @@
+             logging.info("resetting progress")
+             self._printer.data["virtual_sdcard"]["progress"] = 0
+         self.update_progress(0.0)
+-        # 2026-08-16: force the minimal status_grid view for every new print.
+-        # Confirmed by reading this whole file that nothing did this before -
+-        # switch_info() was only ever called once, from __init__ - so a print
+-        # started right after tapping into move_grid/extrusion_grid/time_grid
+-        # (from this same session or a leftover view from a previous one,
+-        # since this Panel instance persists across prints) would silently
+-        # keep showing that denser view instead of defaulting to minimal, the
+-        # opposite of what was asked for.
++        # 2026-08-16: force the minimal view for every new print. Confirmed by
++        # reading this whole file that nothing did this before - switch_info()
++        # was only ever called once, from __init__ - so a print started right
++        # after tapping into move_grid/extrusion_grid/time_grid (from this same
++        # session or a leftover view from a previous one, since this Panel
++        # instance persists across prints) would silently keep showing that
++        # denser view instead of defaulting to minimal, the opposite of what
++        # was asked for. 2026-08-17: same reasoning now applies one level up,
++        # to the Stack page - without this line a print started while the
++        # details page was open would come up on the details page.
+         self.switch_info(info=self.status_grid)
++        self.show_minimal()
+         self.set_state("printing")
+ 
+     def process_update(self, action, data):
+@@ -732,6 +1036,11 @@
+                     self.buttons["extruder"][x].set_label(self.labels[x].get_text())
+                 elif x in self.buttons["heater"]:
+                     self.buttons["heater"][x].set_label(self.labels[x].get_text())
++                # 2026-08-17: same reading, second widget -- the minimal page
++                # has its own buttons because a GTK widget can only live in one
++                # container, and the two pages are both built up-front.
++                if x in self.minimal_temps:
++                    self.minimal_temps[x].set_label(self.labels[x].get_text())
+ 
+         if "display_status" in data and "message" in data["display_status"]:
+             if data["display_status"]["message"]:
+@@ -857,11 +1166,15 @@
+                         f"{self.labels['total_layers'].get_text()}"
+                     )
+             if "total_duration" in data["print_stats"]:
+-                self.labels["duration"].set_label(
+-                    self.format_time(data["print_stats"]["total_duration"])
+-                )
++                self.total_duration = float(data["print_stats"]["total_duration"])
++                self.labels["duration"].set_label(self.format_time(self.total_duration))
+             if self.state in ["printing", "paused"]:
+                 self.update_time_left()
++        # Cheap (a few dict lookups + one set_label) and has to run on both a
++        # print_stats tick, which carries the slicer's layer counter when there
++        # is one, and a gcode_move tick, which carries the Z the fallback is
++        # derived from -- so it runs once per update instead of in both places.
++        self.update_minimal_layer()
+ 
+     def update_flow(self):
+         if not self.flowstore:
+@@ -886,8 +1199,13 @@
+             else self._printer.get_stat("virtual_sdcard", "progress")
+         )
+ 
+-        elapsed_label = f"{self.labels['elapsed'].get_text()}  {self.labels['duration'].get_text()}"
+-        self.buttons["elapsed"].set_label(elapsed_label)
++        # 2026-08-17: was "Elapsed:  7 minutes" and rendered as "Elapsed: 7 mi..."
++        # -- the word plus a spelled-out unit does not fit the ~116px cell this
++        # button gets on a 320x240 screen (measured 2026-07-31). The clock icon
++        # on the button already says which time this is, exactly like the "z"
++        # and "speed" buttons next to it carry no word either, so the word goes
++        # and the number gets the whole cell. Same for "left" below.
++        self.buttons["elapsed"].set_label(self.format_time_short(self.total_duration))
+         find_widget(self.buttons["elapsed"], Gtk.Label).set_ellipsize(Pango.EllipsizeMode.END)
+ 
+         last_time = self.file_metadata["last_time"] if "last_time" in self.file_metadata else 0
+@@ -934,11 +1252,10 @@
+             progress = min(max(print_duration / estimated, 0), 1)
+             self.labels["est_time"].set_label(self.format_time(estimated))
+             self.labels["time_left"].set_label(self.format_eta(estimated, print_duration))
+-            remaining_label = (
+-                f"{self.labels['left'].get_text()}  {self.labels['time_left'].get_text()}"
+-            )
+-            self.buttons["left"].set_label(remaining_label)
++            remaining = self.format_time_short(estimated - print_duration)
++            self.buttons["left"].set_label(remaining)
+             find_widget(self.buttons["left"], Gtk.Label).set_ellipsize(Pango.EllipsizeMode.END)
++            self.buttons["m_left"].set_label(remaining)
+         self.update_progress(progress)
+ 
+     def estimate_time(
+@@ -975,6 +1292,8 @@
+         self.progress = progress
+         self.labels["progress_text"].set_label(f"{trunc(progress * 100)}%")
+         self.labels["darea"].queue_draw()
++        self.labels["minimal_progress_text"].set_label(f"{trunc(progress * 100)}%")
++        self.labels["progress_bar"].queue_draw()
+ 
+     def set_state(self, state, msg=""):
+         if state == "printing":
+@@ -1001,6 +1320,18 @@
+             self._screen.set_panel_title(_("Standby"))
+         if self.state != state:
+             logging.debug(f"Changing job_status state from '{self.state}' to '{state}'")
++            # 2026-08-17: THIS is where "default to the minimal view" actually
++            # has to happen. new_print() looked like the place and the previous
++            # patch put it there, but a grep of the whole checkout shows
++            # new_print() has exactly one caller: the panel's own Restart
++            # button. A print started from Mainsail, from the Print panel, or
++            # from the web at all never goes through it - the panel only ever
++            # learns about it from this state transition. Excluding paused and
++            # cancelling means resuming a paused print does not yank the user
++            # out of a details view they opened on purpose.
++            if state == "printing" and self.state not in ("printing", "paused", "cancelling"):
++                self.switch_info(info=self.status_grid)
++                self.show_minimal()
+             self.state = state
+             if self.thumb_dialog:
+                 self.close_dialog(self.thumb_dialog)
+@@ -1069,10 +1400,20 @@
+         self.content.show_all()
+ 
+     def show_file_thumbnail(self):
++        # 2026-08-17: the minimal page always wants the image - it IS the page.
++        # Decoding cost on this 512MB Orange Pi is one 300x300 PNG scaled down
++        # once per print (load_image_async hands the work to a thread pool and
++        # the result is cached by KlippyGtk), not per update tick.
++        self.load_image_async(
++            self.filename,
++            self.thumb_size,
++            self.thumb_size,
++            callback=lambda p: self._set_big_thumbnail(p),
++        )
+         if not self.show_thumbnail:
+-            # Not attached to info_grid on this screen (see __init__), so the
+-            # decode would be pure work -- and pure RAM -- for a widget that
+-            # is never drawn. Matters here: this runs on a 512MB Orange Pi.
++            # The SMALL thumbnail of the detailed page is not attached to
++            # info_grid on this screen (see __init__), so decoding for it would
++            # be pure work -- and pure RAM -- for a widget that is never drawn.
+             return
+         if self._screen.vertical_mode:
+             max_width = self._screen.width * 0.9
+@@ -1095,6 +1436,17 @@
+         if image := find_widget(self.labels["thumbnail"], Gtk.Image):
+             image.set_from_pixbuf(pixbuf)
+ 
++    def _set_big_thumbnail(self, pixbuf):
++        if not self.content.get_parent():
++            return
++        if pixbuf is None:
++            # No preview embedded by the slicer (or metadata not in yet): keep
++            # the generic file glyph the button was built with, so the page
++            # keeps its shape instead of collapsing around a missing image.
++            return
++        if image := find_widget(self.labels["big_thumbnail"], Gtk.Image):
++            image.set_from_pixbuf(pixbuf)
++
+     def show_fullscreen_thumbnail(self, widget):
+         width = self._screen.width * 0.9
+         height = self._screen.height * 0.75
+@@ -1132,6 +1484,21 @@
+         self.get_file_metadata()
+ 
+     def animate_label(self):
++        # 2026-08-17 crash fix (KeyError: 'current', caught live in
++        # /tmp/ks-stderr.log after the two-page rewrite -- it killed the whole
++        # 500ms GLib timeout, so the filename marquee silently stopped).
++        # Upstream seeds self.filename_label with ONLY "complete" in __init__
++        # and adds "current" in update_filename(), betting that this timer can
++        # never observe the gap. That bet held while the filename label was
++        # always on screen: an unellipsized label takes the else branch, which
++        # writes "current" before anything reads it. It stops holding now that
++        # the label lives on the non-visible page of a Gtk.Stack -- an unmapped
++        # label has no useful layout and reports is_ellipsized() TRUE, so the
++        # first branch runs first and reads a key that does not exist yet.
++        # Seeding from "complete" (not "") keeps the marquee's own invariant:
++        # "current" is always some suffix of "complete".
++        if "current" not in self.filename_label:
++            self.filename_label["current"] = self.filename_label.get("complete", "")
+         if self.labels["file"].get_layout().is_ellipsized():
+             self.filename_label["current"] = self.filename_label["current"][1:]
+             self.labels["file"].set_label(self.filename_label["current"] + " " * 6)
+@@ -1168,6 +1535,7 @@
+             self.labels["filament_total"].set_label(
+                 f"{float(self.file_metadata['filament_total']) / 1000:.1f} m"
+             )
++        self.update_minimal_layer()
+         if "job_id" in self.file_metadata and self.file_metadata["job_id"]:
+             self._screen._ws.api.get_single_job_history(
+                 self.file_metadata["job_id"], self.set_last_time
