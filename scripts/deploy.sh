@@ -205,6 +205,78 @@ if [ "$KLIPPY_STATE" != "ready" ]; then
         echo " остановлена служба klipper. Если после деплоя рестарт не поднимет её:"
         echo " ssh $HOST 'sudo systemctl restart klipper')"
     fi
+
+    # РАСПОЗНАВАНИЕ ОДНОГО КОНКРЕТНОГО ОТКАЗА СТАРТА, а не общий совет.
+    # Дважды (2026-08-16, 2026-08-17) машина не стартовала после того, как
+    # пользователь сохранил Z-офсет: Z_OFFSET_APPLY_ENDSTOP записывает
+    # position_endstop в блок #*# БЕЗ проверки диапазона, а stepper.py на
+    # следующей загрузке его проверяет. Сообщение узнаваемое дословно, и
+    # починка у него ровно одна — поэтому она печатается здесь готовой, с
+    # реальными числами из живого файла, вместо «Klipper не ready, разбирайся».
+    # Профилактика этого состояния — klipper-extras/z_offset_guard.py
+    # ([include z-offset-guard.cfg] в printer.cfg): он не даёт сохранению
+    # уехать за границы и правит position_min в том же сейве. Эта ветка
+    # остаётся для случаев, когда конфиг сломали руками или модуль отключён.
+    if printf '%s' "$INFO" | grep -q "position_endstop in section"; then
+        LIVE_CFG="$(ssh -n -o ConnectTimeout=8 "$HOST" \
+            'cat printer_data/config/printer.cfg' 2>/dev/null || true)"
+        Z_ES="$(printf '%s\n' "$LIVE_CFG" | awk '
+            /^#\*# \[stepper_z\]/ { f = 1; next }
+            /^#\*# \[/           { f = 0 }
+            f && $2 == "position_endstop" { print $4 }' | tail -n1)"
+        # position_min может быть уже ЗАКОММЕНЧЕН самим Klipper: SAVE_CONFIG
+        # комментирует в теле файла любую строку, которая продублирована в
+        # блоке #*# (configfile.py, _strip_duplicates) — ровно это уже
+        # произошло с position_endstop. Поэтому ловим обе формы, иначе в
+        # подсказке появилось бы «не найден» на живом, просто закомменченном
+        # значении.
+        Z_MIN="$(printf '%s\n' "$LIVE_CFG" | awk '
+            /^#?\[stepper_z\]/ { f = 1; next }
+            /^\[/              { f = 0 }
+            f && ($1 == "position_min:" || $1 == "#position_min:") { print $2 }
+            ' | tail -n1)"
+        Z_MIN_AUTOSAVE="$(printf '%s\n' "$LIVE_CFG" | awk '
+            /^#\*# \[stepper_z\]/ { f = 1; next }
+            /^#\*# \[/            { f = 0 }
+            f && $2 == "position_min" { print $4 }' | tail -n1)"
+        [ -n "$Z_MIN_AUTOSAVE" ] && Z_MIN="$Z_MIN_AUTOSAVE (из блока #*#)"
+        echo
+        echo "🔴 РАСПОЗНАНО: это НЕ произвольная ошибка конфига, а известный отказ"
+        echo "   старта после сохранения Z-офсета:"
+        echo "     position_endstop in section 'stepper_z' must be between"
+        echo "     position_min and position_max"
+        echo "   Z_OFFSET_APPLY_ENDSTOP (или Z_ENDSTOP_CALIBRATE) записал в блок"
+        echo "   #*# значение вне диапазона [stepper_z], и stepper.py его отверг."
+        if [ -n "$Z_ES" ]; then
+            echo "   Сейчас на принтере: position_endstop = $Z_ES (из блока #*#),"
+            echo "                       position_min     = ${Z_MIN:-<не найден>} (из тела файла)"
+        fi
+        echo
+        echo "   ПОЧИНКА (порядок важен — блок #*# на принтере хранит ЖИВЫЕ калибровки"
+        echo "   PID, а деплой это простая scp-перезапись: слепой деплой устаревшего"
+        echo "   репозитория их сотрёт):"
+        echo "     1) сначала УБЕДИТЬСЯ, что в репозитории нет своих несохранённых правок"
+        echo "        этого файла — шаг 2 его перезапишет целиком:"
+        echo "          git status --short printer-configs/printer.cfg"
+        echo "     2) забрать живой конфиг ВО ВРЕМЕННЫЙ файл и посмотреть разницу"
+        echo "        (не перезаписывать источник истины вслепую):"
+        echo "          scp $HOST:printer_data/config/printer.cfg /tmp/printer.cfg.live"
+        echo "          diff printer-configs/printer.cfg /tmp/printer.cfg.live"
+        echo "        и только если diff — это ровно блок #*# (и ничего своего):"
+        echo "          cp /tmp/printer.cfg.live printer-configs/printer.cfg"
+        if [ -n "$Z_ES" ]; then
+            echo "     3) в printer-configs/printer.cfg выставить в [stepper_z]:"
+            echo "          position_min: $Z_ES      # РОВНО равным position_endstop —"
+            echo "        равенство не расширяет ход: после хоуминга ось стоит на границе,"
+            echo "        хода ниже концевика нет вообще. НЕ ставить ниже — это был бы"
+            echo "        реальный перебег стола в сопло."
+        else
+            echo "     3) в printer-configs/printer.cfg выставить position_min в [stepper_z]"
+            echo "        РОВНО равным position_endstop из блока #*# в конце того же файла."
+        fi
+        echo "     4) bash scripts/deploy.sh   (проверки печати тут пропускаются, klippy лежит)"
+        echo
+    fi
 else
     echo
     echo "== Проверяю, что принтер ничем не занят =="
