@@ -13,7 +13,67 @@
          self.idex = False
  
          data = [
-@@ -123,7 +129,10 @@
+@@ -110,6 +116,59 @@
+             else:
+                 continue
+             self.fans[fan] = {"name": name, "speed": "-"}
++        # 2026-08-17: [fan] (D9/PH6) is being redeclared as
++        # [temperature_fan hotend_fan] -- it physically blows on the hotend
++        # heatsink, not on the part, and as a plain [fan] every M107 from the
++        # slicer switched it OFF at 200-240 deg C, which is how heat creep and
++        # a jam start. Consequence here: printer.fan STOPS EXISTING.
++        #
++        # get_fans() above only ever returns fan/controller_fan/fan_generic/
++        # heater_fan -- temperature_fan is NOT in that list -- so self.fans
++        # comes out empty, and that path degrades quietly on its own:
++        # update_flow()'s loop does nothing, fan_label stays "", and the
++        # `if fan_label:` guard means the button keeps its "-" instead of
++        # raising. Verified by reading get_fan_speed() too: it returns 0 for an
++        # unknown fan rather than throwing. So no traceback -- but also no
++        # reading, and a permanently blank "Fan" button is exactly the
++        # always-empty field we were told not to leave on screen.
++        #
++        # A temperature_fan is a different kind of object: it has a speed AND a
++        # temperature AND a target, and it is already carried by
++        # get_temp_devices() (via get_temp_fans()), so process_update's
++        # temperature loop feeds it for free. It is shown as a temperature
++        # readout, and the click goes to the temperature panel, which already
++        # knows how to set a temperature_fan target (set_temp_fan_temp).
++        #
++        # PART COOLING DOES NOT EXIST on this machine right now (new fan is a
++        # separate planned job), so nothing here pretends otherwise: the label
++        # says what the fan actually cools.
++        # Name matching is deliberately tolerant. The exact section name is
++        # decided by whoever lands the printer.cfg change, and an exact-match
++        # test that misses ("hotend" vs "hotend_fan") fails SILENTLY here -- the
++        # cell just goes blank, which is the one outcome hardest to notice.
++        # electronics_fan is excluded by name: it cools the case, it is already
++        # a titlebar item, and it is not what a print screen should report.
++        self.hotend_fan = next(
++            (
++                f
++                for f in self._printer.get_temp_fans()
++                if "hotend" in f or "heatsink" in f or "hotend_fan" in f
++            ),
++            None,
++        ) or next(
++            (
++                f
++                for f in self._printer.get_temp_fans()
++                if not f.endswith(" electronics_fan") and not f.split()[-1].startswith("_")
++            ),
++            None,
++        )
++        if self.hotend_fan:
++            # update_temp() (screen_panel.py) writes into self.labels[dev] and
++            # silently does nothing when the key is absent, so the readout only
++            # exists if the label does. Created here, before the halign/ellipsize
++            # loop below, so it gets the same treatment as every other label.
++            self.labels[self.hotend_fan] = Gtk.Label(label="-")
+ 
+         self.labels["file"] = Gtk.Label(label="Filename", hexpand=True)
+         self.labels["file"].get_style_context().add_class("printing-filename")
+@@ -123,7 +182,10 @@
          fi_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.CENTER)
          fi_box.add(self.labels["file"])
          fi_box.add(self.labels["lcdmessage"])
@@ -25,7 +85,7 @@
  
          self.labels["darea"] = Gtk.DrawingArea()
          self.labels["darea"].connect("draw", self.on_draw)
-@@ -133,18 +142,29 @@
+@@ -133,18 +195,29 @@
          self.labels["progress_text"].get_style_context().add_class("printing-progress-text")
          box.add(self.labels["progress_text"])
  
@@ -65,7 +125,7 @@
          # Gtk.EventBox, not a bare DrawingArea event mask - a raw
          # add_events()+"button-press-event" on the DrawingArea inside this
          # Gtk.Overlay silently never fired in live testing (confirmed with
-@@ -163,7 +183,7 @@
+@@ -163,7 +236,7 @@
              "button-press-event", lambda *_: self.switch_info(info=self.move_grid)
          )
          details_tap.set_tooltip_text(_("Tap for details"))
@@ -74,7 +134,7 @@
  
          self.labels["thumbnail"] = self._gtk.Button("file")
          self.labels["thumbnail"].set_hexpand(False)
-@@ -219,10 +239,341 @@
+@@ -219,10 +292,341 @@
          self.create_extrusion_grid()
          self.create_time_grid()
          self.create_move_grid()
@@ -417,7 +477,40 @@
  
  
      def create_status_grid(self, widget=None):
-@@ -449,6 +800,9 @@
+@@ -236,7 +640,19 @@
+         }
+         for button in buttons:
+             buttons[button].set_halign(Gtk.Align.START)
+-        buttons["fan"].connect("clicked", self.menu_item_clicked, {"panel": "fan"})
++        if self.hotend_fan:
++            # Hotend heatsink fan, not part cooling (see __init__). It is a
++            # temperature_fan, so the "fan" panel would not list it at all --
++            # panels/fan.py builds its list from get_fans(), which excludes
++            # temperature_fan -- and clicking would open an empty panel. The
++            # temperature panel does handle it, target and all.
++            buttons["fan"].connect(
++                "clicked",
++                self.menu_item_clicked,
++                {"panel": "temperature", "extra": self.hotend_fan},
++            )
++        else:
++            buttons["fan"].connect("clicked", self.menu_item_clicked, {"panel": "fan"})
+         self.buttons.update(buttons)
+ 
+         self.buttons["extruder"] = {}
+@@ -341,7 +757,10 @@
+         szfe.attach(self.buttons["z"], 1, 0, 1, 1)
+         if self._printer.get_tools():
+             szfe.attach(self.buttons["extrusion"], 0, 1, 1, 1)
+-        if self._printer.get_fans():
++        # `or self.hotend_fan`: once [fan] becomes [temperature_fan hotend_fan]
++        # get_fans() returns [] on this machine, and without this the cell would
++        # simply be empty -- no traceback, but no reading either.
++        if self._printer.get_fans() or self.hotend_fan:
+             szfe.attach(self.buttons["fan"], 1, 1, 1, 1)
+ 
+         # 2026-07-31 height fix, part 1 of 2. Measured live on
+@@ -449,6 +868,9 @@
          if not info:
              logging.debug("No info to attach")
              return
@@ -427,7 +520,7 @@
          # 2026-07-31: where the thumbnail IS shown (portrait, or a screen
          # >=480px wide -- see show_thumbnail in __init__), it still has to get
          # out of the way of the three secondary views. It costs 50px, and
-@@ -551,7 +905,16 @@
+@@ -551,7 +973,16 @@
          # without the animation.
          self.buttons = {
              "cancel": self._gtk.Button(None, _("Cancel"), "color2"),
@@ -445,7 +538,7 @@
              "fine_tune": self._gtk.Button(None, _("Fine Tuning"), "color4"),
              "menu": self._gtk.Button(None, _("Main Menu"), "color4"),
              "pause": self._gtk.Button(None, _("Pause"), "color1"),
-@@ -693,15 +1056,18 @@
+@@ -693,15 +1124,18 @@
              logging.info("resetting progress")
              self._printer.data["virtual_sdcard"]["progress"] = 0
          self.update_progress(0.0)
@@ -472,10 +565,19 @@
          self.set_state("printing")
  
      def process_update(self, action, data):
-@@ -732,6 +1098,16 @@
+@@ -732,6 +1166,25 @@
                      self.buttons["extruder"][x].set_label(self.labels[x].get_text())
                  elif x in self.buttons["heater"]:
                      self.buttons["heater"][x].set_label(self.labels[x].get_text())
++                elif x == self.hotend_fan:
++                    # Heatsink fan: temperature is the reading that matters (it
++                    # is what the fan is regulating), speed is the consequence.
++                    # No "Fan:" prefix -- the button carries the fan icon, and
++                    # this cell is ~116px on this screen.
++                    speed = self._printer.get_stat(x, "speed") or 0
++                    self.buttons["fan"].set_label(
++                        f"{self.labels[x].get_text()}  {speed * 100:3.0f}%"
++                    )
 +                # 2026-08-17: same reading, second widget -- the minimal page
 +                # has its own buttons because a GTK widget can only live in one
 +                # container, and the two pages are both built up-front. Small
@@ -489,7 +591,7 @@
  
          if "display_status" in data and "message" in data["display_status"]:
              if data["display_status"]["message"]:
-@@ -857,11 +1233,15 @@
+@@ -857,11 +1310,15 @@
                          f"{self.labels['total_layers'].get_text()}"
                      )
              if "total_duration" in data["print_stats"]:
@@ -508,7 +610,7 @@
  
      def update_flow(self):
          if not self.flowstore:
-@@ -886,8 +1266,13 @@
+@@ -886,8 +1343,13 @@
              else self._printer.get_stat("virtual_sdcard", "progress")
          )
  
@@ -524,7 +626,7 @@
          find_widget(self.buttons["elapsed"], Gtk.Label).set_ellipsize(Pango.EllipsizeMode.END)
  
          last_time = self.file_metadata["last_time"] if "last_time" in self.file_metadata else 0
-@@ -934,11 +1319,14 @@
+@@ -934,11 +1396,14 @@
              progress = min(max(print_duration / estimated, 0), 1)
              self.labels["est_time"].set_label(self.format_time(estimated))
              self.labels["time_left"].set_label(self.format_eta(estimated, print_duration))
@@ -543,7 +645,7 @@
          self.update_progress(progress)
  
      def estimate_time(
-@@ -975,6 +1363,8 @@
+@@ -975,6 +1440,8 @@
          self.progress = progress
          self.labels["progress_text"].set_label(f"{trunc(progress * 100)}%")
          self.labels["darea"].queue_draw()
@@ -552,7 +654,7 @@
  
      def set_state(self, state, msg=""):
          if state == "printing":
-@@ -1001,6 +1391,18 @@
+@@ -1001,6 +1468,18 @@
              self._screen.set_panel_title(_("Standby"))
          if self.state != state:
              logging.debug(f"Changing job_status state from '{self.state}' to '{state}'")
@@ -571,7 +673,7 @@
              self.state = state
              if self.thumb_dialog:
                  self.close_dialog(self.thumb_dialog)
-@@ -1069,10 +1471,20 @@
+@@ -1069,10 +1548,20 @@
          self.content.show_all()
  
      def show_file_thumbnail(self):
@@ -595,7 +697,7 @@
              return
          if self._screen.vertical_mode:
              max_width = self._screen.width * 0.9
-@@ -1095,6 +1507,17 @@
+@@ -1095,6 +1584,17 @@
          if image := find_widget(self.labels["thumbnail"], Gtk.Image):
              image.set_from_pixbuf(pixbuf)
  
@@ -613,7 +715,7 @@
      def show_fullscreen_thumbnail(self, widget):
          width = self._screen.width * 0.9
          height = self._screen.height * 0.75
-@@ -1132,6 +1555,21 @@
+@@ -1132,6 +1632,21 @@
          self.get_file_metadata()
  
      def animate_label(self):
@@ -635,7 +737,7 @@
          if self.labels["file"].get_layout().is_ellipsized():
              self.filename_label["current"] = self.filename_label["current"][1:]
              self.labels["file"].set_label(self.filename_label["current"] + " " * 6)
-@@ -1168,6 +1606,7 @@
+@@ -1168,6 +1683,7 @@
              self.labels["filament_total"].set_label(
                  f"{float(self.file_metadata['filament_total']) / 1000:.1f} m"
              )
