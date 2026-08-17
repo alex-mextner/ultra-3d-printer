@@ -424,3 +424,86 @@ separator {
 .frame-item {
     border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
+
+/* ==========================================================================
+ * Print screen (panels/job_status.py) -- type scale and readout chrome.
+ * Added 2026-08-17 in response to: «экран с деталями все еще плохо выглядит.
+ * нет приоритета через bold и font size, сетка плывет, а серые боксы только
+ * подчеркивают кривизну».
+ *
+ * THREE STEPS, and only three. The panel had exactly one: this theme's
+ * `* { font-size: 14px }`, which is why eight readouts of completely
+ * different importance all shouted at the same volume.
+ *
+ *   .js-xl      22px/700  the ONE number you walk across the room for
+ *                         (time remaining on the minimal page, progress
+ *                         percentage on the detailed one)
+ *   .js-value   17px/700  a reading you came to this screen to check
+ *   .js-caption 12px/400  what the reading is, plus everything that is
+ *                         context rather than content (file name, layer,
+ *                         temperatures on the minimal page)
+ *
+ * These are px, not em, on purpose: `* { font-size: 14px }` above is itself
+ * an absolute override of KlippyGtk's ~8px Python baseline (see this file's
+ * header), so an em here would compound against a number that is already a
+ * correction. The steps have to be read against each other, not against a
+ * moving base.
+ *
+ * DUPLICATED VERBATIM in big-font/style.css and big-font-light/style.css and
+ * deliberately NOT put in base.css: base.css is upstream and gets replaced by
+ * a KlipperScreen update. auto_dark_theme flips these two themes every five
+ * minutes off sunrise/sunset, so a rule that lives in only one of them is
+ * broken for half of every day.
+ * ========================================================================== */
+.js-xl {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.js-value {
+    font-size: 17px;
+    font-weight: 700;
+}
+
+.js-caption {
+    font-size: 12px;
+    font-weight: 400;
+    color: alpha(@text, 0.7);
+}
+
+/* The grey boxes, gone. base.css paints every button inside .printing-info
+ * with `background-color: rgba(0,0,0,0.1)` and a .5em radius. That is a
+ * reasonable default on a dense screen full of adjacent readings; here it drew
+ * eight rounded rectangles of eight different widths around eight values that
+ * had nothing to align to, which is what made the grid look like it was
+ * drifting. With the boxes gone the eye follows the right-hand edge that
+ * job_status.py's xalign=1.0 now guarantees.
+ *
+ * The :focus/:active rule is NOT optional and must stay AFTER the transparent
+ * one. This machine has five physical buttons and no touchscreen: the focus
+ * highlight is the entire navigation affordance, and both rules have the same
+ * (0,1,1) specificity as the theme's own `button:focus`, so order is what
+ * decides. Selector is .printing-info button:focus -- (0,2,1) -- so it also
+ * beats the transparent rule regardless of where either ends up.
+ */
+.printing-info button {
+    background-color: transparent;
+    background-image: none;
+}
+
+.printing-info button:focus,
+.printing-info button:active {
+    background-color: @active;
+}
+
+/* Compact icon-only buttons in the minimal page's bottom band (pause, cancel,
+ * details). base.css's default button padding would make this strip taller
+ * than the 36px band, and every pixel it takes comes straight off the model
+ * picture, which is the whole point of that page.
+ */
+.js-action {
+    padding: 1px 5px;
+    margin: 0;
+    min-height: 0;
+    min-width: 0;
+}

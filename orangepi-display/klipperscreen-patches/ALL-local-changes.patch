@@ -1589,7 +1589,7 @@ index a47bf4c..62ef442 100644
          if action != "notify_status_update":
              return
 diff --git a/panels/job_status.py b/panels/job_status.py
-index 4e0c01a..7b9538a 100644
+index 4e0c01a..dabaf53 100644
 --- a/panels/job_status.py
 +++ b/panels/job_status.py
 @@ -9,7 +9,7 @@ from math import pi, sqrt, trunc
@@ -1597,24 +1597,40 @@ index 4e0c01a..7b9538a 100644
  from time import time
  
 -from gi.repository import GLib, Gtk, Pango
-+from gi.repository import Gdk, GLib, Gtk, Pango
++from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango
  
  from ks_includes.KlippyGtk import find_widget
  from ks_includes.screen_panel import ScreenPanel
-@@ -52,6 +52,12 @@ class Panel(ScreenPanel):
+@@ -52,6 +52,28 @@ class Panel(ScreenPanel):
          self.move_grid = None
          self.time_grid = None
          self.extrusion_grid = None
 +        self.minimal_grid = None
-+        self.minimal_temps = {}
 +        self.current_info = None
 +        self.stack = None
 +        self.thumb_size = 0
++        # button -> the Gtk.Label inside it that carries the VALUE. The
++        # detailed page's readouts are no longer "icon + one label", they are
++        # "caption left, value right" (see _readout), and Gtk.Button.set_label()
++        # would throw that composition away and replace the child with a plain
++        # label. Everything that used to call button.set_label() goes through
++        # _set_value() instead, which falls back to set_label() if a button was
++        # never registered here -- so a missed call degrades to the old look
++        # rather than to a blank cell.
++        self.readout_values = {}
++        # Last size the big thumbnail was decoded at, quantised to 8px (see
++        # _on_thumb_area_allocate for why the quantisation is not optional).
++        self._thumb_request = None
++        self._thumb_loaded = None
++        self._trim_cache = None
++        self._thumb_pixbuf = None
++        self._thumb_area = None
++        self._thumb_reload_pending = False
 +        self.total_duration = 0
          self.idex = False
  
          data = [
-@@ -110,6 +116,59 @@ class Panel(ScreenPanel):
+@@ -110,9 +132,66 @@ class Panel(ScreenPanel):
              else:
                  continue
              self.fans[fan] = {"name": name, "speed": "-"}
@@ -1673,68 +1689,74 @@ index 4e0c01a..7b9538a 100644
 +            self.labels[self.hotend_fan] = Gtk.Label(label="-")
  
          self.labels["file"] = Gtk.Label(label="Filename", hexpand=True)
-         self.labels["file"].get_style_context().add_class("printing-filename")
-@@ -123,7 +182,10 @@ class Panel(ScreenPanel):
+-        self.labels["file"].get_style_context().add_class("printing-filename")
++        # 2026-08-17: was .printing-filename (1.4em bold). On a header whose
++        # headline is now a 22px/700 percentage, a second bold 19px string is
++        # not a hierarchy, it is two headlines fighting. The name is context,
++        # so it drops to the caption step of the scale.
++        self.labels["file"].get_style_context().add_class("js-caption")
+         self.labels["lcdmessage"] = Gtk.Label(no_show_all=True)
+         self.labels["lcdmessage"].get_style_context().add_class("printing-status")
+ 
+@@ -123,28 +202,83 @@ class Panel(ScreenPanel):
          fi_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.CENTER)
          fi_box.add(self.labels["file"])
          fi_box.add(self.labels["lcdmessage"])
 -        self.grid.attach(fi_box, 1, 0, 3, 1)
+-
+-        self.labels["darea"] = Gtk.DrawingArea()
+-        self.labels["darea"].connect("draw", self.on_draw)
+-
+-        box = Gtk.Box(halign=Gtk.Align.CENTER)
+-        self.labels["progress_text"] = Gtk.Label(label="0%")
+-        self.labels["progress_text"].get_style_context().add_class("printing-progress-text")
+-        box.add(self.labels["progress_text"])
+-
+-        overlay = Gtk.Overlay(hexpand=True)
+-        overlay.set_size_request(*(self._gtk.font_size * 5,) * 2)
+-        overlay.add(self.labels["darea"])
+-        overlay.add_overlay(box)
+-        self.grid.attach(overlay, 0, 0, 1, 1)
 +        # 2026-08-17: not attached to self.grid directly any more -- it is part
 +        # of the "detailed" page of the Gtk.Stack assembled at the end of
 +        # __init__ (see the big comment there).
 +        self.fi_box = fi_box
- 
-         self.labels["darea"] = Gtk.DrawingArea()
-         self.labels["darea"].connect("draw", self.on_draw)
-@@ -133,18 +195,85 @@ class Panel(ScreenPanel):
-         self.labels["progress_text"].get_style_context().add_class("printing-progress-text")
-         box.add(self.labels["progress_text"])
- 
--        overlay = Gtk.Overlay(hexpand=True)
--        overlay.set_size_request(*(self._gtk.font_size * 5,) * 2)
-+        # 2026-08-17 ring/filename collision fix. The ring is drawn to fill its
-+        # whole DrawingArea (see on_draw), and with hexpand=True that area was
-+        # the entire grid cell, ~93px wide as measured on the live screen --
-+        # wider than the ~71px column -- so the right arc of the ellipse was
-+        # painted straight over the first character of the filename next to it
-+        # (visible in every 2026-08-16/17 print screenshot). Fixing it in
-+        # on_draw would have been wrong: the DrawingArea really was that wide,
-+        # the ring was just honouring it. Pinning the overlay to a fixed,
-+        # centred 66x36 keeps the ring inside its own column whatever the grid
-+        # decides the column is, and 66x36 still leaves a ~57x27 hole, more
-+        # than the ~45x22 that a bold 3-digit "100%" needs at this theme's
-+        # 14px base font.
-+        overlay = Gtk.Overlay(hexpand=False, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-+        overlay.set_size_request(66, 36)
-         overlay.add(self.labels["darea"])
-         overlay.add_overlay(box)
--        self.grid.attach(overlay, 0, 0, 1, 1)
-+        # 2026-08-16: extra tap target on the progress ring. It used to be the
-+        # ONLY way into the details view, which the user rightly rejected on
-+        # 2026-08-17 ("кнопка", not an invisible hot spot) -- there is now a
-+        # real labelled button for that (see create_minimal_grid), and this
-+        # ring lives on the details page itself, where it is just a shortcut
-+        # from the overview into the densest sub-view. Kept because it costs
-+        # zero layout and the muscle memory is already there.
-+        # Gtk.EventBox, not a bare DrawingArea event mask - a raw
-+        # add_events()+"button-press-event" on the DrawingArea inside this
-+        # Gtk.Overlay silently never fired in live testing (confirmed with
-+        # debug logging + a real xdotool tap sweep on the actual device, zero
-+        # hits across 6+ coordinates, while the exact same click mechanism
-+        # DID open other real buttons like Fine Tuning normally) - EventBox is
-+        # the standard, reliable GTK3 idiom for adding click handling to a
-+        # non-button widget and does not have this issue. move_grid is the
-+        # target because it is the densest single view already built (speed,
-+        # accel, X/Y/Z, zoffset, height, layer) - the same view already
-+        # reachable by tapping the small "z"/"speed" icon buttons below, this
-+        # just gives the same destination a bigger, more obvious tap target.
++
++        # 2026-08-17, second revision: the progress RING is gone from the
++        # detailed page. It was an ellipse (a circle does not survive a 71x40
++        # cell, see the 2026-07-31 note that used to live in on_draw) drawn
++        # right up against the filename, and in every live screenshot its right
++        # arc sat on the first characters of the name. A ring is a shape that
++        # needs a square cell; this screen has never had one to give it. The
++        # percentage it used to encircle is now the header's own headline
++        # number, and progress as a QUANTITY is shown by the same slim bar the
++        # minimal page uses -- one progress idiom on both pages instead of two.
++        self.labels["progress_text"] = Gtk.Label(label="0%", xalign=0.0)
++        self.labels["progress_text"].get_style_context().add_class("js-xl")
++        # 2026-08-16: the tap shortcut into the densest sub-view (move: speed,
++        # accel, X/Y/Z, z-offset, height, layer). It used to be the ONLY way
++        # into the details at all, which the user rightly rejected -- there is
++        # a real labelled Details button now -- but the muscle memory is there
++        # and it costs no layout, so it stays, moved onto the percentage.
++        # Gtk.EventBox, not an event mask on the widget itself: a raw
++        # add_events()+"button-press-event" silently never fired in live
++        # testing on this device (zero hits across 6+ coordinates with a real
++        # xdotool sweep, while the same click mechanism opened ordinary
++        # buttons normally). EventBox is the standard GTK3 idiom here.
 +        details_tap = Gtk.EventBox()
-+        details_tap.add(overlay)
++        details_tap.add(self.labels["progress_text"])
 +        details_tap.connect(
 +            "button-press-event", lambda *_: self.switch_info(info=self.move_grid)
 +        )
 +        details_tap.set_tooltip_text(_("Tap for details"))
 +        self.details_tap = details_tap
++        # Second progress bar: the same drawing code as the minimal page, but a
++        # widget can only have one parent, so the detailed page needs its own.
++        self.labels["progress_bar_d"] = Gtk.DrawingArea()
++        self.labels["progress_bar_d"].set_size_request(-1, 8)
++        self.labels["progress_bar_d"].set_valign(Gtk.Align.CENTER)
++        self.labels["progress_bar_d"].set_hexpand(True)
++        self.labels["progress_bar_d"].connect("draw", self.on_draw_bar)
  
          self.labels["thumbnail"] = self._gtk.Button("file")
          self.labels["thumbnail"].set_hexpand(False)
@@ -1776,7 +1798,27 @@ index 4e0c01a..7b9538a 100644
          self.current_extruder = self._printer.get_stat("toolhead", "extruder")
          if self.current_extruder:
              diameter = float(
-@@ -163,10 +292,343 @@ class Panel(ScreenPanel):
+@@ -157,43 +291,741 @@ class Panel(ScreenPanel):
+         self.buttons["button_grid"] = Gtk.Grid(
+             row_homogeneous=True, column_homogeneous=True, vexpand=False
+         )
++        # 2026-08-17 rev 2, and this is what buys the model its size. This row
++        # is 47px of a 212px content area -- 22% of the screen -- and while a
++        # job is running the minimal page needs that height far more than it
++        # needs a second copy of Pause/Cancel: the page carries its own compact
++        # pause/cancel/details strip inside the bottom band (see
++        # create_minimal_grid). The full row comes straight back the moment the
++        # job is over (can_close), because THEN it carries things that exist
++        # nowhere else: Save Z Probe/Endstop, Restart, Main Menu.
++        # no_show_all, not a bare hide(): show_all() is called on this panel
++        # from at least three places outside it (attach_panel, _screen.show_all
++        # after a tool change, show_buttons_for_state itself), and every one of
++        # them would resurrect the row. See _sync_button_row for why revealing
++        # it again has to lift the flag first.
++        self.buttons["button_grid"].set_no_show_all(True)
+         self.grid.attach(self.buttons["button_grid"], 0, 3, 4, 1)
+ 
+         self.create_status_grid()
          self.create_extrusion_grid()
          self.create_time_grid()
          self.create_move_grid()
@@ -1811,14 +1853,22 @@ index 4e0c01a..7b9538a 100644
 +        # h/vhomogeneous are off so each page requests its own size; with them
 +        # on (the default) the taller page dictates the height of both and the
 +        # panel can overflow the 240px screen.
-+        detailed = Gtk.Grid(column_homogeneous=True)
-+        detailed.attach(self.details_tap, 0, 0, 1, 1)
-+        # 3 columns -> 2 for the filename: the 4th is the visible way back to
-+        # the minimal page. The name is a marquee (animate_label) anyway, so it
-+        # loses nothing that was readable in the first place.
-+        detailed.attach(self.fi_box, 1, 0, 2, 1)
-+        detailed.attach(self.buttons["to_minimal"], 3, 0, 1, 1)
-+        detailed.attach(self.labels["info_grid"], 0, 1, 4, 2)
++        # Detailed page header, 2026-08-17 rev 2: one row, three parts, no grid
++        # cells to drift out of alignment --
++        #   [ 45% ]  [ filename + lcd message ]  [ <- back to minimal ]
++        # with a slim progress bar underneath spanning the full width. The old
++        # 4-column homogeneous grid gave the percentage a 71px cell and the
++        # filename a 142px one regardless of what either needed, which is half
++        # of why the header looked crooked in every screenshot.
++        header = Gtk.Box(spacing=6)
++        header.pack_start(self.details_tap, False, False, 0)
++        header.pack_start(self.fi_box, True, True, 0)
++        header.pack_start(self.buttons["to_minimal"], False, False, 0)
++
++        detailed = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
++        detailed.pack_start(header, False, False, 0)
++        detailed.pack_start(self.labels["progress_bar_d"], False, False, 0)
++        detailed.pack_start(self.labels["info_grid"], True, True, 0)
 +
 +        self.stack = Gtk.Stack(vexpand=True, hhomogeneous=False, vhomogeneous=False)
 +        self.stack.add_named(self.minimal_grid, "minimal")
@@ -1830,186 +1880,448 @@ index 4e0c01a..7b9538a 100644
          self.content.add(self.grid)
  
 +    def _markup(self, button, markup):
-+        # The readouts on the minimal page carry Pango markup (that is where
-+        # their type hierarchy lives), and Gtk.Button.set_label() would drop it
-+        # back to plain text on the next status tick. Always go through here.
++        # Pango markup into a button's own label, surviving the set_label() that
++        # would otherwise flatten it back to plain text on the next status tick.
 +        if label := find_widget(button, Gtk.Label):
 +            label.set_markup(markup)
 +
-+    @staticmethod
-+    def _align_left(*buttons):
-+        # One vertical edge for the whole readings column. halign on the BUTTON
-+        # would shrink-wrap it and kill the tap target; what has to move is the
-+        # label's alignment INSIDE a full-width button, which is xalign -- and
-+        # xalign only takes effect once the label stops being centred by its own
-+        # halign, hence both. (KlippyGtk.format_label() sets justify/wrap on
-+        # these labels but never touches alignment.)
-+        for button in buttons:
-+            if label := find_widget(button, Gtk.Label):
-+                label.set_halign(Gtk.Align.START)
-+                label.set_xalign(0.0)
++    def _set_value(self, button, text):
++        # Detailed-page readouts are a caption/value pair, not a single label
++        # (see _readout), so set_label() on the button would destroy the
++        # composition. Registered buttons get their value label written; an
++        # unregistered one falls back to the old behaviour rather than silently
++        # dropping the reading, which is the failure mode that is hardest to
++        # notice on a screen nobody is watching.
++        if (label := self.readout_values.get(button)) is not None:
++            label.set_label(text)
++        else:
++            button.set_label(text)
++
++    def _readout(self, key, caption, on_click=None):
++        # One cell of the detailed page's 2x4 grid.
++        #
++        # Why this replaces the icon+label buttons that were here: the user's
++        # verdict on those was "нет приоритета через bold и font size, сетка
++        # плывет, а серые боксы только подчеркивают кривизну", and all three
++        # come from the same construction. An icon+label button is ONE label,
++        # so caption and value cannot have different weights; the label is
++        # left-aligned after an icon, so "215/215°" and "0.0 mm³/s" start at
++        # different x and end at different x, which is what makes a grid of
++        # them look like it is drifting; and .printing-info paints each of them
++        # with a grey box that draws a hard outline around that drift.
++        #
++        # Here: caption on the left at the caption step of the scale, value on
++        # the right at the value step, xalign=1.0 so every number in a column
++        # ends on the SAME vertical edge whatever its width. The grey box is
++        # dropped in CSS (both themes, .printing-info button), so the alignment
++        # is what the eye follows instead of a rectangle.
++        button = Gtk.Button(hexpand=True, vexpand=True)
++        button.set_can_focus(
++            self._screen._config.get_main_config().getboolean("keyboard_navigation", fallback=False)
++        )
++        row = Gtk.Box(spacing=4)
++        cap = Gtk.Label(label=caption, xalign=0.0, ellipsize=Pango.EllipsizeMode.END)
++        cap.get_style_context().add_class("js-caption")
++        val = Gtk.Label(label="-", xalign=1.0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
++        val.get_style_context().add_class("js-value")
++        row.pack_start(cap, False, False, 0)
++        row.pack_start(val, True, True, 0)
++        button.add(row)
++        if on_click is not None:
++            button.connect("clicked", *on_click)
++        button.connect("clicked", self._screen.screensaver.reset_timeout)
++        button.connect("clicked", self._screen.lock_screen.reset_timeout)
++        self.buttons[key] = button
++        self.readout_values[button] = val
++        return button
++
++    def _action_button(self, key, icon, style, on_click, args=None):
++        # Compact icon-only button for the minimal page's bottom band. Icon-only
++        # on purpose: this strip has ~110px of width to spend after the
++        # progress readout, and these three are the glyphs a printer UI is
++        # allowed to assume (pause bars, cross, info) -- unlike "Fine Tuning",
++        # which is why the FULL button row below is still words, not icons.
++        button = self._gtk.Button(icon, None, style, 0.8)
++        button.set_hexpand(False)
++        button.set_vexpand(False)
++        button.set_valign(Gtk.Align.CENTER)
++        button.get_style_context().add_class("js-action")
++        if args is None:
++            button.connect("clicked", on_click)
++        else:
++            button.connect("clicked", on_click, args)
++        button.set_no_show_all(True)
++        self.buttons[key] = button
++        return button
 +
 +    def create_minimal_grid(self):
-+        # 2026-08-17: the minimal (default) print page, laid out for a glance
-+        # from across the room rather than for density.
++        # =====================================================================
++        # THE MINIMAL (default) PRINT PAGE -- rev 3, 2026-08-17 evening.
 +        #
-+        # Budget, from the measured numbers in this file (2026-07-31): 288px of
-+        # content width (320 minus the 32px action bar) and 212px of content
-+        # height (240 minus the title bar), of which the action button row
-+        # takes ~47px. So ~288x165:
++        # Asked for, twice, verbatim:
++        #   «и можно ли миниатюру модели на весь дисплей а все поверх рисовать»
++        #   «но не обрезть ее за границы экрана!»
++        # and after rev 2 shipped a 116px thumbnail BESIDE a column of numbers:
++        #   «дисплей так и не показывает миниатюру на весь экран а параметры
++        #    поверх как я просил»
 +        #
-+        #   +------------------+----------------------------+
-+        #   |                  |  1h 05m         <- large    |
-+        #   |   model, whole   |  Layer 42/150   <- medium   |
-+        #   |    ~130x130      |  210° | 60°     <- small    |
-+        #   +------------------+----------------------------+
-+        #   | [=====45%=====]  45%          [ i Details ]    |
-+        #   +------------------+----------------------------+
++        # So: the picture is the page. It is centred on the full width of the
++        # content area, and the readings sit in bands over that same canvas
++        # instead of in a column next to it.
 +        #
-+        # Three deliberate departures from the first cut of this page, all from
-+        # the user's review of it ("нет приоритета через bold и font size,
-+        # сетка плывет, а серые боксы только подчеркивают кривизну"):
++        #   +--------------------------------------------------+ 28px band
++        #   | 1h 05m                     OrcaCube_v2_0.2mm...  |
++        #   +--------------------------------------------------+
++        #   |                                                  |
++        #   |                +--------------+                  | image region,
++        #   |                |    model     |                  | 286 x ~148
++        #   |                +--------------+                  |
++        #   |                                                  |
++        #   +--------------------------------------------------+
++        #   | ============================================     | 8px bar
++        #   | 45%  L 42/150  210°/60°        [||] [X] [i]      | ~28px strip
++        #   +--------------------------------------------------+
 +        #
-+        # 1. TYPE HIERARCHY, not four identical rows. Time remaining is the one
-+        #    number a person walks over to read, so it is large+bold; the layer
-+        #    counter is the progress you follow while watching; temperatures
-+        #    are confirmation, not headline, so they are small and share one
-+        #    row. That also drops the block from 4 rows to 3 and gives the
-+        #    thumbnail its height back.
-+        # 2. NO GREY BOXES. The `.printing-info` class (base.css) paints every
-+        #    button in it rgba(0,0,0,0.1) with a .5em radius -- fine for the
-+        #    dense detailed page where the boxes separate readings that would
-+        #    otherwise run together, wrong here where each reading is alone on
-+        #    its line and the boxes just draw four ragged rectangles against the
-+        #    model. Left off, the readouts inherit the plain page background and
-+        #    read as text. They stay real Gtk.Buttons, so D-pad focus still
-+        #    highlights them (button:focus -> @active in the theme) -- the
-+        #    affordance moves from a permanent grey box to the focus ring,
-+        #    which is what a 5-button device actually navigates by.
-+        # 3. ONE ALIGNMENT. Everything in the right-hand column is left-aligned
-+        #    on a single edge (halign=START on the column, FILL on the rows), so
-+        #    there is one vertical line instead of the four the centred boxes
-+        #    produced.
++        # WHY BANDS AND NOT FREE-FLOATING TEXT ON THE IMAGE. An image that is
++        # scaled to FIT (which it must be -- "не обрезать" is a standing rule of
++        # this project) almost never has the aspect of the box it lands in, so
++        # it comes with empty margins. Putting the readings in reserved bands
++        # means the picture is fitted into what is left, i.e. the text is in the
++        # margin BY CONSTRUCTION and cannot land on the model whatever the
++        # preview's proportions are. No text-shadow (mud at 114 ppi), no Pango
++        # outline (does not exist), no translucent plaque (nothing to hide) --
++        # the readability problem is designed out instead of mitigated.
 +        #
-+        # The image is never cropped: PixbufFromFile() -> new_from_file_at_size()
-+        # scales to FIT the box and preserves aspect ratio, so a tall model
-+        # letterboxes rather than losing its top.
-+        # Height budget, and it is tight enough to be worth writing down. The
-+        # stack gets 212px of content height minus the ~47px action row = 165.
-+        # Of that the progress strip takes ~26 and the page spacing 2, leaving
-+        # ~137 for this row; the button's own chrome is ~12 (base.css: .2em
-+        # margin + .25em padding, both sides, at the theme's 14px base). At
-+        # 0.72 the image came out 152px and pushed Pause/Cancel/Fine Tuning/
-+        # Menu off the bottom edge -- confirmed on a live screenshot, the
-+        # "Fine Tuning" label was sliced. 0.55 lands at 116px, which fits with
-+        # room to spare and is still by far the largest thing on the page.
-+        # A square request, not -1: it keeps the box stable while the image is
-+        # still the generic file glyph and after the real model arrives, so the
-+        # readings column does not jump sideways when a print starts.
-+        self.thumb_size = int(min(self._gtk.content_height * 0.55, self._gtk.content_width * 0.42))
-+        self.labels["big_thumbnail"] = self._gtk.Button("file")
-+        self.labels["big_thumbnail"].set_hexpand(False)
-+        self.labels["big_thumbnail"].set_vexpand(False)
-+        self.labels["big_thumbnail"].set_valign(Gtk.Align.CENTER)
-+        self.labels["big_thumbnail"].set_size_request(self.thumb_size, self.thumb_size)
-+        self.labels["big_thumbnail"].connect("clicked", self.show_fullscreen_thumbnail)
++        # WHERE THE HEIGHT COMES FROM. Measured, not computed: the content area
++        # of this panel allocates 286x212 at (34,28) -- logged live on
++        # 2026-07-31 -- while KlippyGtk's own content_height says 224. The 12px
++        # difference is exactly what sliced the "Fine Tuning" label off the
++        # bottom edge the last time this page was sized off content_height.
++        # 212 = 28 (top band) + ~148 (image) + 36 (bottom band), and the
++        # 47px Pause/Cancel/Fine Tuning/Menu row is NOT in that budget: it is
++        # hidden while a job runs (see _sync_button_row) and its function is
++        # covered by the three compact buttons in the bottom band. That row was
++        # 22% of the screen spent on a duplicate.
++        #
++        # The 148 is a starting request only. The real allocation is whatever
++        # GTK hands the image container, and _on_thumb_area_allocate re-decodes
++        # the preview at that size, so the arithmetic above cannot go stale
++        # against a theme change or a different screen.
++        # =====================================================================
 +
-+        # --- the readings column, in descending order of importance ---------
-+        self.buttons["m_left"] = self._gtk.Button(
-+            None, "-", None, self.bts, Gtk.PositionType.LEFT, 1
++        # --- top band: the one number you walk across the room for -----------
++        self.labels["m_time"] = Gtk.Label(label="-", xalign=0.0)
++        self.labels["m_time"].get_style_context().add_class("js-xl")
++        self.labels["m_file"] = Gtk.Label(
++            label="", xalign=1.0, hexpand=True, ellipsize=Pango.EllipsizeMode.END
 +        )
-+        self.buttons["m_left"].connect("clicked", self.show_detailed, self.time_grid)
-+        self.buttons["m_layer"] = self._gtk.Button(
-+            None, "-", None, self.bts, Gtk.PositionType.LEFT, 1
++        self.labels["m_file"].get_style_context().add_class("js-caption")
++        top = Gtk.Box(spacing=8)
++        top.set_size_request(-1, 28)
++        top.pack_start(self.labels["m_time"], False, False, 0)
++        top.pack_start(self.labels["m_file"], True, True, 0)
++
++        # --- the image, and its stand-in when the slicer embedded no preview --
++        # A Gtk.DrawingArea that blits the pixbuf, NOT a Gtk.Image, and not the
++        # Gtk.Button of rev 2. Caught live: with a Gtk.Image the page RATCHETS
++        # its own height. A Gtk.Image's minimum size is its pixbuf's size, and
++        # the pixbuf here is decoded to fill whatever the area was last
++        # allocated -- so one transient over-allocation (any moment the bottom
++        # band has not been sized yet) becomes a permanent minimum, the page
++        # minimum grows past 212px, and what falls off the bottom edge is the
++        # progress strip. Seen in the paused-state screenshot: "45% L 0/150"
++        # sliced in half by the screen edge.
++        #
++        # A DrawingArea requests nothing at all. It takes the height it is
++        # given, the picture is painted centred inside it, and the geometry can
++        # only ever flow one way -- layout decides, image obeys.
++        self.labels["m_image"] = Gtk.DrawingArea(hexpand=True, vexpand=True)
++        self.labels["m_image"].connect("draw", self.on_draw_thumbnail)
++        self._thumb_pixbuf = None
++
++        # The no-preview stand-in. It must be the QUIETEST thing on the page,
++        # not the loudest: rev 2 fell back to the theme's "file" glyph rendered
++        # at thumbnail size, i.e. a teal diamond filling the whole box, which
++        # made "this file has no preview" the most eye-catching state the
++        # screen could be in. 24px outline glyph, the file name under it, the
++        # whole group at 35% opacity -- present, legible, ignorable.
++        placeholder = Gtk.Box(
++            orientation=Gtk.Orientation.VERTICAL,
++            spacing=6,
++            halign=Gtk.Align.CENTER,
++            valign=Gtk.Align.CENTER,
 +        )
-+        self.buttons["m_layer"].connect("clicked", self.show_detailed, self.move_grid)
-+
-+        self.minimal_temps = {}
-+        temps_row = Gtk.Box(spacing=2, homogeneous=True)
-+        for extruder in self._printer.get_tools():
-+            if extruder != self._printer.get_stat("toolhead", "extruder"):
-+                continue
-+            button = self._gtk.Button(
-+                f"extruder-{self._printer.get_tools().index(extruder)}",
-+                "-",
-+                None,
-+                self.bts,
-+                Gtk.PositionType.LEFT,
-+                1,
-+            )
-+            button.connect(
-+                "clicked", self.menu_item_clicked, {"panel": "temperature", "extra": extruder}
-+            )
-+            self.minimal_temps[extruder] = button
-+            self._align_left(button)
-+            temps_row.pack_start(button, True, True, 0)
-+        for dev in self._printer.get_heaters():
-+            if dev != "heater_bed":
-+                continue
-+            button = self._gtk.Button("bed", "-", None, self.bts, Gtk.PositionType.LEFT, 1)
-+            button.connect(
-+                "clicked", self.menu_item_clicked, {"panel": "temperature", "extra": dev}
-+            )
-+            self.minimal_temps[dev] = button
-+            self._align_left(button)
-+            temps_row.pack_start(button, True, True, 0)
-+
-+        self._align_left(self.buttons["m_left"], self.buttons["m_layer"])
-+        readouts = Gtk.Box(
-+            orientation=Gtk.Orientation.VERTICAL, spacing=0, valign=Gtk.Align.CENTER, hexpand=True
++        placeholder.add(self._gtk.Image("file", 24, 24))
++        self.labels["m_placeholder_text"] = Gtk.Label(
++            label="", justify=Gtk.Justification.CENTER, ellipsize=Pango.EllipsizeMode.END
 +        )
-+        readouts.pack_start(self.buttons["m_left"], False, False, 0)
-+        readouts.pack_start(self.buttons["m_layer"], False, False, 0)
-+        readouts.pack_start(temps_row, False, False, 0)
++        # max_width_chars bounds the NATURAL width. Without it a long file name
++        # makes the placeholder ask for more width than the screen has, and this
++        # box is the only child of the image region with a size request at all.
++        self.labels["m_placeholder_text"].set_max_width_chars(22)
++        self.labels["m_placeholder_text"].get_style_context().add_class("js-caption")
++        placeholder.add(self.labels["m_placeholder_text"])
++        placeholder.set_opacity(0.35)
++        placeholder.set_no_show_all(True)
++        self.labels["m_placeholder"] = placeholder
 +
-+        top = Gtk.Box(spacing=4)
-+        top.pack_start(self.labels["big_thumbnail"], False, False, 0)
-+        top.pack_start(readouts, True, True, 0)
++        # Overlay, not a Box: the stand-in has to sit in the SAME place the
++        # picture would, and only one of the two is ever visible. no_show_all on
++        # the placeholder because this panel is show_all()'d from several places
++        # outside itself, every one of which would otherwise draw the "no
++        # preview" glyph on top of a perfectly good model.
++        thumb_area = Gtk.Overlay(hexpand=True, vexpand=True)
++        thumb_area.add(self.labels["m_image"])
++        thumb_area.add_overlay(self.labels["m_placeholder"])
++        thumb_area.connect("size-allocate", self._on_thumb_area_allocate)
++        self._thumb_area = thumb_area
 +
-+        # Progress: a plain horizontal bar, not a second copy of the ring. The
-+        # ring needs a square-ish cell to stay readable (it already had to be
-+        # turned into an ellipse to survive this screen, see on_draw) while a
-+        # bar is happy in the ~26px strip under the thumbnail and reads from
-+        # across the room, which is the whole point of this page. The percent
-+        # sits next to it at NORMAL weight -- on the detailed page it is the
-+        # single biggest thing on screen, which is how "0%" ended up dominating
-+        # a screen whose title already said "Cancelled".
++        # --- bottom band -----------------------------------------------------
 +        self.labels["progress_bar"] = Gtk.DrawingArea()
-+        self.labels["progress_bar"].set_size_request(-1, 12)
++        self.labels["progress_bar"].set_size_request(-1, 8)
 +        self.labels["progress_bar"].set_valign(Gtk.Align.CENTER)
 +        self.labels["progress_bar"].set_hexpand(True)
 +        self.labels["progress_bar"].connect("draw", self.on_draw_bar)
-+        self.labels["minimal_progress_text"] = Gtk.Label(label="0%")
 +
-+        # THE button the user asked for: labelled, visible, in the flow of the
-+        # default page. The old invisible tap zone on the progress ring is
-+        # still there but is no longer the only way in.
-+        self.buttons["details"] = self._gtk.Button(
-+            "settings", _("Details"), "color3", self.bts, Gtk.PositionType.LEFT, 1
++        self.labels["minimal_progress_text"] = Gtk.Label(label="0%", xalign=0.0)
++        self.labels["minimal_progress_text"].get_style_context().add_class("js-caption")
++        self.labels["m_layer"] = Gtk.Label(label="", xalign=0.0)
++        self.labels["m_layer"].get_style_context().add_class("js-caption")
++        self.labels["m_temps"] = Gtk.Label(
++            label="", xalign=0.0, ellipsize=Pango.EllipsizeMode.END
 +        )
-+        self.buttons["details"].set_hexpand(False)
-+        self.buttons["details"].connect("clicked", self.show_detailed)
++        self.labels["m_temps"].get_style_context().add_class("js-caption")
++
++        # Pause and Resume are two buttons, not one that changes its icon: the
++        # icon lives in a GdkPixbuf baked at construction time by KlippyGtk, so
++        # swapping it at runtime means rebuilding the button anyway. Visibility
++        # is driven by state in _sync_minimal_actions.
++        actions = Gtk.Box(spacing=2, halign=Gtk.Align.END)
++        actions.pack_start(self._action_button("m_pause", "pause", "color1", self.pause), 0, 0, 0)
++        actions.pack_start(self._action_button("m_resume", "resume", "color1", self.resume), 0, 0, 0)
++        actions.pack_start(self._action_button("m_cancel", "stop", "color2", self.cancel), 0, 0, 0)
++        # THE button the user asked for ("при печати на экране пусть будет
++        # кнопка с подробностями"). Icon-only here because the strip is narrow,
++        # but it is a real, permanently visible, focusable button -- not the
++        # invisible tap zone that the first attempt at this shipped.
++        details = self._action_button("m_details", "info", "color3", self.show_detailed)
++        details.set_tooltip_text(_("Details"))
++        actions.pack_start(details, 0, 0, 0)
++        self.buttons["details"] = details
++
++        strip = Gtk.Box(spacing=8)
++        strip.pack_start(self.labels["minimal_progress_text"], False, False, 0)
++        strip.pack_start(self.labels["m_layer"], False, False, 0)
++        strip.pack_start(self.labels["m_temps"], True, True, 0)
++        strip.pack_start(actions, False, False, 0)
++
++        bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
++        bottom.set_size_request(-1, 36)
++        bottom.pack_start(self.labels["progress_bar"], False, False, 0)
++        bottom.pack_start(strip, False, False, 0)
++
 +        self.buttons["to_minimal"] = self._gtk.Button(
 +            "back", None, "color1", self.bts, Gtk.PositionType.TOP, False
 +        )
++        self.buttons["to_minimal"].set_hexpand(False)
 +        self.buttons["to_minimal"].connect("clicked", self.show_minimal)
 +
-+        bottom = Gtk.Box(spacing=6)
-+        bottom.pack_start(self.labels["progress_bar"], True, True, 0)
-+        bottom.pack_start(self.labels["minimal_progress_text"], False, False, 0)
-+        bottom.pack_start(self.buttons["details"], False, False, 0)
-+
-+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-+        page.pack_start(top, True, True, 0)
++        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
++        page.pack_start(top, False, False, 0)
++        page.pack_start(thumb_area, True, True, 0)
 +        page.pack_start(bottom, False, False, 0)
 +        self.minimal_grid = page
 +
++    def _on_thumb_area_allocate(self, widget, allocation):
++        # Self-tuning image size: whatever GTK actually gives the image region
++        # is what the preview gets decoded at, so the hand-computed 286x148
++        # above is only ever a first guess and cannot rot.
++        #
++        # Two hazards, both paid for elsewhere in this codebase and both real:
++        #   * setting a pixbuf from inside a size-allocate handler re-triggers
++        #     allocation -> loop. Hence the handler is on the CONTAINER, the
++        #     reload is deferred to GLib.idle_add, and a pending reload is
++        #     coalesced with _thumb_reload_pending.
++        #   * KlippyGtk.PixbufFromFile is @lru_cache(maxsize=500) keyed on
++        #     (path, w, h). An unquantised stream of allocations would fill 500
++        #     near-identical ~170KB pixbufs on a 512MB Orange Pi. Quantising to
++        #     8px means the cache holds a handful of entries, and a 4px error in
++        #     the fit is invisible.
++        width = (allocation.width // 8) * 8
++        height = (allocation.height // 8) * 8
++        if width < 32 or height < 32:
++            return
++        if (width, height) == self._thumb_request:
++            return
++        self._thumb_request = (width, height)
++        if not self._thumb_reload_pending:
++            self._thumb_reload_pending = True
++            GLib.idle_add(self._reload_thumbnail)
++
++    def _reload_thumbnail(self):
++        self._thumb_reload_pending = False
++        if not self.content.get_parent():
++            return False
++        if not self.filename or self._thumb_request is None:
++            self._set_big_thumbnail(None)
++            return False
++        width, height = self._thumb_request
++        key = (self.filename, width, height)
++        if key == self._thumb_loaded:
++            return False
++        self._thumb_loaded = key
++        # Preferred path: trim the preview's transparent margin, then fit.
++        # Measured on this machine's own files (OrcaSlicer 2.4.2, 300x300 PNG):
++        # the model's real bounding box is 238x251 and it is not even centred
++        # (46px of empty pixels on the left, 16 on the right). Fitting the raw
++        # 300x300 into the 286x148 region therefore spends 20% of the height on
++        # nothing and lands the model off-centre. Trimming FULLY TRANSPARENT
++        # rows and columns only is not cropping -- not one pixel of the model is
++        # touched, which is the standing rule here ("но не обрезать её за
++        # границы экрана!") -- and it makes the model 148px tall instead of
++        # 124px, i.e. 40% more area, for free.
++        if self._load_trimmed_async(self.filename, width, height):
++            return False
++        # Fallback: upstream's loader. new_from_file_at_size() scales to FIT and
++        # preserves the aspect ratio, so this path letterboxes rather than
++        # cropping too -- it just keeps the slicer's empty margin.
++        self.load_image_async(self.filename, width, height, callback=self._set_big_thumbnail)
++        return False
++
++    def _load_trimmed_async(self, filename, width, height):
++        # Returns True if it took the job, False to let the caller fall back.
++        # Everything that can be unknown here (no thumbnail, an HTTP-served one,
++        # a GdkPixbuf failure) returns False rather than guessing.
++        if not self._files.has_thumbnail(filename):
++            return False
++        loc = self._files.get_thumbnail_location(filename, False)
++        if loc is None or loc[0] != "file":
++            return False
++        path = loc[1]
++
++        def _work():
++            try:
++                pixbuf = self._trimmed_source(path)
++                if pixbuf is None:
++                    GLib.idle_add(self._set_big_thumbnail, None)
++                    return
++                sw, sh = pixbuf.get_width(), pixbuf.get_height()
++                scale = min(width / sw, height / sh)
++                # Never enlarge: a 300px preview blown up to 400px on a 114 ppi
++                # panel is just a blurry 300px preview.
++                scale = min(scale, 1.0)
++                target_w = max(int(sw * scale), 1)
++                target_h = max(int(sh * scale), 1)
++                if (target_w, target_h) != (sw, sh):
++                    pixbuf = pixbuf.scale_simple(
++                        target_w, target_h, GdkPixbuf.InterpType.BILINEAR
++                    )
++                GLib.idle_add(self._set_big_thumbnail, pixbuf)
++            except Exception as e:
++                logging.exception(f"Trimmed thumbnail failed, falling back: {e}")
++                GLib.idle_add(
++                    self.load_image_async, filename, width, height, False, self._set_big_thumbnail
++                )
++
++        # Same thread pool upstream's load_image_async uses: decoding a 300x300
++        # PNG plus the row/column scan below is ~100ms on this H3, and the UI
++        # thread also drives a 500ms marquee timer.
++        self._gtk._executor.submit(_work)
++        return True
++
++    def _trimmed_source(self, path):
++        # Cached per file: the panel re-requests the image whenever its
++        # allocation changes (theme switch, page switch), and there is no reason
++        # to re-decode and re-scan for that. One 238x251 RGBA pixbuf is ~240KB;
++        # this machine has 512MB and the cache holds exactly one entry.
++        if self._trim_cache and self._trim_cache[0] == path:
++            return self._trim_cache[1]
++        pixbuf = self._gtk.PixbufFromFile(path, -1, -1)
++        if pixbuf is None:
++            return None
++        if pixbuf.get_has_alpha() and pixbuf.get_n_channels() == 4:
++            box = self._alpha_bbox(pixbuf)
++            if box is not None:
++                x0, y0, x1, y1 = box
++                if (x1 - x0 + 1, y1 - y0 + 1) != (pixbuf.get_width(), pixbuf.get_height()):
++                    pixbuf = pixbuf.new_subpixbuf(x0, y0, x1 - x0 + 1, y1 - y0 + 1)
++        self._trim_cache = (path, pixbuf)
++        return pixbuf
++
++    @staticmethod
++    def _alpha_bbox(pixbuf, threshold=8):
++        # Bounding box of everything that is not fully transparent.
++        #
++        # Written as slices on purpose: a per-pixel Python loop over 90 000
++        # pixels takes seconds on an H3. data[y*rs+3 : y*rs+w*4 : 4] is one
++        # row's alpha channel, and data[x*4+3 : h*rs : rs] is one COLUMN's
++        # (stride rs steps exactly one row down at the same x). That is 600
++        # C-level slice+max operations instead of 90 000 interpreter steps.
++        data = pixbuf.get_pixels()
++        width, height, rs = pixbuf.get_width(), pixbuf.get_height(), pixbuf.get_rowstride()
++        rows = [y for y in range(height) if max(data[y * rs + 3 : y * rs + width * 4 : 4]) > threshold]
++        if not rows:
++            return None
++        cols = [x for x in range(width) if max(data[x * 4 + 3 : height * rs : rs]) > threshold]
++        if not cols:
++            return None
++        return cols[0], rows[0], cols[-1], rows[-1]
++
++    def _sync_button_row(self):
++        # The full Pause/Cancel/Fine Tuning/Menu row is 47px of a 212px screen.
++        # While a job runs the minimal page spends that height on the model
++        # instead and offers the same actions as icons in its bottom band; the
++        # moment the job is over the row comes back, because then it carries
++        # Save Z / Restart / Main Menu, which exist nowhere else.
++        grid = self.buttons["button_grid"]
++        if self.stack is None:
++            return
++        if self.stack.get_visible_child_name() == "minimal" and not self.can_close:
++            grid.hide()
++            return
++        # gtk_widget_show_all() returns immediately on a widget with
++        # no_show_all set (that flag is what stops the panel-wide show_all()
++        # calls from resurrecting this row), so revealing it has to lift the
++        # flag for the duration of the call. A plain .show() would reveal an
++        # EMPTY row -- the children attached by show_buttons_for_state() have
++        # never been shown.
++        grid.set_no_show_all(False)
++        grid.show_all()
++        grid.set_no_show_all(True)
++
++    def _sync_minimal_actions(self):
++        # Pause/Resume/Cancel only mean anything while a job is live. Showing
++        # them greyed out afterwards is noise on a page whose whole point is
++        # that it shows the minimum.
++        live = self.state in ("printing", "paused", "cancelling")
++        for key, visible in (
++            ("m_pause", self.state == "printing"),
++            ("m_resume", self.state == "paused"),
++            ("m_cancel", live),
++            ("m_details", True),
++        ):
++            button = self.buttons.get(key)
++            if button is None:
++                continue
++            if visible:
++                button.set_no_show_all(False)
++                button.show_all()
++                button.set_no_show_all(True)
++            else:
++                button.hide()
++
 +    def show_minimal(self, widget=None):
 +        self.stack.set_visible_child_name("minimal")
++        self._sync_button_row()
 +
 +    def show_detailed(self, widget=None, info=None):
-+        self.switch_info(info=info or self.status_grid)
++        # widget is the clicked button when this is used as a signal handler,
++        # and Gtk passes no second argument then -- but show_detailed is ALSO
++        # connected with a user-data grid (m_layer used to do that), so `info`
++        # has to tolerate being a widget rather than a grid.
++        self.switch_info(info=info if isinstance(info, Gtk.Widget) else self.status_grid)
 +        self.stack.set_visible_child_name("detailed")
++        self._sync_button_row()
 +
 +    def back(self):
 +        # 2026-08-17 -- THE ESCAPE HATCH. Bug report, verbatim: "кажется в
@@ -2053,16 +2365,51 @@ index 4e0c01a..7b9538a 100644
 +    def open_menu(self, widget=None):
 +        self._screen._go_to_submenu(None, "")
 +
++    def _state_rgb(self):
++        # 2026-08-17: the bar used to be red at every progress on every state,
++        # including a print running perfectly normally. Red is the one colour a
++        # machine that can set itself on fire should reserve for trouble.
++        if self.state == "paused":
++            return 0.90, 0.62, 0.12
++        if self.state in ("error", "cancelled", "cancelling"):
++            return 0.718, 0.110, 0.110
++        if self.state == "complete":
++            return 0.16, 0.65, 0.35
++        return 0.05, 0.60, 0.55
++
 +    def on_draw_bar(self, da, ctx):
++        # Theme-aware track. The old fixed rgb(0.13,0.13,0.13) was a black slab
++        # across the light theme, which this machine runs for most of the day
++        # (auto_dark_theme flips every 5 minutes off sunrise/sunset). Taking the
++        # colour from the widget's own style context means the track follows
++        # whichever theme is up, with no theme lookup table to keep in sync.
 +        w = da.get_allocated_width()
 +        h = da.get_allocated_height()
-+        ctx.set_source_rgb(0.13, 0.13, 0.13)
-+        ctx.rectangle(0, 0, w, h)
++        if w < 1 or h < 1:
++            return
++        fg = da.get_style_context().get_color(Gtk.StateFlags.NORMAL)
++        radius = h / 2
++        ctx.set_source_rgba(fg.red, fg.green, fg.blue, 0.18)
++        self._rounded_rect(ctx, 0, 0, w, h, radius)
 +        ctx.fill()
-+        # Same red as the progress ring on the detailed page (on_draw).
-+        ctx.set_source_rgb(0.718, 0.110, 0.110)
-+        ctx.rectangle(0, 0, w * min(max(self.progress, 0), 1), h)
-+        ctx.fill()
++        filled = w * min(max(self.progress, 0), 1)
++        if filled > 0:
++            ctx.set_source_rgb(*self._state_rgb())
++            # max(filled, h): below one bar-height a rounded rectangle degenerates
++            # into a shape narrower than its own corners and disappears, so a
++            # just-started print would show nothing at all.
++            self._rounded_rect(ctx, 0, 0, max(filled, h), h, radius)
++            ctx.fill()
++
++    @staticmethod
++    def _rounded_rect(ctx, x, y, width, height, radius):
++        radius = min(radius, width / 2, height / 2)
++        ctx.new_sub_path()
++        ctx.arc(x + width - radius, y + radius, radius, -pi / 2, 0)
++        ctx.arc(x + width - radius, y + height - radius, radius, 0, pi / 2)
++        ctx.arc(x + radius, y + height - radius, radius, pi / 2, pi)
++        ctx.arc(x + radius, y + radius, radius, pi, 3 * pi / 2)
++        ctx.close_path()
 +
 +    @staticmethod
 +    def format_time_short(seconds):
@@ -2107,120 +2454,198 @@ index 4e0c01a..7b9538a 100644
 +        derived = min(max(derived, 0), int(layer_count))
 +        self._set_layer_markup(f"{derived}/{layer_count}")
 +
-+    def _set_layer_markup(self, value):
-+        # The word carries the meaning here, so it can be small and quiet while
-+        # the number stays at full size -- that is the whole reason this row is
-+        # markup and not a label with an icon in front of it.
-+        self._markup(
-+            self.buttons["m_layer"],
-+            f"<span size='small' alpha='65535'>{_('Layer')}</span>  {value}",
-+        )
++    def update_minimal_temps(self):
++        # One caption-sized line in the bottom band, both readings in it. On
++        # the minimal page temperatures are confirmation ("yes, it is hot"),
++        # not the headline, so they get the smallest step of the scale and
++        # share a line with the percentage and the layer counter.
++        parts = []
++        extruder = self._printer.get_stat("toolhead", "extruder") or "extruder"
++        for dev in (extruder, "heater_bed"):
++            if dev in self.labels and isinstance(self.labels[dev], Gtk.Label):
++                text = self.labels[dev].get_text()
++                if text and text != "-":
++                    parts.append(text)
++        if "m_temps" in self.labels:
++            self.labels["m_temps"].set_label("  ".join(parts))
 +
++    def _set_layer_markup(self, value):
++        # Bottom band of the minimal page, sharing one caption-sized line with
++        # the percentage and the temperatures. "L" and not "Layer": the strip
++        # has ~150px before the action buttons start, and the number is the
++        # part that carries information.
++        self.labels["m_layer"].set_label("" if value in ("-", "") else f"L {value}")
 +
 +
      def create_status_grid(self, widget=None):
-         buttons = {
-             "speed": self._gtk.Button("speed+", "-", None, self.bts, Gtk.PositionType.LEFT, 1),
-@@ -178,7 +640,19 @@ class Panel(ScreenPanel):
-         }
-         for button in buttons:
-             buttons[button].set_halign(Gtk.Align.START)
+-        buttons = {
+-            "speed": self._gtk.Button("speed+", "-", None, self.bts, Gtk.PositionType.LEFT, 1),
+-            "z": self._gtk.Button("home-z", "-", None, self.bts, Gtk.PositionType.LEFT, 1),
+-            "extrusion": self._gtk.Button("extrude", "-", None, self.bts, Gtk.PositionType.LEFT, 1),
+-            "fan": self._gtk.Button("fan", "-", None, self.bts, Gtk.PositionType.LEFT, 1),
+-            "elapsed": self._gtk.Button("clock", "-", None, self.bts, Gtk.PositionType.LEFT, 1),
+-            "left": self._gtk.Button("hourglass", "-", None, self.bts, Gtk.PositionType.LEFT, 1),
+-        }
+-        for button in buttons:
+-            buttons[button].set_halign(Gtk.Align.START)
 -        buttons["fan"].connect("clicked", self.menu_item_clicked, {"panel": "fan"})
+-        self.buttons.update(buttons)
++        # =====================================================================
++        # DETAILED PAGE, OVERVIEW -- rev 2, 2026-08-17 evening.
++        #
++        # Verdict on rev 1, verbatim: «экран с деталями все еще плохо выглядит.
++        # нет приоритета через bold и font size, сетка плывет, а серые боксы
++        # только подчеркивают кривизну». Three complaints, one construction to
++        # blame, and all three are fixed by the same change (see _readout):
++        #
++        #   * NO HIERARCHY -- an icon+label button carries a single Gtk.Label,
++        #     so "Speed" and "100%" had to share one size and one weight. Now
++        #     every cell is a caption (12px/400) plus a value (17px/700).
++        #   * THE GRID DRIFTS -- the label was left-aligned after an icon, so
++        #     each value started and ended wherever its own text did. Values
++        #     are now xalign=1.0: a column of numbers ends on ONE edge, which
++        #     is the only thing that makes a table of numbers look straight.
++        #   * GREY BOXES -- .printing-info paints every button rgba(0,0,0,.1);
++        #     with eight ragged cells that just outlines the raggedness. The
++        #     background is dropped in BOTH themes' style.css (never base.css,
++        #     it is upstream), keeping the :focus/:active highlight, because on
++        #     a machine with five buttons and no touchscreen the focus ring is
++        #     the entire navigation affordance.
++        #
++        # Geometry: two equal columns with an 8px gutter (spec: 132/8/130 on a
++        # 286px content area; column_homogeneous gets there without hard-coding
++        # a pixel width that a theme change would falsify), four homogeneous
++        # rows. Same eight readouts as before, no information removed.
++        # =====================================================================
++        self._readout("speed", _("Speed"))
++        self._readout("z", "Z")
++        self._readout("extrusion", _("Flow"))
++        self._readout("elapsed", _("Elapsed"))
++        self._readout("left", _("Left"))
 +        if self.hotend_fan:
 +            # Hotend heatsink fan, not part cooling (see __init__). It is a
-+            # temperature_fan, so the "fan" panel would not list it at all --
-+            # panels/fan.py builds its list from get_fans(), which excludes
-+            # temperature_fan -- and clicking would open an empty panel. The
-+            # temperature panel does handle it, target and all.
-+            buttons["fan"].connect(
-+                "clicked",
-+                self.menu_item_clicked,
-+                {"panel": "temperature", "extra": self.hotend_fan},
++            # temperature_fan, so panels/fan.py -- which builds its list from
++            # get_fans(), where temperature_fan does not appear -- would open
++            # empty. The temperature panel handles it, target and all.
++            self._readout(
++                "fan",
++                _("Fan"),
++                (self.menu_item_clicked, {"panel": "temperature", "extra": self.hotend_fan}),
 +            )
 +        else:
-+            buttons["fan"].connect("clicked", self.menu_item_clicked, {"panel": "fan"})
-         self.buttons.update(buttons)
++            self._readout("fan", _("Fan"), (self.menu_item_clicked, {"panel": "fan"}))
++        # switch_info needs the grid as user data, and the grids do not exist
++        # until create_move_grid/create_time_grid/create_extrusion_grid run
++        # later in __init__ -- so those three destinations are wired there, as
++        # they always were. Only the widgets moved.
  
          self.buttons["extruder"] = {}
-@@ -193,7 +667,13 @@ class Panel(ScreenPanel):
+         for i, extruder in enumerate(self._printer.get_tools()):
+             self.labels[extruder] = Gtk.Label(label="-")
+-            self.buttons["extruder"][extruder] = self._gtk.Button(
+-                f"extruder-{i}", "", None, self.bts, Gtk.PositionType.LEFT, 1
+-            )
+-            self.buttons["extruder"][extruder].set_label(self.labels[extruder].get_text())
+-            self.buttons["extruder"][extruder].connect(
+-                "clicked", self.menu_item_clicked, {"panel": "temperature", "extra": extruder}
++            name = _("Nozzle") if len(self._printer.get_tools()) == 1 else f"T{i}"
++            self.buttons["extruder"][extruder] = self._readout(
++                f"extruder_readout_{i}",
++                name,
++                (self.menu_item_clicked, {"panel": "temperature", "extra": extruder}),
              )
-             self.buttons["extruder"][extruder].set_halign(Gtk.Align.START)
+-            self.buttons["extruder"][extruder].set_halign(Gtk.Align.START)
  
 -        self.labels["temp_grid"] = Gtk.Grid(column_homogeneous=True)
-+        # 2026-07-31: column_homogeneous forced every heater cell to the
-+        # widest one. Harmless while they all read "-", but under real print
-+        # values ("215/215deg" vs "60/60deg") the narrow ones were padded up
-+        # to the wide one's width for nothing -- measured 172px for the pair.
-+        # These are independent readouts with no reason to align, so let each
-+        # take the width its own text needs.
-+        self.labels["temp_grid"] = Gtk.Grid(column_homogeneous=False)
++        self.labels["temp_grid"] = Gtk.Grid(column_homogeneous=True, column_spacing=8)
          nlimit = 2 if self._screen.width <= 500 else 3
          n = 0
          if nlimit > 2 and len(self._printer.get_tools()) == 2:
-@@ -259,20 +739,54 @@ class Panel(ScreenPanel):
+@@ -212,21 +1044,13 @@ class Panel(ScreenPanel):
+         for dev in self._printer.get_heaters():
+             if n >= nlimit:
+                 break
+-            if dev == "heater_bed":
+-                self.buttons["heater"][dev] = self._gtk.Button(
+-                    "bed", "", None, self.bts, Gtk.PositionType.LEFT, 1
+-                )
+-            else:
+-                self.buttons["heater"][dev] = self._gtk.Button(
+-                    "heater", "", None, self.bts, Gtk.PositionType.LEFT, 1
+-                )
+             self.labels[dev] = Gtk.Label(label="-")
+-
+-            self.buttons["heater"][dev].set_label(self.labels[dev].get_text())
+-            self.buttons["heater"][dev].connect(
+-                "clicked", self.menu_item_clicked, {"panel": "temperature", "extra": dev}
++            caption = _("Bed") if dev == "heater_bed" else " ".join(dev.split(" ")[1:]) or dev
++            self.buttons["heater"][dev] = self._readout(
++                f"heater_readout_{dev}",
++                caption,
++                (self.menu_item_clicked, {"panel": "temperature", "extra": dev}),
+             )
+-            self.buttons["heater"][dev].set_halign(Gtk.Align.START)
+             self.labels["temp_grid"].attach(self.buttons["heater"][dev], n, 0, 1, 1)
+             n += 1
+         extra_item = not self._show_heater_power
+@@ -244,37 +1068,37 @@ class Panel(ScreenPanel):
+                                 nlimit += 1
+                             if n >= nlimit:
+                                 break
+-                            self.buttons["heater"][device] = self._gtk.Button(
+-                                "heat-up", "", None, self.bts, Gtk.PositionType.LEFT, 1
+-                            )
+                             self.labels[device] = Gtk.Label(label="-")
+-                            self.buttons["heater"][device].set_label(self.labels[device].get_text())
+-                            self.buttons["heater"][device].connect(
+-                                "clicked", self.menu_item_clicked, {"panel": "temperature"}
++                            self.buttons["heater"][device] = self._readout(
++                                f"heater_readout_{device}",
++                                name,
++                                (self.menu_item_clicked, {"panel": "temperature"}),
+                             )
+-                            self.buttons["heater"][device].set_halign(Gtk.Align.START)
+                             self.labels["temp_grid"].attach(
+                                 self.buttons["heater"][device], n, 0, 1, 1
+                             )
                              n += 1
                              break
  
 -        szfe = Gtk.Grid(column_homogeneous=True)
 -        szfe.attach(self.buttons["speed"], 0, 0, 3, 1)
 -        szfe.attach(self.buttons["z"], 2, 0, 2, 1)
-+        # 2026-07-31 overlapping-cells fix (320x240 landscape,
-+        # verified on a live render of this panel). Upstream attaches `speed`
-+        # across columns 0-2 and `z` across columns 2-3 -- both claim COLUMN 2
-+        # -- and likewise `extrusion` 0-2 with `fan` 2-3. Two children in the
-+        # same cell of a Gtk.Grid are simply drawn on top of each other; every
-+        # button here is halign=START, so on a wide screen `speed` ends well
-+        # before column 2 and the collision never shows. At 232px of grid
-+        # width it does: the live screenshot had the fan button's icon and
-+        # "0%" painted straight through the extrusion button's
-+        # "100%  0.0 mm/s", and "Z: 0.00" sitting on top of the speed cell.
-+        # Two equal columns, one button per cell, no spans: each gets ~116px,
-+        # more than the widest label needs (`speed` measured 112px natural
-+        # width, the others less).
-+        szfe = Gtk.Grid(column_homogeneous=False)
-+        szfe.attach(self.buttons["speed"], 0, 0, 1, 1)
-+        szfe.attach(self.buttons["z"], 1, 0, 1, 1)
-         if self._printer.get_tools():
+-        if self._printer.get_tools():
 -            szfe.attach(self.buttons["extrusion"], 0, 1, 3, 1)
 -        if self._printer.get_fans():
 -            szfe.attach(self.buttons["fan"], 2, 1, 2, 1)
-+            szfe.attach(self.buttons["extrusion"], 0, 1, 1, 1)
-+        # `or self.hotend_fan`: once [fan] becomes [temperature_fan hotend_fan]
-+        # get_fans() returns [] on this machine, and without this the cell would
-+        # simply be empty -- no traceback, but no reading either.
-+        if self._printer.get_fans() or self.hotend_fan:
-+            szfe.attach(self.buttons["fan"], 1, 1, 1, 1)
-+
-+        # 2026-07-31 height fix, part 1 of 2. Measured live on
-+        # this panel's first-ever render here: content is allocated 284x262 at
-+        # y=28, i.e. it runs to y=290 on a 240px screen -- 50px of the panel
-+        # hangs off the bottom, and what falls off is the entire action-button
-+        # row (Pause/Cancel/Fine Tuning/Settings while printing, Main Menu
-+        # when not). Breakdown of the 262px: 40px title row + 150px info_grid
-+        # + 72px button_grid, against 212px of usable height (240px screen
-+        # minus the 28px title bar). This grid is row_homogeneous with 5 rows
-+        # (temp_grid, szfe spanning two, elapsed, left) at 30px each = 150px.
-+        # `elapsed` and `left` are both short icon+time readouts -- 25px
-+        # natural width each, measured -- so stacking them burns a whole 30px
-+        # row on nothing. Side by side in a 2-column homogeneous sub-grid they
-+        # get ~116px each, far more than either needs, and this grid drops to
-+        # 4 rows = 120px. That is 30px of the 50px deficit; create_buttons()
-+        # below accounts for the other 28.
-+        times = Gtk.Grid(column_homogeneous=True)
-+        times.attach(self.buttons["elapsed"], 0, 0, 1, 1)
-+        times.attach(self.buttons["left"], 1, 0, 1, 1)
- 
-         info = Gtk.Grid(row_homogeneous=True)
+-
+-        info = Gtk.Grid(row_homogeneous=True)
++        info = Gtk.Grid(row_homogeneous=True, column_homogeneous=True, column_spacing=8)
          info.get_style_context().add_class("printing-info")
-         info.attach(self.labels["temp_grid"], 0, 0, 1, 1)
-         info.attach(szfe, 0, 1, 1, 2)
--        info.attach(self.buttons["elapsed"], 0, 3, 1, 1)
+-        info.attach(self.labels["temp_grid"], 0, 0, 1, 1)
+-        info.attach(szfe, 0, 1, 1, 2)
++        # Row 0 is the temperature pair, which is built as its own grid above
++        # because how many devices it holds depends on the printer.
++        info.attach(self.labels["temp_grid"], 0, 0, 2, 1)
++        info.attach(self.buttons["speed"], 0, 1, 1, 1)
++        info.attach(self.buttons["z"], 1, 1, 1, 1)
++        if self._printer.get_tools():
++            info.attach(self.buttons["extrusion"], 0, 2, 1, 1)
++        # `or self.hotend_fan`: once [fan] became [temperature_fan hotend_fan]
++        # get_fans() returns [] on this machine, and without this the cell
++        # would simply be empty -- no traceback, but no reading either.
++        if self._printer.get_fans() or self.hotend_fan:
++            info.attach(self.buttons["fan"], 1, 2, 1, 1)
+         info.attach(self.buttons["elapsed"], 0, 3, 1, 1)
 -        info.attach(self.buttons["left"], 0, 4, 1, 1)
-+        info.attach(times, 0, 3, 1, 1)
++        info.attach(self.buttons["left"], 1, 3, 1, 1)
          self.status_grid = info
  
++
      def create_extrusion_grid(self, widget=None):
-@@ -354,6 +868,23 @@ class Panel(ScreenPanel):
+         goback = self._gtk.Button("back", None, "color1", self.bts, Gtk.PositionType.TOP, False)
+         goback.connect("clicked", self.switch_info, self.status_grid)
+@@ -354,6 +1178,23 @@ class Panel(ScreenPanel):
          if not info:
              logging.debug("No info to attach")
              return
@@ -2244,58 +2669,54 @@ index 4e0c01a..7b9538a 100644
          if self._screen.vertical_mode:
              self.labels["info_grid"].remove_row(1)
              self.labels["info_grid"].attach(info, 0, 1, 1, 1)
-@@ -363,17 +894,44 @@ class Panel(ScreenPanel):
+@@ -362,25 +1203,23 @@ class Panel(ScreenPanel):
+             self.labels["info_grid"].attach(info, 1, 0, 1, 1)
          self.labels["info_grid"].show_all()
  
-     def on_draw(self, da, ctx):
-+        # 2026-07-31 progress-ring / percentage overlap fix.
-+        # This DrawingArea shares a Gtk.Overlay with the "0%".."100%" label, so
-+        # the ring has to leave a hole wide enough for that text. The old
-+        # radius `min(w, h) * 0.42` plus a `font_size * 0.75` stroke assumed a
-+        # roughly SQUARE cell; here the cell is column 0 of a 4-column
-+        # homogeneous grid in a short top row, measured live at 71x40. That
-+        # gave r=16.8 and a 10.5px stroke, so the hole came out 23px across
-+        # while the percentage label measured 30px wide -- the ring was drawn
-+        # straight through the digits (plainly visible in the live screenshot).
-+        # min(w, h) cannot be right when the cell is nearly twice as wide as it
-+        # is tall: an ellipse inscribed in the real cell keeps the same visual
-+        # idea, collapses back to exactly the original circle whenever the cell
-+        # is square (so nothing changes on larger screens), and at 71x40 with a
-+        # thinner 0.45 stroke leaves a ~62x31 hole -- comfortable even for a
-+        # three-digit "100%".
-         w = da.get_allocated_width()
-         h = da.get_allocated_height()
+-    def on_draw(self, da, ctx):
+-        w = da.get_allocated_width()
+-        h = da.get_allocated_height()
 -        r = min(w, h) * 0.42
-+        lw = self._gtk.font_size * 0.45
-+        rx = max(w / 2 - lw / 2 - 1, 1)
-+        ry = max(h / 2 - lw / 2 - 1, 1)
- 
+-
 -        ctx.set_source_rgb(0.13, 0.13, 0.13)
 -        ctx.set_line_width(self._gtk.font_size * 0.75)
-         ctx.translate(w / 2, h / 2)
+-        ctx.translate(w / 2, h / 2)
 -        ctx.arc(0, 0, r, 0, 2 * pi)
-+        ctx.set_line_width(lw)
-+        # Each arc is built under a scaled CTM (cairo maps path points into
-+        # device space as they are appended), then the CTM is restored before
-+        # stroking so the stroke width stays uniform instead of being squashed
-+        # along with the path.
-+        ctx.set_source_rgb(0.13, 0.13, 0.13)
-+        ctx.save()
-+        ctx.scale(rx, ry)
-+        ctx.arc(0, 0, 1, 0, 2 * pi)
-+        ctx.restore()
-         ctx.stroke()
-         ctx.set_source_rgb(0.718, 0.110, 0.110)
+-        ctx.stroke()
+-        ctx.set_source_rgb(0.718, 0.110, 0.110)
 -        ctx.arc(0, 0, r, 3 / 2 * pi, 3 / 2 * pi + (self.progress * 2 * pi))
-+        ctx.save()
-+        ctx.scale(rx, ry)
-+        ctx.arc(0, 0, 1, 3 / 2 * pi, 3 / 2 * pi + (self.progress * 2 * pi))
-+        ctx.restore()
-         ctx.stroke()
- 
+-        ctx.stroke()
+-
      def activate(self):
-@@ -391,17 +949,48 @@ class Panel(ScreenPanel):
+         if self.flow_timeout is None:
+             self.flow_timeout = GLib.timeout_add_seconds(2, self.update_flow)
+         if self.animation_timeout is None:
+             self.animation_timeout = GLib.timeout_add(500, self.animate_label)
++        # 2026-08-17: the titlebar's nozzle/bed chips are a duplicate of this
++        # panel's own readings and nothing else -- see the screenshots, "27°
++        # 36°" appeared twice on a 320x240 screen. screen.py's
++        # set_titlebar_items() clears them when this panel is opened with
++        # remove_all=True (which is the path state_printing takes), but it is
++        # NOT called when the panel is merely re-attached -- coming back from
++        # the __print submenu goes through attach_panel(), which calls this.
++        # Hence both halves: screen.py for the entry, activate() for the
++        # return, deactivate() to put them back for every other panel.
++        self._screen.base_panel.clear_titlebar_items()
++        self._sync_button_row()
++        self._sync_minimal_actions()
+ 
+     def deactivate(self):
+         if self.flow_timeout is not None:
+@@ -389,19 +1228,56 @@ class Panel(ScreenPanel):
+         if self.animation_timeout is not None:
+             GLib.source_remove(self.animation_timeout)
              self.animation_timeout = None
++        # Hand the titlebar back. _menu_go_back() re-attaches the panel
++        # underneath with attach_panel(), which does NOT call
++        # set_titlebar_items(), so if this panel did not restore them itself
++        # the main menu would come back with an empty titlebar and stay that
++        # way until the next remove_all=True show_panel().
++        self._screen.base_panel.show_titlebar_items()
  
      def create_buttons(self):
 +        # 2026-07-31 height fix, part 2 of 2 (numbers in
@@ -2352,7 +2773,7 @@ index 4e0c01a..7b9538a 100644
              ),
          }
          self.buttons["cancel"].connect("clicked", self.cancel)
-@@ -535,6 +1124,18 @@ class Panel(ScreenPanel):
+@@ -535,6 +1411,18 @@ class Panel(ScreenPanel):
              logging.info("resetting progress")
              self._printer.data["virtual_sdcard"]["progress"] = 0
          self.update_progress(0.0)
@@ -2371,33 +2792,79 @@ index 4e0c01a..7b9538a 100644
          self.set_state("printing")
  
      def process_update(self, action, data):
-@@ -565,6 +1166,25 @@ class Panel(ScreenPanel):
-                     self.buttons["extruder"][x].set_label(self.labels[x].get_text())
+@@ -562,9 +1450,18 @@ class Panel(ScreenPanel):
+                     digits=0,
+                 )
+                 if x in self.buttons["extruder"]:
+-                    self.buttons["extruder"][x].set_label(self.labels[x].get_text())
++                    self._set_value(self.buttons["extruder"][x], self.labels[x].get_text())
                  elif x in self.buttons["heater"]:
-                     self.buttons["heater"][x].set_label(self.labels[x].get_text())
+-                    self.buttons["heater"][x].set_label(self.labels[x].get_text())
++                    self._set_value(self.buttons["heater"][x], self.labels[x].get_text())
 +                elif x == self.hotend_fan:
 +                    # Heatsink fan: temperature is the reading that matters (it
 +                    # is what the fan is regulating), speed is the consequence.
-+                    # No "Fan:" prefix -- the button carries the fan icon, and
-+                    # this cell is ~116px on this screen.
-+                    speed = self._printer.get_stat(x, "speed") or 0
-+                    self.buttons["fan"].set_label(
-+                        f"{self.labels[x].get_text()}  {speed * 100:3.0f}%"
-+                    )
-+                # 2026-08-17: same reading, second widget -- the minimal page
-+                # has its own buttons because a GTK widget can only live in one
-+                # container, and the two pages are both built up-front. Small
-+                # type: on that page temperatures are confirmation, not
-+                # headline (see create_minimal_grid).
-+                if x in self.minimal_temps:
-+                    self._markup(
-+                        self.minimal_temps[x],
-+                        f"<span size='small'>{self.labels[x].get_text()}</span>",
-+                    )
++                    # The speed used to be appended -- "22/50° 100%" -- and at
++                    # 17px/700 that is wider than the 131px cell, so it
++                    # ellipsized away the digits it was there to show. The cell
++                    # is a click into the temperature panel, which has both.
++                    self._set_value(self.buttons["fan"], self.labels[x].get_text())
++        self.update_minimal_temps()
  
          if "display_status" in data and "message" in data["display_status"]:
              if data["display_status"]["message"]:
-@@ -690,11 +1310,15 @@ class Panel(ScreenPanel):
+@@ -596,9 +1493,12 @@ class Panel(ScreenPanel):
+         if "gcode_move" in data:
+             if "gcode_position" in data["gcode_move"]:
+                 self.pos_z = round(float(data["gcode_move"]["gcode_position"][2]), 2)
+-                self.buttons["z"].set_label(
+-                    f"Z: {self.pos_z:6.2f}{f'/{self.oheight}' if self.oheight > 0 else ''} "
+-                    f"{f'{self.mm}' if self._screen.width > 500 else ''}"
++                # No "Z:" prefix any more -- the cell has a real caption now
++                # (see _readout), and repeating it inside the value was part of
++                # what made these readouts different widths for no reason.
++                self._set_value(
++                    self.buttons["z"],
++                    f"{self.pos_z:.2f}{f'/{self.oheight}' if self.oheight > 0 else ''}",
+                 )
+             if "extrude_factor" in data["gcode_move"]:
+                 self.extrusion = round(float(data["gcode_move"]["extrude_factor"]) * 100)
+@@ -617,7 +1517,11 @@ class Panel(ScreenPanel):
+                 self.labels["req_speed"].set_label(
+                     f"{self.speed}% {self.vel:3.0f}/{self.req_speed:3.0f} {mms_unit}"
+                 )
+-                self.buttons["speed"].set_label(self.labels["req_speed"].get_label())
++                # Padded widths (%3.0f) plus the factor plus a unit came to 13
++                # characters, which at 17px/700 ellipsized to "100%  ..." in a
++                # 131px cell (live screenshot 2026-08-17). The caption already
++                # says "Speed"; live/requested mm/s is the reading.
++                self._set_value(self.buttons["speed"], f"{self.vel:.0f}/{self.req_speed:.0f}")
+             if "homing_origin" in data["gcode_move"]:
+                 self.zoffset = float(data["gcode_move"]["homing_origin"][2])
+                 self.labels["zoffset"].set_label(f"{self.zoffset:.3f} {self.mm}")
+@@ -650,7 +1554,11 @@ class Panel(ScreenPanel):
+                 self.labels["req_speed"].set_label(
+                     f"{self.speed}% {self.vel:3.0f}/{self.req_speed:3.0f} {mms_unit}"
+                 )
+-                self.buttons["speed"].set_label(self.labels["req_speed"].get_label())
++                # Padded widths (%3.0f) plus the factor plus a unit came to 13
++                # characters, which at 17px/700 ellipsized to "100%  ..." in a
++                # 131px cell (live screenshot 2026-08-17). The caption already
++                # says "Speed"; live/requested mm/s is the reading.
++                self._set_value(self.buttons["speed"], f"{self.vel:.0f}/{self.req_speed:.0f}")
+             if "live_extruder_velocity" in data["motion_report"]:
+                 self.flowstore.append(
+                     self.fila_section * float(data["motion_report"]["live_extruder_velocity"])
+@@ -660,7 +1568,7 @@ class Panel(ScreenPanel):
+             self.fans[fan]["speed"] = f"{self._printer.get_fan_speed(fan) * 100:3.0f}%"
+             fan_label += f" {self.fans[fan]['name']}{self.fans[fan]['speed']}"
+         if fan_label:
+-            self.buttons["fan"].set_label(fan_label[:12])
++            self._set_value(self.buttons["fan"], fan_label[:12])
+         if "print_stats" in data:
+             if "state" in data["print_stats"]:
+                 self.set_state(
+@@ -690,11 +1598,15 @@ class Panel(ScreenPanel):
                          f"{self.labels['total_layers'].get_text()}"
                      )
              if "total_duration" in data["print_stats"]:
@@ -2416,23 +2883,33 @@ index 4e0c01a..7b9538a 100644
  
      def update_flow(self):
          if not self.flowstore:
-@@ -719,8 +1343,13 @@ class Panel(ScreenPanel):
+@@ -702,7 +1614,7 @@ class Panel(ScreenPanel):
+         self.flowrate = median(self.flowstore)
+         self.flowstore = []
+         self.labels["flowrate"].set_label(f"{self.flowrate:.1f} {self.mms3}")
+-        self.buttons["extrusion"].set_label(f"{self.extrusion:3}% {self.flowrate:5.1f} {self.mms3}")
++        self._set_value(self.buttons["extrusion"], f"{self.extrusion}% {self.flowrate:.1f}")
+         return True
+ 
+     def update_time_left(self):
+@@ -719,9 +1631,13 @@ class Panel(ScreenPanel):
              else self._printer.get_stat("virtual_sdcard", "progress")
          )
  
 -        elapsed_label = f"{self.labels['elapsed'].get_text()}  {self.labels['duration'].get_text()}"
 -        self.buttons["elapsed"].set_label(elapsed_label)
+-        find_widget(self.buttons["elapsed"], Gtk.Label).set_ellipsize(Pango.EllipsizeMode.END)
 +        # 2026-08-17: was "Elapsed:  7 minutes" and rendered as "Elapsed: 7 mi..."
 +        # -- the word plus a spelled-out unit does not fit the ~116px cell this
 +        # button gets on a 320x240 screen (measured 2026-07-31). The clock icon
 +        # on the button already says which time this is, exactly like the "z"
 +        # and "speed" buttons next to it carry no word either, so the word goes
 +        # and the number gets the whole cell. Same for "left" below.
-+        self.buttons["elapsed"].set_label(self.format_time_short(self.total_duration))
-         find_widget(self.buttons["elapsed"], Gtk.Label).set_ellipsize(Pango.EllipsizeMode.END)
++        self._set_value(self.buttons["elapsed"], self.format_time_short(self.total_duration))
  
          last_time = self.file_metadata["last_time"] if "last_time" in self.file_metadata else 0
-@@ -767,11 +1396,14 @@ class Panel(ScreenPanel):
+         slicer_time = (
+@@ -767,11 +1683,12 @@ class Panel(ScreenPanel):
              progress = min(max(print_duration / estimated, 0), 1)
              self.labels["est_time"].set_label(self.format_time(estimated))
              self.labels["time_left"].set_label(self.format_eta(estimated, print_duration))
@@ -2440,27 +2917,37 @@ index 4e0c01a..7b9538a 100644
 -                f"{self.labels['left'].get_text()}  {self.labels['time_left'].get_text()}"
 -            )
 -            self.buttons["left"].set_label(remaining_label)
+-            find_widget(self.buttons["left"], Gtk.Label).set_ellipsize(Pango.EllipsizeMode.END)
 +            remaining = self.format_time_short(estimated - print_duration)
-+            self.buttons["left"].set_label(remaining)
-             find_widget(self.buttons["left"], Gtk.Label).set_ellipsize(Pango.EllipsizeMode.END)
++            self._set_value(self.buttons["left"], remaining)
 +            # The headline of the minimal page: the one number somebody walks
-+            # across the room to read. Large and bold is the hierarchy.
-+            self._markup(
-+                self.buttons["m_left"], f"<span size='x-large' weight='bold'>{remaining}</span>"
-+            )
++            # across the room to read, at the top of the type scale (.js-xl,
++            # 22px/700) and alone in its band.
++            self.labels["m_time"].set_label(remaining)
          self.update_progress(progress)
  
      def estimate_time(
-@@ -808,6 +1440,8 @@ class Panel(ScreenPanel):
+@@ -807,7 +1724,9 @@ class Panel(ScreenPanel):
+     def update_progress(self, progress: float):
          self.progress = progress
          self.labels["progress_text"].set_label(f"{trunc(progress * 100)}%")
-         self.labels["darea"].queue_draw()
+-        self.labels["darea"].queue_draw()
 +        self.labels["minimal_progress_text"].set_label(f"{trunc(progress * 100)}%")
 +        self.labels["progress_bar"].queue_draw()
++        self.labels["progress_bar_d"].queue_draw()
  
      def set_state(self, state, msg=""):
          if state == "printing":
-@@ -834,6 +1468,18 @@ class Panel(ScreenPanel):
+@@ -817,7 +1736,7 @@ class Panel(ScreenPanel):
+         elif state == "complete":
+             self.update_progress(1)
+             self._screen.set_panel_title(_("Complete"))
+-            self.buttons["left"].set_label("-")
++            self._set_value(self.buttons["left"], "-")
+             self._add_timeout(self._config.get_main_config().getint("job_complete_timeout", 0))
+         elif state == "error":
+             self._screen.set_panel_title(_("Error"))
+@@ -834,9 +1753,25 @@ class Panel(ScreenPanel):
              self._screen.set_panel_title(_("Standby"))
          if self.state != state:
              logging.debug(f"Changing job_status state from '{self.state}' to '{state}'")
@@ -2479,20 +2966,30 @@ index 4e0c01a..7b9538a 100644
              self.state = state
              if self.thumb_dialog:
                  self.close_dialog(self.thumb_dialog)
-@@ -902,6 +1548,21 @@ class Panel(ScreenPanel):
++            # The progress bar is coloured by state (see _state_rgb), so a
++            # transition has to repaint it even when the number has not moved.
++            self.labels["progress_bar"].queue_draw()
++            self.labels["progress_bar_d"].queue_draw()
+         self.show_buttons_for_state()
+ 
+     def _add_timeout(self, timeout):
+@@ -900,8 +1835,24 @@ class Panel(ScreenPanel):
+             self.enable_button("menu")
+             self.can_close = True
          self.content.show_all()
++        # AFTER show_all(), always: show_all() is what makes the freshly
++        # attached buttons above visible, and it is also what would put the
++        # whole row back on the minimal page during a print. These two calls
++        # are the only place that decides what is actually on screen.
++        self._sync_button_row()
++        self._sync_minimal_actions()
  
      def show_file_thumbnail(self):
 +        # 2026-08-17: the minimal page always wants the image - it IS the page.
 +        # Decoding cost on this 512MB Orange Pi is one 300x300 PNG scaled down
 +        # once per print (load_image_async hands the work to a thread pool and
 +        # the result is cached by KlippyGtk), not per update tick.
-+        self.load_image_async(
-+            self.filename,
-+            self.thumb_size,
-+            self.thumb_size,
-+            callback=lambda p: self._set_big_thumbnail(p),
-+        )
++        self._reload_thumbnail()
 +        if not self.show_thumbnail:
 +            # The SMALL thumbnail of the detailed page is not attached to
 +            # info_grid on this screen (see __init__), so decoding for it would
@@ -2501,25 +2998,68 @@ index 4e0c01a..7b9538a 100644
          if self._screen.vertical_mode:
              max_width = self._screen.width * 0.9
              max_height = self._screen.height / 4
-@@ -923,6 +1584,17 @@ class Panel(ScreenPanel):
+@@ -923,6 +1874,43 @@ class Panel(ScreenPanel):
          if image := find_widget(self.labels["thumbnail"], Gtk.Image):
              image.set_from_pixbuf(pixbuf)
  
++    def on_draw_thumbnail(self, da, ctx):
++        pixbuf = self._thumb_pixbuf
++        if pixbuf is None:
++            return
++        width, height = da.get_allocated_width(), da.get_allocated_height()
++        # Centred, at its own size. The pixbuf was already scaled to FIT this
++        # area by _load_trimmed_async/PixbufFromFile, so there is no scaling
++        # here and therefore no way for this to crop anything.
++        Gdk.cairo_set_source_pixbuf(
++            ctx,
++            pixbuf,
++            (width - pixbuf.get_width()) / 2,
++            (height - pixbuf.get_height()) / 2,
++        )
++        ctx.paint()
++
 +    def _set_big_thumbnail(self, pixbuf):
 +        if not self.content.get_parent():
 +            return
++        placeholder = self.labels["m_placeholder"]
++        self._thumb_pixbuf = pixbuf
++        self.labels["m_image"].queue_draw()
 +        if pixbuf is None:
-+            # No preview embedded by the slicer (or metadata not in yet): keep
-+            # the generic file glyph the button was built with, so the page
-+            # keeps its shape instead of collapsing around a missing image.
++            # No preview embedded by the slicer, or the metadata has not landed
++            # yet. The page must not collapse around the hole and must not
++            # shout about it either -- the stand-in is the quietest thing on
++            # screen by construction (24px outline glyph at 35% opacity),
++            # where rev 2 put the theme's teal file diamond at thumbnail size
++            # and made "no preview" the loudest state the screen could show.
++            name = os.path.splitext(os.path.basename(self.filename))[0] if self.filename else ""
++            self.labels["m_placeholder_text"].set_label(name)
++            placeholder.set_no_show_all(False)
++            placeholder.show_all()
++            placeholder.set_no_show_all(True)
 +            return
-+        if image := find_widget(self.labels["big_thumbnail"], Gtk.Image):
-+            image.set_from_pixbuf(pixbuf)
++        placeholder.hide()
 +
      def show_fullscreen_thumbnail(self, widget):
          width = self._screen.width * 0.9
          height = self._screen.height * 0.75
-@@ -960,6 +1632,21 @@ class Panel(ScreenPanel):
+@@ -957,9 +1945,38 @@ class Panel(ScreenPanel):
+             "complete": self.labels["file"].get_label(),
+             "current": self.labels["file"].get_label(),
+         }
++        # Minimal page: the basename only, and no marquee. The detailed page
++        # scrolls the full path because it has a row to spare; here the name
++        # shares its band with the headline number and is context, not content,
++        # so a static ellipsized basename is the honest amount of space to give
++        # it -- and a second 500ms animation on this CPU is not free.
++        self.labels["m_file"].set_label(os.path.splitext(os.path.basename(self.filename))[0])
++        # A new file means a new preview. _thumb_request is the last size the
++        # AREA was allocated (unchanged by a new file), so the memo that has to
++        # be dropped is the one about what was actually loaded -- otherwise
++        # _reload_thumbnail would see "same size, already done" and the screen
++        # would keep the previous model's picture for the whole print.
++        self._thumb_loaded = None
++        self._trim_cache = None
++        self._thumb_pixbuf = None
          self.get_file_metadata()
  
      def animate_label(self):
@@ -2541,7 +3081,7 @@ index 4e0c01a..7b9538a 100644
          if self.labels["file"].get_layout().is_ellipsized():
              self.filename_label["current"] = self.filename_label["current"][1:]
              self.labels["file"].set_label(self.filename_label["current"] + " " * 6)
-@@ -996,6 +1683,7 @@ class Panel(ScreenPanel):
+@@ -996,6 +2013,7 @@ class Panel(ScreenPanel):
              self.labels["filament_total"].set_label(
                  f"{float(self.file_metadata['filament_total']) / 1000:.1f} m"
              )
@@ -4487,7 +5027,7 @@ index 573180a..b85e7e2 100644
          self.dropdown.set_sensitive(False)
  
 diff --git a/screen.py b/screen.py
-index 4efa3ac..83fa12a 100755
+index 4efa3ac..75d44fb 100755
 --- a/screen.py
 +++ b/screen.py
 @@ -60,6 +60,58 @@ class AppState:
@@ -4648,7 +5188,30 @@ index 4efa3ac..83fa12a 100755
          self.update_cursor(self.show_cursor)
          min_ver = (3, 8)
          if sys.version_info < min_ver:
-@@ -640,6 +766,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -435,9 +561,20 @@ class KlipperScreen(Gtk.ApplicationWindow):
+ 
+     def set_titlebar_items(self, panel):
+         logging.debug("set_titlebar_items")
+-        if panel in {"main_menu", "job_status"}:
++        # 2026-08-17: job_status moved from the "show" set to the "clear" one.
++        # The titlebar chips are the nozzle and bed temperatures, and the print
++        # panel shows those itself -- on a 320x240 screen the same two numbers
++        # appeared twice, which is a duplicate nobody has room for. Note this
++        # runs ONLY on show_panel(remove_all=True); returning to the panel from
++        # a submenu goes through attach_panel(), so job_status also clears from
++        # its own activate() and restores from deactivate(). Simply deleting
++        # job_status from the first set would have matched NEITHER branch and
++        # done nothing at all: show_titlebar_items() early-returns once
++        # titlebar_populated is set, and on a kiosk sitting on the main menu it
++        # always is.
++        if panel in {"main_menu"}:
+             self.base_panel.show_titlebar_items()
+-        elif panel in {"splash_screen", "printer_select"}:
++        elif panel in {"splash_screen", "printer_select", "job_status"}:
+             self.base_panel.clear_titlebar_items()
+ 
+     def set_panel_title(self, title):
+@@ -640,6 +777,163 @@ class KlipperScreen(Gtk.ApplicationWindow):
              screen, self.style_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
          )
  
@@ -4812,7 +5375,7 @@ index 4efa3ac..83fa12a 100755
      def change_theme(self, theme_name=None):
          if not theme_name:
              theme_name = self._config.get_main_config().get("theme")
-@@ -692,6 +975,35 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -692,6 +986,35 @@ class KlipperScreen(Gtk.ApplicationWindow):
      def _menu_go_back(self, widget=None, home=False):
          logging.info(f"#### Menu go {'home' if home else 'back'}")
          self.remove_keyboard()
@@ -4848,7 +5411,7 @@ index 4efa3ac..83fa12a 100755
          while len(self._cur_panels) > 1:
              self._remove_current_panel()
              del self._cur_panels[-1]
-@@ -699,6 +1011,342 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -699,6 +1022,342 @@ class KlipperScreen(Gtk.ApplicationWindow):
                  break
          self.attach_panel(self._cur_panels[-1])
  
@@ -5191,7 +5754,7 @@ index 4efa3ac..83fa12a 100755
      def check_dpms_state(self):
          if not self.use_dpms or self.wayland:
              return False
-@@ -708,7 +1356,14 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -708,7 +1367,14 @@ class KlipperScreen(Gtk.ApplicationWindow):
              self.set_dpms(False)
              return False
          elif state != functions.DPMS_State.On:
@@ -5207,7 +5770,7 @@ index 4efa3ac..83fa12a 100755
                  self.screensaver.show()
          return True
  
-@@ -891,6 +1546,7 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -891,6 +1557,7 @@ class KlipperScreen(Gtk.ApplicationWindow):
              msg += _("A FIRMWARE_RESTART may fix the issue.") + "\n"
          elif "micro-controller" in state:
              msg += _("Please recompile and flash the micro-controller.") + "\n"
@@ -5215,7 +5778,7 @@ index 4efa3ac..83fa12a 100755
          self.printer_initializing(msg + "\n" + state, go_to_splash=True)
          self.state.initialized = False
  
-@@ -920,6 +1576,10 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -920,6 +1587,10 @@ class KlipperScreen(Gtk.ApplicationWindow):
      def state_shutdown(self):
          self.printer.stop_tempstore_updates()
          msg = self.printer.get_stat("webhooks", "state_message")
@@ -5226,7 +5789,7 @@ index 4efa3ac..83fa12a 100755
          self.printer_initializing(_("Klipper has shutdown") + "\n\n" + msg, go_to_splash=True)
  
      def check_active_commands(self):
-@@ -996,6 +1656,13 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -996,6 +1667,13 @@ class KlipperScreen(Gtk.ApplicationWindow):
              self.show_panel(*action)
  
      def process_update(self, *args):
@@ -5240,7 +5803,7 @@ index 4efa3ac..83fa12a 100755
          self.base_panel.process_update(*args)
          if (
              self.printer
-@@ -1082,13 +1749,31 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -1082,13 +1760,31 @@ class KlipperScreen(Gtk.ApplicationWindow):
          if self.confirm is not None:
              self.gtk.remove_dialog(self.confirm)
          self.confirm = self.gtk.Dialog(
@@ -5275,7 +5838,7 @@ index 4efa3ac..83fa12a 100755
  
      def _send_action(self, widget, method, params):
          logging.info(f"{method}: {params}")
-@@ -1425,10 +2110,791 @@ class KlipperScreen(Gtk.ApplicationWindow):
+@@ -1425,10 +2121,791 @@ class KlipperScreen(Gtk.ApplicationWindow):
  
      def _key_press_event(self, widget, event):
          keyval_name = Gdk.keyval_name(event.keyval)
