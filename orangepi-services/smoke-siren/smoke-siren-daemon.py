@@ -38,9 +38,14 @@
 # TWO-SIGNAL ALARM CONTRACT (copy of printer-configs/smoke-alarm.cfg /
 # smoke-alarm-banner.patch - the three places must agree, don't drift):
 #
-#   alarm active  <=>  output_pin siren .value > 0   (klippy alive - bench
-#                       tests via SMOKE_TEST_SIREN/SET_PIN, or the few ms
-#                       inside SMOKE_ALARM before the shutdown wins the race)
+#   alarm active  <=>  output_pin smoke_alarm_active .value > 0  (klippy alive -
+#                       the few ms inside SMOKE_ALARM before the shutdown wins
+#                       the race, or a bench SMOKE_ALARM with the estop removed)
+#                       🔴 smoke_alarm_active, NOT siren - changed 2026-08-17
+#                       after the buzzer pin produced ten false fire alarms.
+#                       SMOKE_TEST_SIREN and _BEEP drive `siren` and must NOT
+#                       read as fires; only SMOKE_ALARM raises this flag. Full
+#                       account in printer-configs/smoke-alarm.cfg.
 #                       OR
 #                       klippy state in ("shutdown", "error")
 #                       AND state_message CONTAINS "SMOKE ALARM"
@@ -445,13 +450,30 @@ def alarm_source():
         _note_moonraker_reachable(True)
         return "shutdown"
 
-    pin_resp = moonraker_get("/printer/objects/query?output_pin%20siren")
+    # 🔴 THIS QUERIES smoke_alarm_active, NOT siren - changed 2026-08-17, and
+    # the difference is the whole point. `siren` means "the buzzer is on", and
+    # three unrelated things turn the buzzer on: a real alarm, the 3-second
+    # SMOKE_TEST_SIREN bench check, and _BEEP's print-start/print-end chirps
+    # (printer-configs/print-start-end.cfg, added 2026-08-16). Watching it made
+    # this daemon declare a fire on a print-finished chirp - the journal for
+    # 2026-08-17 00:18:48 reads "ALARM ACTIVE (source=pin) - pulsing gpio110"
+    # and clears one second later, which is a print ending, not a fire.
+    # [output_pin smoke_alarm_active] (printer-configs/smoke-alarm.cfg, AUX-4
+    # D43/PL6, software-only) is raised by SMOKE_ALARM and by nothing else.
+    # Failure mode if the config is older than this daemon: the object is
+    # absent, the KeyError below is caught, and this returns None - i.e. the pin
+    # source goes quiet rather than firing. The "shutdown" source above is
+    # unaffected and still catches every real alarm, so a version skew costs
+    # detection of the bench case only.
+    pin_resp = moonraker_get(
+        "/printer/objects/query?output_pin%20smoke_alarm_active")
     if pin_resp is None:
         _note_moonraker_reachable(False)
         return None
     _note_moonraker_reachable(True)
     try:
-        value = pin_resp["result"]["status"]["output_pin siren"]["value"]
+        value = pin_resp["result"]["status"][
+            "output_pin smoke_alarm_active"]["value"]
         if value is not None and float(value) > 0:
             return "pin"
     except (KeyError, TypeError, ValueError):
