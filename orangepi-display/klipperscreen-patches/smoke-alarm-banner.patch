@@ -39,9 +39,9 @@
 +    #             ECHO/STATUS/HELP after a shutdown. The only thing that
 +    #             silences it is FIRMWARE_RESTART, which also starts the
 +    #             config's automatic 10-minute disarm window.
-+    #   pin       [output_pin siren].value > 0 with Klipper still alive.
-+    #             Bench path: SMOKE_TEST_SIREN, and the few milliseconds
-+    #             inside SMOKE_ALARM between its SET_PIN and its shutdown
++    #   pin       [output_pin smoke_alarm_active].value > 0, Klipper alive.
++    #             NOT the siren pin, which also carries _BEEP/SMOKE_TEST_SIREN
++    #             (2026-08-17). Raised for the few ms before the shutdown
 +    #             (worth keeping: if that update wins the race the banner is
 +    #             up marginally earlier, and it costs nothing if it loses).
 +    #             Silenced by SMOKE_SILENCE_MACRO, never by a firmware
@@ -51,7 +51,7 @@
 +    # If none of this exists on the printer, _smoke_alarm_source() returns
 +    # None and every code path below is inert: no banner, no key branch, no
 +    # log noise.
-+    SMOKE_ALARM_OBJECT = "output_pin siren"
++    SMOKE_ALARM_OBJECT = "output_pin smoke_alarm_active"
 +    SMOKE_ALARM_FIELD = "value"
 +    SMOKE_SILENCE_MACRO = "SMOKE_SILENCE_MANUAL"
 +    SMOKE_SHUTDOWN_MARKER = "SMOKE ALARM"
