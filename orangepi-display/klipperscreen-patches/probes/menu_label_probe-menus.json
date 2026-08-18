@@ -1,0 +1,135 @@
+[
+  {
+    "id": "__main (Main Menu)",
+    "title": "Main Menu",
+    "columns": 3,
+    "scale": null,
+    "png": "before-main.png",
+    "entries": [
+      {"key": "move", "name": "Move", "icon": "move"},
+      {"key": "temperature", "name": "Temperature", "icon": "heat-up"},
+      {"key": "extrude", "name": "Extrude", "icon": "extrude"},
+      {"key": "more", "name": "More", "icon": "settings"},
+      {"key": "print", "name": "Print", "icon": "printer"}
+    ]
+  },
+  {
+    "id": "__main more (More)",
+    "title": "More",
+    "columns": 4,
+    "scale": 1.08,
+    "png": "before-more.png",
+    "entries": [
+      {"key": "zoffset", "name": "Z Calibrate", "icon": "z-farther"},
+      {"key": "limits", "name": "Limits", "icon": "fine-tune"},
+      {"key": "fan", "name": "Fan", "icon": "fan"},
+      {"key": "led", "name": "Leds", "icon": "light"},
+      {"key": "macros", "name": "Macros", "icon": "custom-script"},
+      {"key": "pins", "name": "Pins", "icon": "hashtag"},
+      {"key": "camera", "name": "Camera", "icon": "camera"},
+      {"key": "console", "name": "Console", "icon": "console"},
+      {"key": "updater", "name": "Update", "icon": "refresh"},
+      {"key": "save", "name": "Save Config", "icon": "complete"},
+      {"key": "settings", "name": "Settings", "icon": "settings"},
+      {"key": "network", "name": "Network", "icon": "network"},
+      {"key": "system", "name": "System", "icon": "info"},
+      {"key": "fine_tune", "name": "Fine Tuning", "icon": "fine-tune"}
+    ]
+  },
+  {
+    "id": "__print (Print Control)",
+    "title": "Print Control",
+    "columns": 4,
+    "scale": 1.08,
+    "png": "before-print.png",
+    "entries": [
+      {"key": "temperature", "name": "Temperature", "icon": "heat-up"},
+      {"key": "fan", "name": "Fan", "icon": "fan"},
+      {"key": "extrude", "name": "Extrude", "icon": "extrude"},
+      {"key": "led", "name": "Leds", "icon": "light"},
+      {"key": "macros", "name": "Macros", "icon": "custom-script"},
+      {"key": "camera", "name": "Camera", "icon": "camera"},
+      {"key": "console", "name": "Console", "icon": "console"},
+      {"key": "limits", "name": "Limits", "icon": "fine-tune"},
+      {"key": "network", "name": "Network", "icon": "network"},
+      {"key": "settings", "name": "Settings", "icon": "settings"},
+      {"key": "system", "name": "System", "icon": "info"},
+      {"key": "pins", "name": "Pins", "icon": "hashtag"},
+      {"key": "lock", "name": "Lock", "icon": "lock"}
+    ]
+  },
+  {
+    "id": "__print (paused: +Move)",
+    "title": "Print Control",
+    "columns": 4,
+    "scale": 1.08,
+    "png": null,
+    "entries": [
+      {"key": "temperature", "name": "Temperature", "icon": "heat-up"},
+      {"key": "fan", "name": "Fan", "icon": "fan"},
+      {"key": "move", "name": "Move", "icon": "move"},
+      {"key": "extrude", "name": "Extrude", "icon": "extrude"},
+      {"key": "led", "name": "Leds", "icon": "light"},
+      {"key": "macros", "name": "Macros", "icon": "custom-script"},
+      {"key": "camera", "name": "Camera", "icon": "camera"},
+      {"key": "console", "name": "Console", "icon": "console"},
+      {"key": "limits", "name": "Limits", "icon": "fine-tune"},
+      {"key": "network", "name": "Network", "icon": "network"},
+      {"key": "settings", "name": "Settings", "icon": "settings"},
+      {"key": "system", "name": "System", "icon": "info"},
+      {"key": "pins", "name": "Pins", "icon": "hashtag"},
+      {"key": "lock", "name": "Lock", "icon": "lock"}
+    ]
+  },
+  {
+    "id": "__splashscreen (Menu, 4 items -> 2 cols)",
+    "title": "Menu",
+    "columns": 2,
+    "scale": null,
+    "png": "before-splashmenu.png",
+    "entries": [
+      {"key": "network", "name": "Network", "icon": "network"},
+      {"key": "updater", "name": "Update", "icon": "refresh"},
+      {"key": "settings", "name": "Settings", "icon": "settings"},
+      {"key": "system", "name": "System", "icon": "info"}
+    ]
+  },
+  {
+    "id": "splash_screen.py actions (initialized: 3 wide)",
+    "title": "Initializing printer...", "layout": "box",
+    "columns": 3,
+    "scale": null,
+    "png": "before-splash3.png",
+    "entries": [
+      {"key": "restart", "name": "Klipper Restart", "icon": "refresh"},
+      {"key": "firmware_restart", "name": "Firmware Restart", "icon": "refresh"},
+      {"key": "menu", "name": "Menu", "icon": "settings"}
+    ]
+  },
+  {
+    "id": "splash_screen.py actions (not initialized + retry: 4 wide)",
+    "title": "Initializing printer...", "layout": "box",
+    "columns": 4,
+    "scale": null,
+    "png": "before-splash4.png",
+    "entries": [
+      {"key": "restart_system", "name": "System Restart", "icon": "refresh"},
+      {"key": "shutdown", "name": "System Shutdown", "icon": "shutdown"},
+      {"key": "menu", "name": "Menu", "icon": "settings"},
+      {"key": "retry", "name": "Retry", "icon": "load"}
+    ]
+  },
+  {
+    "id": "splash_screen.py actions (power device: 4 wide incl. Power On Printer)",
+    "title": "Initializing printer...", "layout": "box",
+    "columns": 4,
+    "scale": null,
+    "png": null,
+    "entries": [
+      {"key": "power", "name": "Power On Printer", "icon": "shutdown"},
+      {"key": "restart", "name": "Klipper Restart", "icon": "refresh"},
+      {"key": "firmware_restart", "name": "Firmware Restart", "icon": "refresh"},
+      {"key": "menu", "name": "Menu", "icon": "settings"}
+    ]
+  }
+]
