@@ -38,7 +38,9 @@ set -euo pipefail
 
 MODE="${1:-}"
 OUT="${2:-}"
-PRINTER="${PRINTER:-ultra@192.168.11.160}"
+# NOT named PRINTER: Windows already exports PRINTER as the default paper
+# printer ("Pantum-E75CB3 (P2500W series)"), which scp then took for a hostname.
+PRINTER_SSH="${PRINTER_SSH:-ultra@192.168.11.160}"
 
 case "$MODE" in
     combo)    : ;;
@@ -136,7 +138,7 @@ else
 fi
 
 echo "wrote $OUT ($(wc -l < "$OUT") lines, $(grep -c MEASURE_HOME "$OUT") measurements)"
-scp "$OUT" "$PRINTER:~/printer_data/gcodes/$(basename "$OUT")"
-echo "uploaded to $PRINTER:~/printer_data/gcodes/$(basename "$OUT")"
+scp "$OUT" "$PRINTER_SSH:~/printer_data/gcodes/$(basename "$OUT")"
+echo "uploaded to $PRINTER_SSH:~/printer_data/gcodes/$(basename "$OUT")"
 echo "start it with: curl -X POST http://192.168.11.160:7125/printer/print/start \\"
 echo "                 -H 'Content-Type: application/json' -d '{\"filename\":\"$(basename "$OUT")\"}'"
