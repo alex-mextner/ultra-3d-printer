@@ -1,8 +1,42 @@
 diff --git a/config/main_menu.conf b/config/main_menu.conf
-index b268ef9..623419c 100644
+index b268ef9..c5b9993 100644
 --- a/config/main_menu.conf
 +++ b/config/main_menu.conf
-@@ -118,7 +118,12 @@ icon: complete
+@@ -11,7 +11,32 @@ icon: move
+ panel: move
+ 
+ [menu __main temperature]
+-name: {{ gettext('Temperature') }}
++# 2026-08-18: was "Temperature". Measured on this panel, not guessed: the word
++# renders 90px wide at the theme's 14px, and the label slot is 89px in this
++# 3-column __main menu and 66px in the 4-column __print one. panels/menu.py
++# builds every menu item with KlippyGtk.Button's default lines=2, which sets
++# Pango WrapMode.WORD_CHAR -- and WORD_CHAR breaks INSIDE a word that does not
++# fit, with no space to break at. Result before this change: "Temperatur-/e"
++# here and "Temper-/ature" in Print Control.
++#
++# lines=1 is NOT the fix and was rejected after measuring: at 66px it only
++# swaps the mid-word break for an ellipsis ("Temperat..."), equally unreadable.
++# The remedy is the one already used by `settings` further down (which was
++# "KlipperScreen" and char-wrapped as "KlipperS-/creen"): shorten the label in
++# the menu config, leave the shared wrap mechanism alone.
++#
++# Honest cost, and it is the INVERSE of that precedent: renaming to "Settings"
++# GAINED a translation, renaming to "Temp" LOSES one. "Temperature" is msgid in
++# all 32 bundled catalogues; "Temp" is in none, so gettext() returns it
++# unchanged. Acceptable only because this device is English-only
++# (LANG=en_US.UTF-8; KlipperScreen.log: "Selected lang: system_lang OS lang:
++# en_US") and the alternative is a label that cannot be read at all. Revisit if
++# the UI language ever changes -- do not "restore" it without re-measuring.
++#
++# Not visible on the dashboard either way: in landscape main_menu.py hides
++# every label in its icon-only bottom row. This label is what the __main menu
++# shows when it is opened as a real menu panel (via _go_to_submenu).
++name: {{ gettext('Temp') }}
+ icon: heat-up
+ panel: temperature
+ enable: {{ (printer.temperature_devices.count > 0) or (printer.extruders.count > 0)}}
+@@ -118,7 +143,12 @@ icon: complete
  method: ks_confirm_save
  
  [menu __main more settings]
@@ -17,10 +51,24 @@ index b268ef9..623419c 100644
  panel: settings
  
 diff --git a/config/print_menu.conf b/config/print_menu.conf
-index 712b632..344c0c6 100644
+index 712b632..750cd58 100644
 --- a/config/print_menu.conf
 +++ b/config/print_menu.conf
-@@ -74,7 +74,12 @@ icon: network
+@@ -6,7 +6,12 @@
+ name: {{ gettext('Print Control') }}
+ 
+ [menu __print temperature]
+-name: {{ gettext('Temperature') }}
++# 2026-08-18: was "Temperature", char-wrapped as "Temper-/ature" in this
++# 4-column menu (word 90px, label slot 66px). Full rationale, the measurements
++# and the honest translation cost are in config/main_menu.conf on the twin of
++# this entry; both menus have to change together or the same word stays broken
++# on whichever one was missed.
++name: {{ gettext('Temp') }}
+ icon: heat-up
+ panel: temperature
+ enable: {{ (printer.temperature_devices.count > 0) or (printer.extruders.count > 0)}}
+@@ -74,7 +79,12 @@ icon: network
  panel: network
  
  [menu __print settings]
@@ -4530,6 +4578,44 @@ index e798e5e..73fdfe0 100644
          reset.connect("clicked", self.reset_value, option)
          reset.set_hexpand(False)
  
+diff --git a/panels/splash_screen.py b/panels/splash_screen.py
+index 05cecd8..3487499 100644
+--- a/panels/splash_screen.py
++++ b/panels/splash_screen.py
+@@ -33,7 +33,17 @@ class Panel(ScreenPanel):
+         self.labels["firmware_restart"].connect("clicked", self.firmware_restart)
+         self.labels["restart_system"] = self._gtk.Button("refresh", _("System Restart"), "color1")
+         self.labels["restart_system"].connect("clicked", self.reboot_poweroff, "reboot")
+-        self.labels["shutdown"] = self._gtk.Button("shutdown", _("System Shutdown"), "color2")
++        # 2026-08-18: was _("System Shutdown"). This row is a homogeneous Box
++        # across the full content width, so with four buttons (the
++        # not-initialized branch plus Retry) each one is 72px, leaving a 66px
++        # label slot -- and "Shutdown" alone measures 70px. With lines=2 that
++        # is past a mid-word break and into an ELLIPSIS: the panel rendered
++        # "System / Shutdo...", i.e. it lost text, not just prettiness. Nothing
++        # shorter keeps the word ("Shutdown" is 70px on its own), so the word
++        # itself had to go. "Power Off" is 43px per word, wraps cleanly at the
++        # space here and fits on ONE line in the 3-button layout (68px of 90).
++        # Matches the button's existing power-symbol icon.
++        self.labels["shutdown"] = self._gtk.Button("shutdown", _("Power Off"), "color2")
+         self.labels["shutdown"].connect("clicked", self.reboot_poweroff, "shutdown")
+         self.labels["retry"] = self._gtk.Button("load", _("Retry"), "color3")
+         self.labels["retry"].connect("clicked", self.retry)
+@@ -88,7 +98,13 @@ class Panel(ScreenPanel):
+         self.labels["actions"].show_all()
+ 
+     def add_power_button(self, powerdevs):
+-        self.labels["power"] = self._gtk.Button("shutdown", _("Power On Printer"), "color3")
++        # 2026-08-18: was _("Power On Printer") -- three words into a 2-line
++        # label at 66px, which ellipsised to "Power / On Print...". Latent on
++        # this machine (no Moonraker power devices are configured, so this
++        # button is never built here), fixed anyway because it is the same
++        # defect class as the shutdown button above and found by the same
++        # measurement pass. "Power On" wraps at the space, both words fit.
++        self.labels["power"] = self._gtk.Button("shutdown", _("Power On"), "color3")
+         self.labels["power"].connect("clicked", self._screen.power_devices, powerdevs, True)
+         self.check_power_status()
+         self.labels["actions"].add(self.labels["power"])
 diff --git a/panels/spool_editor.py b/panels/spool_editor.py
 index 480c1a2..f950229 100644
 --- a/panels/spool_editor.py
