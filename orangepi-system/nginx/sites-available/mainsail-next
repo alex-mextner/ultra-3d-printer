@@ -30,6 +30,36 @@ server {
     client_max_body_size 0;
     proxy_request_buffering off;
 
+    # 🔴 EVICT THE OLD MAINSAIL'S SERVICE WORKER FROM THIS ORIGIN.
+    #
+    # Until 2026-08-19 port 80 served the Vue 2 Mainsail, which is a PWA: it
+    # registered /sw.js (workbox, registerType 'autoUpdate', ~218 precached
+    # files) against http://<printer>/ in every browser that ever opened it --
+    # the user's laptop and the tablet at the machine. That registration belongs
+    # to the ORIGIN, not to the bundle, so it survived the port swap and would
+    # keep serving the cached old-Mainsail shell from the bare address. The swap
+    # would simply look like it never happened, on exactly the devices that
+    # matter.
+    #
+    # It does not heal by itself either. Without this block /sw.js falls through
+    # to the SPA fallback below and answers 200 text/html; a service worker
+    # update check treats that as a failed update and KEEPS the old worker
+    # registered. Browsers only drop a registration when the script returns
+    # 404/410 -- hence this.
+    #
+    # Effect: an affected browser shows the old interface for one more load (the
+    # one whose update check gets this 404 and unregisters), then the fork.
+    # curl never sees any of this, because curl has no service worker.
+    #
+    # This app ships no service worker of its own. If it ever does, and at this
+    # same path, remove this block -- it would 404 our own worker.
+    # The old Mainsail keeps serving its real /sw.js on :8090, which is a
+    # separate origin and is supposed to have its own worker.
+    location = /sw.js {
+        access_log off;
+        return 404;
+    }
+
     # SPA history fallback: deep links must not 404.
     location / {
         try_files $uri $uri/ /index.html;
