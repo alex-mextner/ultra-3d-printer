@@ -33,7 +33,7 @@
     <div><span class="k">Главная опасность</span><span class="v">Стол 1000 Вт от сети 220 В, аппаратной защиты нет</span></div>
     <div><span class="k">Потолок температуры стола</span><span class="v">110 °C, и только под присмотром</span></div>
     <div><span class="k">Аварийная остановка</span><span class="v">Вилка из розетки · кнопка Emergency Stop · <code>M112</code></span></div>
-    <div><span class="k">Состояние документа</span><span class="v">18 августа 2026, отдаётся с открытыми вопросами</span></div>
+    <div><span class="k">Состояние документа</span><span class="v">19 августа 2026, отдаётся с открытыми вопросами</span></div>
   </div>
 </div>
 
@@ -58,10 +58,15 @@
     <thead><tr><th>Способ</th><th>Как</th><th>Что происходит</th></tr></thead>
     <tbody>
       <tr><td><strong>Вилка из розетки</strong></td><td>физически, рукой</td><td>Самый надёжный. Гаснет всё. Выключатель на сетевом разъёме принтера тоже есть, но полагаться в аварии надо на вилку.</td></tr>
-      <tr><td><strong>Emergency Stop</strong></td><td>красная кнопка в веб-интерфейсе <code>http://192.168.11.160/</code> и на экране самого принтера</td><td>Мгновенно гасит нагреватели и обрывает движение. Питание остаётся.</td></tr>
-      <tr><td><code>M112</code></td><td>в консоли веб-интерфейса</td><td>То же самое, что кнопка.</td></tr>
+      <tr><td><strong>Emergency Stop</strong></td><td>красная кнопка <strong>на экране самого принтера</strong> и в запасном веб-интерфейсе <code>http://192.168.11.160:8090/</code></td><td>Мгновенно гасит нагреватели и обрывает движение. Питание остаётся.</td></tr>
+      <tr><td><code>M112</code></td><td>в консоли любого веб-интерфейса, включая главную страницу <code>http://192.168.11.160/</code> (раздел Console)</td><td>То же самое, что кнопка.</td></tr>
     </tbody>
   </table>
+  </div>
+
+  <div class="callout danger">
+    <span class="ctitle">На главной странице <code>http://192.168.11.160/</code> кнопки аварийной остановки НЕТ</span>
+    <p>С 19 августа 2026 там стоит новый интерфейс, и красную кнопку в нём ещё не сделали. Аварийно остановить машину с этой страницы можно, но командой: открыть Console и набрать <code>M112</code>. Красная кнопка — на экране самого принтера и по адресу <code>http://192.168.11.160:8090/</code>, где остался старый интерфейс. <strong>Если счёт идёт на секунды — дёргайте вилку</strong>, это быстрее, чем вспоминать, на какой странице какая кнопка.</p>
   </div>
 
   <p>После аварийной остановки Klipper уходит в <code>shutdown</code> и принимает только восемь команд: <code>M110</code>, <code>M112</code>, <code>M115</code>, <code>RESTART</code>, <code>FIRMWARE_RESTART</code>, <code>ECHO</code>, <code>STATUS</code>, <code>HELP</code>. Вернуть машину в рабочее состояние — <code>FIRMWARE_RESTART</code>.</p>
@@ -280,7 +285,8 @@
   <table>
     <thead><tr><th>Что</th><th>Где</th></tr></thead>
     <tbody>
-      <tr><td>Веб-интерфейс (Mainsail)</td><td><code>http://192.168.11.160/</code></td></tr>
+      <tr><td>Веб-интерфейс, основной (новый)</td><td><code>http://192.168.11.160/</code> — <strong>кнопки аварийной остановки в нём нет</strong>, только <code>M112</code> в разделе Console</td></tr>
+      <tr><td>Веб-интерфейс, запасной (старый Mainsail)</td><td><code>http://192.168.11.160:8090/</code> — здесь красная кнопка Emergency Stop есть</td></tr>
       <tr><td>Камера</td><td><code>http://192.168.11.160/webcam/?action=stream</code></td></tr>
       <tr><td>Эта документация</td><td><code>http://192.168.11.160:8001/safety.html</code></td></tr>
       <tr><td>Экран на самом принтере</td><td>KlipperScreen, кнопка аварийной остановки на главном экране</td></tr>
@@ -338,6 +344,6 @@
 </div>
 
 <footer>
-  <div class="mono">Состояние на 18 августа 2026. Текстовый оригинал — <code>docs/safety.md</code> в репозитории проекта; эта страница — <code>docs/safety.html</code>, правятся вместе. Публикация: <code>bash scripts/serve-docs.sh</code>.</div>
+  <div class="mono">Состояние на 19 августа 2026. Текстовый оригинал — <code>docs/safety.md</code> в репозитории проекта; эта страница — <code>docs/safety.html</code>, правятся вместе. Публикация: <code>bash scripts/serve-docs.sh</code>.</div>
 </footer>
 </html>
